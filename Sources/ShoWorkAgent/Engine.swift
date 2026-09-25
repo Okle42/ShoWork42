@@ -54,6 +54,9 @@ final class Engine {
             }
         }
         ClearWatcher.shared.onUserActivity = { [weak self] in self?.acknowledgeLooked() }
+        NotificationCenter.default.addObserver(forName: GlowSettings.changed, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.glows.values.forEach { $0.restyle() }; self?.render() }
+        }
         ClearWatcher.shared.start()
     }
 
@@ -106,7 +109,8 @@ final class Engine {
     /// window state = the most urgent of its tabs (red > gold > purple)
     func windowStates() -> [CGWindowID: (WorkState, pid_t)] {
         var out: [CGWindowID: (WorkState, pid_t)] = [:]
-        for t in tabs.values { for p in t.placements {
+        // a state switched off in settings doesn't light anything; the window shows its next lit state
+        for t in tabs.values where GlowSettings.shared.look(t.state).enabled { for p in t.placements {
             let cur = out[p.wid]?.0 ?? .idle
             out[p.wid] = (StateMachine.windowState([cur, t.state]), p.pid)
         } }
