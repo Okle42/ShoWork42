@@ -3,3 +3,8 @@ spikes/**/m0_glow
 .build/
 spikes/**/m0_verify
 docs/*.log
+spikes/**/axtitle
+spikes/**/iterm_resolve
+spikes/**/ghostty_resolve
+spikes/**/axdoc_find
+spikes/**/tmux_resolve
