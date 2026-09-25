@@ -129,4 +129,37 @@ for n in $(seq 1 $MAXN); do
   if (( n == 4 )); then check "n=4 columns" columns; check "n=4 grid" grid; check "n=4 back to columns" columns
   else check "n=$n"; fi
 done
+# ── restacking (Keng 09-26): arrange 11, click a TOP window, then a BOTTOM window ⇒
+#    bottom-clicked window on top; other rows back to top < middle < bottom
+if (( MAXN >= 11 )); then
+  cat > $ST/zorder.swift <<'EOF2'
+import CoreGraphics
+for w in (CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]) ?? [] where (w[kCGWindowLayer as String] as? Int) == 0 { print(w[kCGWindowNumber as String]!) }
+EOF2
+  swiftc -O -o $ST/zorder $ST/zorder.swift 2>/dev/null
+  guard
+  SHOWORK_ONLY_WIDS=${(j:,:)MINE} $AG --arrange-watch > $ST/watch.plan 2>$ST/watch.err &
+  WPID=$!
+  sleep 2.5
+  typeset -a P Y G
+  P=($(sed -n '1,4p' $ST/watch.plan | awk '{print $1}')); Y=($(sed -n '5,7p' $ST/watch.plan | awk '{print $1}')); G=($(sed -n '8,11p' $ST/watch.plan | awk '{print $1}'))
+  GP=$(osascript -e 'tell application "System Events" to get unix id of process "Ghostty"')
+  $ROOT/spikes/m0_glow/axraise $GP $P[2]; sleep 1.2
+  [[ -n ${SW42_SHOTS:-} ]] && screencapture -x "$SW42_SHOTS/restack_1_click_top.png"
+  $ROOT/spikes/m0_glow/axraise $GP $G[3]; sleep 1.5
+  [[ -n ${SW42_SHOTS:-} ]] && screencapture -x "$SW42_SHOTS/restack_2_click_bottom.png"
+  $ST/zorder > $ST/z
+  kill $WPID 2>/dev/null
+  python3 - $ST/z "${(j:,:)P}" "${(j:,:)Y}" "${(j:,:)G}" <<'PY' && ok "restack: clicked bottom window on top; bottom > middle > top" || bad "restack order"
+import sys
+z=[l.strip() for l in open(sys.argv[1]) if l.strip()]
+P,Y,G=[a.split(',') for a in sys.argv[2:5]]
+idx={w:i for i,w in enumerate(z)}                 # 0 = frontmost
+mine=[w for w in z if w in P+Y+G]
+ok = mine and mine[0]==G[2]
+ok = ok and max(idx[w] for w in G) < min(idx[w] for w in Y) and max(idx[w] for w in Y) < min(idx[w] for w in P)
+if not ok: print("    front→back:", ["P" if w in P else "Y" if w in Y else "G" for w in mine], "first:", mine[:1], "want", G[2])
+sys.exit(0 if ok else 1)
+PY
+fi
 print "RESULT pass=$pass fail=$fail"

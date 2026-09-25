@@ -28,6 +28,27 @@ if argv.count >= 2, argv[1] == "--arrange-once" {
     }
 }
 
+// Test: ShoWorkAgent --arrange-watch  → arrange (whitelist required), then keep restacking on focus changes
+if argv.count >= 2, argv[1] == "--arrange-watch" {
+    MainActor.assumeIsolated {
+        guard Arranger.onlyWIDs != nil else { FileHandle.standardError.write(Data("--arrange-watch requires SHOWORK_ONLY_WIDS\n".utf8)); exit(3) }
+        let a = Arranger.shared
+        let p = a.plan()
+        guard a.arrange(p) else { exit(4) }
+        for (t, f) in p { print(AXQuery.wid(t.el), Int(f.minX), Int(f.minY), Int(f.width), Int(f.height)) }
+        fflush(stdout)
+        a.watchFocus()
+        NotificationCenter.default.addObserver(forName: Notification.Name("sw42.focus"), object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { a.focusChanged() }
+        }
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { a.focusChanged() }
+        }
+        NSApplication.shared.setActivationPolicy(.accessory)
+        NSApplication.shared.run()
+    }
+}
+
 // Debug: ShoWorkAgent --resolve /dev/ttysNNN   → "<app> <pid> <wid> <tabTTY>" per placement
 if argv.count == 3, argv[1] == "--resolve" {
     MainActor.assumeIsolated {

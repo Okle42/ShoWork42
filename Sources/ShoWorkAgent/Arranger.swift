@@ -20,6 +20,10 @@ final class Arranger {
     }
 
     private var lastCount = -1
+    /// Windows placed by the last overlapping layout, with their row (0 = top). Drives restacking.
+    private(set) var arranged: [(wid: CGWindowID, pid: pid_t, el: AXUIElement, row: Int)] = []
+    private var restacking = false
+    private var focusObservers: [pid_t: AXObserver] = [:]
     private var pending: DispatchWorkItem?
     private var poll: Timer?
 
@@ -34,6 +38,13 @@ final class Arranger {
             MainActor.assumeIsolated { self?.checkCount() }
         }
         lastCount = targets().count
+        watchFocus()
+        NotificationCenter.default.addObserver(forName: Notification.Name("sw42.focus"), object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.focusChanged() }
+        }
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.watchFocus(); self?.focusChanged() }
+        }
     }
 
     func hotkey() {
@@ -141,6 +152,8 @@ final class Arranger {
             if wrong == 0 { break }
             if attempt < 2 { usleep(120_000) }                       // some terminals resize asynchronously
         }
+        let rows = LayoutPlan.rows(count: ts.count)
+        arranged = ts.count >= 6 ? zip(ts, rows).map { (AXQuery.wid($0.el), $0.pid, $0.el, $1) } : []
         // later windows on top so staggered title bars stay visible (per app; cross-app order is the user's)
         for t in ts { AXUIElementPerformAction(t.el, kAXRaiseAction as CFString) }
         if let front = NSWorkspace.shared.frontmostApplication?.processIdentifier,
@@ -154,6 +167,41 @@ final class Arranger {
     private func close(_ a: CGRect, _ b: CGRect) -> Bool {
         abs(a.minX - b.minX) <= 2 && abs(a.minY - b.minY) <= 2 &&
         (-25...2).contains(a.width - b.width) && (-25...2).contains(a.height - b.height)
+    }
+
+    // MARK: canonical stacking (Keng 09-26: click a bottom window ⇒ middle row re-emerges above top row)
+
+    /// Top row < middle row < bottom row, and the window you're using above everything.
+    func restack(focused: CGWindowID) {
+        guard !restacking, arranged.count >= 6, let me = arranged.first(where: { $0.wid == focused }) else { return }
+        restacking = true
+        for w in arranged.sorted(by: { $0.row < $1.row }) where w.wid != focused {
+            AXUIElementPerformAction(w.el, kAXRaiseAction as CFString)
+        }
+        AXUIElementPerformAction(me.el, kAXRaiseAction as CFString)
+        // give keyboard focus back to the window you clicked (raising others may have moved it)
+        AXUIElementSetAttributeValue(me.el, kAXMainAttribute as CFString, kCFBooleanTrue)
+        AXUIElementSetAttributeValue(AXUIElementCreateApplication(me.pid), kAXFocusedWindowAttribute as CFString, me.el)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in self?.restacking = false }
+    }
+
+    /// Watch focus changes in every running terminal app.
+    func watchFocus() {
+        for (_, pid) in runningTerminals() where focusObservers[pid] == nil {
+            var o: AXObserver?
+            guard AXObserverCreate(pid, { _, _, _, _ in
+                NotificationCenter.default.post(name: Notification.Name("sw42.focus"), object: nil)
+            }, &o) == .success, let o else { continue }
+            AXObserverAddNotification(o, AXUIElementCreateApplication(pid), kAXFocusedWindowChangedNotification as CFString, nil)
+            CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(o), .defaultMode)
+            focusObservers[pid] = o
+        }
+    }
+
+    func focusChanged() {
+        guard let front = NSWorkspace.shared.frontmostApplication?.processIdentifier,
+              let fw = Selection.focusedWID(pid: front) else { return }
+        restack(focused: fw)
     }
 
     // MARK: AX helpers
