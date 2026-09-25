@@ -123,6 +123,8 @@ final class Engine {
         }
         updateEdge()
         save()
+        Menu.shared.summary = tabs.values.flatMap { t in t.placements.map { (t.state, $0) } }
+        Menu.shared.refresh()
         StatusFile.write(tabs: tabs, glows: glows)
     }
 
@@ -133,7 +135,7 @@ final class Engine {
             .map { $0[kCGWindowNumber as String] as? Int ?? -1 }
         for g in glows.values where g.state != .idle {
             if let ti = order.firstIndex(of: Int(g.wid)) {
-                if order.firstIndex(of: g.overlayNumber) != ti + 1 { g.sync() }
+                if order.firstIndex(of: g.overlayNumber) != ti + 1 || order.firstIndex(of: g.barNumber) != ti - 1 { g.sync() }
             } else if g.overlayVisible { g.sync() }
         }
         updateEdge()

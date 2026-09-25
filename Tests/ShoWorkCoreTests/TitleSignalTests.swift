@@ -12,6 +12,16 @@ struct TitleSignalTests {
     @Test("anything else is not a Claude title", arguments: ["", "/Users/someone", "zsh", "SW42-test", "⠀blank braille"])
     func unknown(t: String) { #expect(TitleSignal.classify(t) == .unknown) }
 
+    @Test("claude agents view (background conversation)")
+    func agentsView() {
+        #expect(TitleSignal.classify("1 awaiting input · claude agents") == .input)
+        #expect(TitleSignal.classify("2 working · claude agents") == .busy)
+        #expect(TitleSignal.classify("claude agents") == .idle)
+        #expect(TitleSignal.event(from: .idle, to: .input) == .input)
+        #expect(TitleSignal.event(from: .unknown, to: .input) == .input)   // first sight of a waiting session: red right away
+        #expect(TitleSignal.event(from: .input, to: .busy) == .working)
+    }
+
     @Test("edges")
     func edges() {
         #expect(TitleSignal.event(from: .idle, to: .busy) == .working)

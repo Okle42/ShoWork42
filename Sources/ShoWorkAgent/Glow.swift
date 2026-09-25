@@ -78,18 +78,52 @@ final class Glow {
     let pid: pid_t
     private var window: GlowWindow
     private var view: GlowView { window.contentView as! GlowView }
+    /// Title-bar light: sits directly ABOVE the target over the top of its title bar. In overlapping
+    /// layouts the outer ring hides under neighbours; the title bar is always exposed (09-26).
+    private var bar: GlowWindow = Glow.makeBar()
+    var barNumber: Int { bar.windowNumber }
     private var axWin: AXUIElement?
     private var observer: AXObserver?
     private var hotTimer: Timer?
     private var lastFrame: CGRect = .null
     private var stillSince = Date()
-    var state: WorkState = .idle { didSet { view.apply(state); sync() } }
+    var state: WorkState = .idle { didSet { view.apply(state); barState = nil; sync() } }
+    private var barState: WorkState?
 
     init(wid: CGWindowID, pid: pid_t) {
         self.wid = wid; self.pid = pid
         window = Glow.makeWindow()
         axWin = AXQuery.element(pid: pid, wid: wid)
         observe()
+    }
+
+    static let barHeight: CGFloat = 10
+    static func makeBar() -> GlowWindow {
+        let w = GlowWindow(contentRect: .zero, styleMask: .borderless, backing: .buffered, defer: false)
+        w.isOpaque = false; w.backgroundColor = .clear; w.hasShadow = false
+        w.ignoresMouseEvents = true
+        w.isReleasedWhenClosed = false
+        w.collectionBehavior = [.managed, .ignoresCycle, .fullScreenNone]
+        let v = NSView(); v.wantsLayer = true
+        w.contentView = v
+        return w
+    }
+    private func paintBar(_ s: WorkState) {
+        guard let l = bar.contentView?.layer else { return }
+        l.sublayers?.forEach { $0.removeFromSuperlayer() }
+        l.removeAllAnimations()
+        guard s != .idle else { return }
+        let c = Look.color(s)
+        let g = CAGradientLayer()                            // bright top edge fading down into the title bar
+        g.frame = CGRect(x: 0, y: 0, width: bar.frame.width, height: Glow.barHeight)
+        g.colors = [c.withAlphaComponent(0).cgColor, c.withAlphaComponent(0.55).cgColor, c.cgColor]
+        g.locations = [0, 0.6, 1]
+        l.addSublayer(g)
+        guard !Look.reduceMotion, s != .done else { return }
+        let a = CABasicAnimation(keyPath: "opacity")
+        a.autoreverses = true; a.repeatCount = .infinity
+        a.fromValue = 1.0; a.toValue = s == .input ? 0.4 : 0.55; a.duration = s == .input ? 0.6 : 1.6
+        l.add(a, forKey: "pulse")
     }
 
     static func makeWindow() -> GlowWindow {
@@ -106,6 +140,7 @@ final class Glow {
         hotTimer?.invalidate()
         if let o = observer { CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(o), .defaultMode) }
         window.orderOut(nil); window.close()
+        bar.orderOut(nil); bar.close()
     }
 
     private func observe() {
@@ -169,7 +204,7 @@ final class Glow {
     /// Put the ring exactly around the target, directly BELOW it in z-order (target covers the middle).
     func sync() {
         guard state != .idle, let r = axFrame(), !axBool(kAXMinimizedAttribute), !isFullScreen, targetOnScreen else {
-            window.orderOut(nil); return
+            window.orderOut(nil); bar.orderOut(nil); return
         }
         lastFrame = r
         let primaryH = NSScreen.screens.first?.frame.height ?? 0          // AX: top-left origin
@@ -177,6 +212,10 @@ final class Glow {
             .insetBy(dx: -Look.pad, dy: -Look.pad)
         window.setFrame(cocoa, display: true)
         window.order(.below, relativeTo: Int(wid))
+        let barRect = CGRect(x: r.minX + 6, y: primaryH - r.minY - Glow.barHeight, width: r.width - 12, height: Glow.barHeight)
+        bar.setFrame(barRect, display: true)
+        if barState != state { paintBar(state); barState = state }
+        bar.order(.above, relativeTo: Int(wid))
         if !overlayVisible {
             // pinned to the Space it was first shown on; the target moved Spaces (M0 ④) ⇒ fresh window
             let s = state

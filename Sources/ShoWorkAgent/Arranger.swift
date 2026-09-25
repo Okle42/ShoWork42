@@ -270,7 +270,7 @@ final class Menu: NSObject {
     private let menu = NSMenu()
 
     func install() {
-        let i = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        let i = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         i.button?.image = NSImage(systemSymbolName: "rectangle.3.group", accessibilityDescription: "ShoWork42")
         i.button?.image?.isTemplate = true
         i.menu = menu
@@ -278,9 +278,43 @@ final class Menu: NSObject {
         refresh()
     }
 
+    /// (state, placement) for every lit tab — set by the Engine after each render
+    var summary: [(WorkState, Placement)] = []
+
+    /// Menu bar shows how many windows are purple / gold / red; the menu lists them, click to go there.
+    private func paintButton() {
+        guard let b = item?.button else { return }
+        let counts = [WorkState.working, .done, .input].map { s in (s, Set(summary.filter { $0.0 == s }.map(\.1.wid)).count) }
+        let lit = counts.filter { $0.1 > 0 }
+        guard !lit.isEmpty else { b.attributedTitle = NSAttributedString(string: ""); b.imagePosition = .imageOnly; return }
+        let t = NSMutableAttributedString()
+        for (s, n) in lit {
+            t.append(NSAttributedString(string: " ●", attributes: [.foregroundColor: Look.color(s), .font: NSFont.systemFont(ofSize: 11)]))
+            t.append(NSAttributedString(string: "\(n)", attributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .semibold)]))
+        }
+        b.attributedTitle = t
+        b.imagePosition = .imageLeft
+    }
+
     func refresh() {
         guard item != nil else { return }
+        paintButton()
         menu.removeAllItems()
+        let names: [WorkState: String] = [.input: "等你回答", .done: "已完成", .working: "工作中"]
+        var shown = Set<CGWindowID>()
+        for s in [WorkState.input, .done, .working] {
+            for (_, p) in summary.filter({ $0.0 == s }) where !shown.contains(p.wid) {
+                shown.insert(p.wid)
+                let title = AXQuery.element(pid: p.pid, wid: p.wid).flatMap { AXQuery.string($0, kAXTitleAttribute) } ?? "視窗 \(p.wid)"
+                let mi = menu.addItem(withTitle: "\(names[s]!)　\(title)", action: #selector(focusWindow(_:)), keyEquivalent: "")
+                mi.image = NSImage(systemSymbolName: "circle.fill", accessibilityDescription: names[s])?
+                    .withSymbolConfiguration(.init(paletteColors: [Look.color(s)]))
+                mi.representedObject = [Int(p.pid), Int(p.wid)]
+                mi.target = self
+            }
+        }
+        if shown.isEmpty { menu.addItem(withTitle: "目前沒有工作中的 AI 視窗", action: nil, keyEquivalent: "").isEnabled = false }
+        menu.addItem(.separator())
         let a = Arranger.shared
         menu.addItem(withTitle: "立即排版", action: #selector(arrangeNow), keyEquivalent: "l").keyEquivalentModifierMask = [.control, .option]
         let auto = menu.addItem(withTitle: "視窗數量變動時自動排版", action: #selector(toggleAuto), keyEquivalent: "")
@@ -291,7 +325,15 @@ final class Menu: NSObject {
         let g = menu.addItem(withTitle: "　上下左右 2×2", action: #selector(fourGrid), keyEquivalent: ""); g.state = a.fourStyle == .grid ? .on : .off
         menu.addItem(.separator())
         menu.addItem(withTitle: "結束 ShoWork42", action: #selector(quit), keyEquivalent: "")
-        menu.items.forEach { if $0.action != nil { $0.target = self } }
+        menu.items.forEach { if $0.action != nil && $0.target == nil { $0.target = self } }
+    }
+
+    @objc private func focusWindow(_ sender: NSMenuItem) {
+        guard let v = sender.representedObject as? [Int], v.count == 2,
+              let el = AXQuery.element(pid: pid_t(v[0]), wid: CGWindowID(v[1])) else { return }
+        NSRunningApplication(processIdentifier: pid_t(v[0]))?.activate()
+        AXUIElementPerformAction(el, kAXRaiseAction as CFString)
+        AXUIElementSetAttributeValue(el, kAXMainAttribute as CFString, kCFBooleanTrue)
     }
 
     @objc private func arrangeNow() { Arranger.shared.arrange() }
