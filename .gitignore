@@ -10,3 +10,4 @@ spikes/**/axdoc_find
 spikes/**/tmux_resolve
 .build/
 .swiftpm/
+spikes/**/axraise
