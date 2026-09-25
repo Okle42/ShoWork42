@@ -5,8 +5,8 @@ import ShoWorkCore
 // MARK: - Look (Keng: soft outer glow ≈12pt; purple breathing, gold steady, red pulsing)
 
 enum Look {
-    static let pad: CGFloat = 26            // overlay extends this far beyond the window
-    static let spread: CGFloat = 12         // visible soft glow
+    static let pad: CGFloat = 34            // overlay extends this far beyond the window
+    static let spread: CGFloat = 18         // visible soft glow (Keng 09-26: "要更明顯")
     static let corner: CGFloat = 12
 
     static func color(_ s: WorkState) -> NSColor {
@@ -30,8 +30,8 @@ final class GlowView: NSView {
         super.init(frame: frame)
         wantsLayer = true
         for l in [halo, edge] { l.fillColor = nil; l.shadowOffset = .zero; layer?.addSublayer(l) }
-        halo.lineWidth = 6; halo.shadowRadius = Look.spread; halo.shadowOpacity = 1
-        edge.lineWidth = 1.5; edge.shadowRadius = 3; edge.shadowOpacity = 0.9
+        halo.lineWidth = 10; halo.shadowRadius = Look.spread; halo.shadowOpacity = 1
+        edge.lineWidth = 2.5; edge.shadowRadius = 5; edge.shadowOpacity = 1
     }
     required init?(coder: NSCoder) { fatalError() }
 
@@ -46,7 +46,7 @@ final class GlowView: NSView {
         guard s != state else { return }
         state = s
         let c = Look.color(s).cgColor
-        halo.strokeColor = Look.color(s).withAlphaComponent(0.35).cgColor; halo.shadowColor = c
+        halo.strokeColor = Look.color(s).withAlphaComponent(0.55).cgColor; halo.shadowColor = c
         edge.strokeColor = Look.color(s).withAlphaComponent(0.95).cgColor; edge.shadowColor = c
         layer?.removeAllAnimations(); halo.removeAllAnimations(); edge.removeAllAnimations()
         guard !Look.reduceMotion else { return }
@@ -54,8 +54,8 @@ final class GlowView: NSView {
         a.autoreverses = true; a.repeatCount = .infinity
         a.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
         switch s {
-        case .working: a.fromValue = 1.0; a.toValue = 0.45; a.duration = 1.6   // slow breath
-        case .input:   a.fromValue = 1.0; a.toValue = 0.35; a.duration = 0.6   // urgent pulse
+        case .working: a.fromValue = 1.0; a.toValue = 0.6; a.duration = 1.6    // slow breath, never faint
+        case .input:   a.fromValue = 1.0; a.toValue = 0.45; a.duration = 0.6   // urgent pulse
         default: return                                                         // gold: steady
         }
         layer?.add(a, forKey: "pulse")
