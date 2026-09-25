@@ -5,7 +5,7 @@ import ShoWorkCore
 // MARK: - Look (Keng: soft outer glow ≈12pt; purple breathing, gold steady, red pulsing)
 
 enum Look {
-    static let pad: CGFloat = 34            // overlay extends this far beyond the window
+    static let pad: CGFloat = 46            // room for the breathing glow at its widest
     static let spread: CGFloat = 18         // visible soft glow (Keng 09-26: "要更明顯")
     static let corner: CGFloat = 12
 
@@ -49,16 +49,17 @@ final class GlowView: NSView {
         halo.strokeColor = Look.color(s).withAlphaComponent(0.55).cgColor; halo.shadowColor = c
         edge.strokeColor = Look.color(s).withAlphaComponent(0.95).cgColor; edge.shadowColor = c
         layer?.removeAllAnimations(); halo.removeAllAnimations(); edge.removeAllAnimations()
-        guard !Look.reduceMotion else { return }
-        let a = CABasicAnimation(keyPath: "opacity")
-        a.autoreverses = true; a.repeatCount = .infinity
-        a.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-        switch s {
-        case .working: a.fromValue = 1.0; a.toValue = 0.6; a.duration = 1.6    // slow breath, never faint
-        case .input:   a.fromValue = 1.0; a.toValue = 0.45; a.duration = 0.6   // urgent pulse
-        default: return                                                         // gold: steady
-        }
-        layer?.add(a, forKey: "pulse")
+        guard !Look.reduceMotion, s != .idle else { return }
+        // Keng 09-26 (glow_style_board): style A "breathing" for ALL states, normal speed — the outer
+        // glow slowly brightens and widens, then dims and narrows (3.2 s per breath).
+        let g = CAAnimationGroup()
+        let radius = CABasicAnimation(keyPath: "shadowRadius"); radius.fromValue = Look.spread * 0.8; radius.toValue = Look.spread * 1.9
+        let bright = CABasicAnimation(keyPath: "shadowOpacity"); bright.fromValue = 0.6; bright.toValue = 1.0
+        let width = CABasicAnimation(keyPath: "lineWidth"); width.fromValue = 6; width.toValue = 14
+        g.animations = [radius, bright, width]
+        g.duration = 1.6; g.autoreverses = true; g.repeatCount = .infinity
+        g.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        halo.add(g, forKey: "breathe")
     }
 }
 

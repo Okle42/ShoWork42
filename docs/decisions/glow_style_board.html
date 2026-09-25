@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="zh-Hant">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>外圍光芒款式</title>
+<style>
+:root { --bg:#0b0d12; --card:#151821; --line:#2a2f3a; --text:#e8eaf0; --dim:#9aa3b2; --accent:#8B5CF6; --c:#9E66FF; --c2:#C9A8FF; }
+body[data-c="gold"] { --c:#FFC23D; --c2:#FFE3A1; }
+body[data-c="red"]  { --c:#FF4040; --c2:#FF9A9A; }
+* { box-sizing:border-box }
+body { margin:0; background:var(--bg); color:var(--text); font:15px/1.6 -apple-system,"PingFang TC",sans-serif }
+main { max-width:1200px; margin:0 auto; padding:26px 16px 150px }
+h1 { font-size:23px; margin:0 0 6px } .lead { color:var(--dim); margin:0 0 14px }
+.toolbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:18px }
+.chip { border:1px solid var(--line); border-radius:99px; padding:6px 14px; cursor:pointer; background:var(--card) }
+.chip.on { border-color:var(--c); box-shadow:0 0 0 2px color-mix(in srgb,var(--c) 30%,transparent) }
+.grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px }
+.card { background:var(--card); border:2px solid var(--line); border-radius:16px; padding:14px; cursor:pointer; position:relative }
+.card.sel { border-color:var(--accent); box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 25%,transparent) }
+.card h3 { margin:0 0 2px; font-size:17px } .card p { margin:0; color:var(--dim); font-size:13px }
+.stage { height:230px; display:grid; place-items:center; background:radial-gradient(circle at 50% 40%,#161a24,#0b0d12); border-radius:10px; margin-bottom:10px; overflow:hidden }
+/* mock terminal window */
+.win { position:relative; width:220px; height:140px; border-radius:12px; background:#1f232d; z-index:2;
+       box-shadow: inset 0 0 0 1.5px var(--c), inset 0 0 12px color-mix(in srgb,var(--c) 70%,transparent); }  /* the inner ring you already have */
+.win::before { content:""; position:absolute; left:10px; top:9px; width:34px; height:8px; border-radius:4px;
+       background:radial-gradient(circle at 4px 4px,#ff5f57 3.5px,transparent 4px),radial-gradient(circle at 17px 4px,#febc2e 3.5px,transparent 4px),radial-gradient(circle at 30px 4px,#28c840 3.5px,transparent 4px) }
+.win::after { content:"claude › 工作中…"; position:absolute; left:12px; top:32px; font:11px ui-monospace,monospace; color:#9aa3b2 }
+.halo { position:absolute; inset:0; pointer-events:none; z-index:1 }
+.wrap { position:relative; width:220px; height:140px }
+
+/* A. 呼吸 */
+.A .halo { border-radius:12px; animation:breathe 3.2s ease-in-out infinite }
+@keyframes breathe { 0%,100% { box-shadow:0 0 14px 4px color-mix(in srgb,var(--c) 55%,transparent) } 50% { box-shadow:0 0 30px 12px color-mix(in srgb,var(--c) 90%,transparent) } }
+
+/* B. 流光繞行 */
+.B .halo { inset:-10px; border-radius:20px; padding:10px; filter:blur(5px);
+  background:conic-gradient(from var(--a), transparent 0deg, transparent 250deg, var(--c2) 300deg, var(--c) 330deg, transparent 360deg);
+  -webkit-mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite:xor; mask-composite:exclude;
+  animation:orbit 3.4s linear infinite }
+.B .halo::after { content:""; position:absolute; inset:6px; border-radius:16px; box-shadow:0 0 16px 3px color-mix(in srgb,var(--c) 45%,transparent) }
+@property --a { syntax:'<angle>'; inherits:false; initial-value:0deg }
+@keyframes orbit { to { --a:360deg } }
+
+/* C. 漣漪外擴 */
+.C .halo span { position:absolute; inset:0; border-radius:12px; border:2px solid var(--c); opacity:0; animation:ripple 3s ease-out infinite }
+.C .halo span:nth-child(2) { animation-delay:1s } .C .halo span:nth-child(3) { animation-delay:2s }
+.C .halo::before { content:""; position:absolute; inset:0; border-radius:12px; box-shadow:0 0 16px 4px color-mix(in srgb,var(--c) 55%,transparent) }
+@keyframes ripple { 0% { transform:scale(1); opacity:.8; filter:blur(0) } 100% { transform:scale(1.28); opacity:0; filter:blur(3px) } }
+
+/* D. 光霧飄動 */
+.D .halo { inset:-34px; filter:blur(16px) }
+.D .halo span { position:absolute; width:120px; height:80px; border-radius:50%; background:var(--c); opacity:.55; animation:drift 7s ease-in-out infinite alternate }
+.D .halo span:nth-child(1) { left:0; top:0 } .D .halo span:nth-child(2) { right:0; top:20px; background:var(--c2); animation-duration:9s }
+.D .halo span:nth-child(3) { left:40px; bottom:0; animation-duration:8s } .D .halo span:nth-child(4) { right:30px; bottom:10px; background:var(--c2); animation-duration:6s }
+@keyframes drift { 0% { transform:translate(0,0) scale(1) } 50% { transform:translate(22px,-12px) scale(1.15) } 100% { transform:translate(-16px,14px) scale(.92) } }
+
+/* E. 微光粒子 */
+.E .halo::before { content:""; position:absolute; inset:0; border-radius:12px; box-shadow:0 0 14px 3px color-mix(in srgb,var(--c) 50%,transparent) }
+.E .halo i { position:absolute; width:5px; height:5px; border-radius:50%; background:var(--c2); box-shadow:0 0 8px 2px var(--c); opacity:0; animation:float 3.6s ease-in-out infinite }
+@keyframes float { 0% { opacity:0; transform:translate(0,0) scale(.6) } 25% { opacity:1 } 100% { opacity:0; transform:translate(var(--dx),var(--dy)) scale(1.1) } }
+
+/* F. 極光旋轉 */
+.F .halo { inset:-18px; border-radius:26px; filter:blur(14px); opacity:.9;
+  background:conic-gradient(from var(--a), var(--c), var(--c2), color-mix(in srgb,var(--c) 40%,#fff 0%), var(--c), var(--c2), var(--c));
+  animation:orbit 9s linear infinite }
+
+.none .halo { display:none }
+.bar { position:fixed; left:0; right:0; bottom:0; background:color-mix(in srgb,var(--bg) 92%,transparent); backdrop-filter:blur(8px); border-top:1px solid var(--line) }
+.bar .in { max-width:1200px; margin:0 auto; padding:12px 16px; display:flex; gap:10px; align-items:center; flex-wrap:wrap }
+.bar label { color:var(--dim); font-size:13px }
+select, textarea { background:var(--card); color:var(--text); border:1px solid var(--line); border-radius:10px; padding:8px 10px; font:inherit }
+textarea { flex:1; min-width:200px; height:42px }
+button { font:inherit; padding:10px 18px; border-radius:10px; border:0; background:var(--accent); color:#fff; font-weight:600; cursor:pointer }
+button:disabled { opacity:.45 } button.ghost { background:transparent; color:var(--text); border:1px solid var(--line) }
+#status { color:var(--dim); font-size:13px }
+@media (max-width:900px) { .grid { grid-template-columns:1fr 1fr } } @media (max-width:600px) { .grid { grid-template-columns:1fr } }
+</style>
+<body data-c="purple">
+<main>
+  <h1>外圍那一層光芒：選一個「浮動感」款式</h1>
+  <p class="lead">每張卡片都是實際在動的預覽。視窗本身已經有的「內側一圈光」保留不變，這裡只換<b>外圍那一層</b>。用下面的按鈕切換顏色看看紫／金／紅各是什麼感覺，點卡片選你要的。</p>
+  <div class="toolbar">預覽顏色：
+    <span class="chip on" data-c="purple">🟣 工作中</span><span class="chip" data-c="gold">🟡 完成</span><span class="chip" data-c="red">🔴 等你回答</span>
+  </div>
+  <div class="grid">
+    <div class="card A" data-v="A"><div class="stage"><div class="wrap"><div class="halo"></div><div class="win"></div></div></div><h3>A. 呼吸</h3><p>整圈慢慢變亮變暗、擴大縮小。最接近現在，最低調。</p></div>
+    <div class="card B" data-v="B"><div class="stage"><div class="wrap"><div class="halo"></div><div class="win"></div></div></div><h3>B. 流光繞行</h3><p>一道亮光沿著外框繞圈跑，像跑馬燈。一眼看出「正在動」。</p></div>
+    <div class="card C" data-v="C"><div class="stage"><div class="wrap"><div class="halo"><span></span><span></span><span></span></div><div class="win"></div></div></div><h3>C. 漣漪外擴</h3><p>光圈一層層往外擴散再淡掉，像水波。</p></div>
+    <div class="card D" data-v="D"><div class="stage"><div class="wrap"><div class="halo"><span></span><span></span><span></span><span></span></div><div class="win"></div></div></div><h3>D. 光霧飄動</h3><p>幾團柔光在視窗周圍緩緩漂移，像極光霧氣，最有「浮動」感。</p></div>
+    <div class="card E" data-v="E"><div class="stage"><div class="wrap"><div class="halo" id="sparks"></div><div class="win"></div></div></div><h3>E. 微光粒子</h3><p>細小光點沿邊緣飄起、閃爍後消失。</p></div>
+    <div class="card F" data-v="F"><div class="stage"><div class="wrap"><div class="halo"></div><div class="win"></div></div></div><h3>F. 極光旋轉</h3><p>同色系深淺光帶繞著視窗慢慢轉，柔和、有層次。</p></div>
+  </div>
+</main>
+<div class="bar"><div class="in">
+  <label>完成（金）／等回答（紅）要不要也用同一款？
+    <select id="others"><option value="same">同一款</option><option value="steady">金、紅保持靜止發亮（只有工作中會動）</option><option value="faster">同一款但紅色動得更快（更急迫）</option></select></label>
+  <label>速度 <select id="speed"><option value="normal">正常</option><option value="slow">慢一點</option><option value="fast">快一點</option></select></label>
+  <textarea id="note" placeholder="備註（選填）：例如「B 但光再柔一點」"></textarea>
+  <button id="send" disabled>送出</button><button class="ghost" id="copy">拷貝答案</button><span id="status">先點一張卡片</span>
+</div></div>
+<script>
+// sparkles for E
+const sp=document.getElementById('sparks');
+for(let i=0;i<18;i++){const e=document.createElement('i');const side=i%4;const t=Math.random();
+  const x=side===0?t*220:side===1?220:side===2?t*220:0, y=side===0?0:side===1?t*140:side===2?140:t*140;
+  e.style.left=(x-2)+'px';e.style.top=(y-2)+'px';
+  e.style.setProperty('--dx',((side===1?1:side===3?-1:(Math.random()-.5))*22)+'px');
+  e.style.setProperty('--dy',((side===0?-1:side===2?1:(Math.random()-.5))*22)+'px');
+  e.style.animationDelay=(Math.random()*3.6)+'s';sp.appendChild(e);}
+document.querySelectorAll('.chip').forEach(c=>c.onclick=()=>{document.querySelectorAll('.chip').forEach(x=>x.classList.remove('on'));c.classList.add('on');document.body.dataset.c=c.dataset.c;});
+let choice=null;
+document.querySelectorAll('.card').forEach(c=>c.onclick=()=>{document.querySelectorAll('.card').forEach(x=>x.classList.remove('sel'));c.classList.add('sel');choice=c.dataset.v;
+  document.getElementById('send').disabled=false;document.getElementById('status').textContent='已選 '+choice;});
+function payload(){const n=document.getElementById('note').value.trim();const o=document.getElementById('others').value,s=document.getElementById('speed').value;
+  return {answers:{style:choice,others:o,speed:s},notes:n?{note:n}:{},summary:`款式=${choice} 金紅=${o} 速度=${s}`+(n?'；備註：'+n:'')};}
+document.getElementById('send').onclick=async()=>{const st=document.getElementById('status');
+  try{const r=await fetch('/__submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload())});st.textContent=r.ok?'✅ 已送出給 Claude，可以關掉這頁了':'送出失敗，請按「拷貝答案」';}
+  catch(e){st.textContent='送出失敗，請按「拷貝答案」貼回對話';}};
+document.getElementById('copy').onclick=()=>{navigator.clipboard.writeText(payload().summary);document.getElementById('status').textContent='已拷貝';};
+</script>
+</body>
+</html>
