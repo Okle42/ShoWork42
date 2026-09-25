@@ -78,8 +78,8 @@ final class Glow {
     let pid: pid_t
     private var window: GlowWindow
     private var view: GlowView { window.contentView as! GlowView }
-    /// Title-bar light: sits directly ABOVE the target over the top of its title bar. In overlapping
-    /// layouts the outer ring hides under neighbours; the title bar is always exposed (09-26).
+    /// Inner light: sits directly ABOVE the target, all four edges. In overlapping layouts the outer
+    /// ring hides under neighbours; the inner light stays on the window's own visible part (09-26).
     private var bar: GlowWindow = Glow.makeBar()
     var barNumber: Int { bar.windowNumber }
     private var axWin: AXUIElement?
@@ -108,21 +108,29 @@ final class Glow {
         w.contentView = v
         return w
     }
+    /// Inner light on ALL four edges (Keng 09-26: the top had light inside and out, the other sides only
+    /// outside — make every side the same). A stroked rounded rect whose glow is clipped to the window,
+    /// drawn in a click-through window directly above the target.
     private func paintBar(_ s: WorkState) {
         guard let l = bar.contentView?.layer else { return }
+        l.masksToBounds = true
         l.sublayers?.forEach { $0.removeFromSuperlayer() }
         l.removeAllAnimations()
         guard s != .idle else { return }
         let c = Look.color(s)
-        let g = CAGradientLayer()                            // bright top edge fading down into the title bar
-        g.frame = CGRect(x: 0, y: 0, width: bar.frame.width, height: Glow.barHeight)
-        g.colors = [c.withAlphaComponent(0).cgColor, c.withAlphaComponent(0.55).cgColor, c.cgColor]
-        g.locations = [0, 0.6, 1]
-        l.addSublayer(g)
+        let ring = CAShapeLayer()
+        ring.frame = CGRect(origin: .zero, size: bar.frame.size)
+        ring.path = CGPath(roundedRect: ring.frame.insetBy(dx: 1.5, dy: 1.5), cornerWidth: Look.corner - 1,
+                           cornerHeight: Look.corner - 1, transform: nil)
+        ring.fillColor = nil
+        ring.strokeColor = c.withAlphaComponent(0.95).cgColor
+        ring.lineWidth = 3
+        ring.shadowColor = c.cgColor; ring.shadowRadius = 8; ring.shadowOpacity = 1; ring.shadowOffset = .zero
+        l.addSublayer(ring)
         guard !Look.reduceMotion, s != .done else { return }
         let a = CABasicAnimation(keyPath: "opacity")
         a.autoreverses = true; a.repeatCount = .infinity
-        a.fromValue = 1.0; a.toValue = s == .input ? 0.4 : 0.55; a.duration = s == .input ? 0.6 : 1.6
+        a.fromValue = 1.0; a.toValue = s == .input ? 0.45 : 0.6; a.duration = s == .input ? 0.6 : 1.6
         l.add(a, forKey: "pulse")
     }
 
@@ -212,7 +220,8 @@ final class Glow {
             .insetBy(dx: -Look.pad, dy: -Look.pad)
         window.setFrame(cocoa, display: true)
         window.order(.below, relativeTo: Int(wid))
-        let barRect = CGRect(x: r.minX + 6, y: primaryH - r.minY - Glow.barHeight, width: r.width - 12, height: Glow.barHeight)
+        let barRect = CGRect(x: r.minX, y: primaryH - r.maxY, width: r.width, height: r.height)   // whole window
+        if bar.frame.size != barRect.size { barState = nil }                                        // repaint on resize
         bar.setFrame(barRect, display: true)
         if barState != state { paintBar(state); barState = state }
         bar.order(.above, relativeTo: Int(wid))
