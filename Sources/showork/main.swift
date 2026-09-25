@@ -1,5 +1,5 @@
 // showork — the tiny command every adapter calls.
-//   showork emit <working|done|input|clear> [--agent claude] [--tty /dev/ttysNNN]
+//   showork emit <working|done|input|clear> [--agent claude] [--tty /dev/ttysNNN] [--pid N]
 //
 // Contract with the AI tools that call us (hooks): this must NEVER slow them down or fail them.
 //   • always exits 0, prints nothing on success
@@ -20,17 +20,20 @@ args.removeFirst(2)
 
 var agent = "generic"
 var ttyOverride: String?
+var pidOverride: Int32?
 while let a = args.first {
     args.removeFirst()
     switch a {
     case "--agent": agent = args.first ?? agent; if !args.isEmpty { args.removeFirst() }
     case "--tty": ttyOverride = args.first; if !args.isEmpty { args.removeFirst() }
+    case "--pid": pidOverride = args.first.flatMap { Int32($0) }; if !args.isEmpty { args.removeFirst() }   // the AI process (liveness)
     default: break
     }
 }
 
 let found = ttyOverride.map { TTYFinder.Found(tty: $0, pid: getppid()) } ?? TTYFinder.find()
-guard let found else { exit(0) }                       // not in a terminal: nothing to light up
+guard var found else { exit(0) }                       // not in a terminal: nothing to light up
+if let p = pidOverride { found = TTYFinder.Found(tty: found.tty, pid: p) }
 guard let line = try? WireMessage(event: event, tty: found.tty, agent: agent, pid: found.pid).encodedLine() else { exit(0) }
 
 // Unix socket, non-blocking connect with a hard deadline.
