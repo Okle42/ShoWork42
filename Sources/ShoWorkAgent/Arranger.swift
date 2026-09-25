@@ -171,11 +171,17 @@ final class Arranger {
 
     // MARK: canonical stacking (Keng 09-26: click a bottom window ⇒ middle row re-emerges above top row)
 
-    /// Top row < middle row < bottom row, and the window you're using above everything.
+    /// The row you're in goes on top; the closer another row is to yours, the higher it sits
+    /// (Keng 09-26: click a top window ⇒ the middle row shows its lower half right beneath it;
+    /// click a bottom window ⇒ the middle row re-emerges above the top row). Yours is topmost.
     func restack(focused: CGWindowID) {
         guard !restacking, arranged.count >= 6, let me = arranged.first(where: { $0.wid == focused }) else { return }
         restacking = true
-        for w in arranged.sorted(by: { $0.row < $1.row }) where w.wid != focused {
+        let order = arranged.sorted {                       // raise farthest rows first, nearest last
+            let da = abs($0.row - me.row), db = abs($1.row - me.row)
+            return da != db ? da > db : $0.row < $1.row
+        }
+        for w in order where w.wid != focused {
             AXUIElementPerformAction(w.el, kAXRaiseAction as CFString)
         }
         AXUIElementPerformAction(me.el, kAXRaiseAction as CFString)

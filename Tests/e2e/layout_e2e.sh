@@ -144,8 +144,20 @@ EOF2
   typeset -a P Y G
   P=($(sed -n '1,4p' $ST/watch.plan | awk '{print $1}')); Y=($(sed -n '5,7p' $ST/watch.plan | awk '{print $1}')); G=($(sed -n '8,11p' $ST/watch.plan | awk '{print $1}'))
   GP=$(osascript -e 'tell application "System Events" to get unix id of process "Ghostty"')
-  $ROOT/spikes/m0_glow/axraise $GP $P[2]; sleep 1.2
+  $ROOT/spikes/m0_glow/axraise $GP $P[2]; sleep 1.5
   [[ -n ${SW42_SHOTS:-} ]] && screencapture -x "$SW42_SHOTS/restack_1_click_top.png"
+  $ST/zorder > $ST/z1
+  python3 - $ST/z1 "${(j:,:)P}" "${(j:,:)Y}" "${(j:,:)G}" <<'PY' && ok "restack: clicked TOP window on top; then middle, then bottom" || bad "restack after clicking top"
+import sys
+z=[l.strip() for l in open(sys.argv[1]) if l.strip()]
+P,Y,G=[a.split(',') for a in sys.argv[2:5]]
+idx={w:i for i,w in enumerate(z)}
+mine=[w for w in z if w in P+Y+G]
+ok = mine and mine[0]==P[1]
+ok = ok and max(idx[w] for w in P) < min(idx[w] for w in Y) and max(idx[w] for w in Y) < min(idx[w] for w in G)
+if not ok: print("    front→back:", ["P" if w in P else "Y" if w in Y else "G" for w in mine], "first:", mine[:1], "want", P[1])
+sys.exit(0 if ok else 1)
+PY
   $ROOT/spikes/m0_glow/axraise $GP $G[3]; sleep 1.5
   [[ -n ${SW42_SHOTS:-} ]] && screencapture -x "$SW42_SHOTS/restack_2_click_bottom.png"
   $ST/zorder > $ST/z

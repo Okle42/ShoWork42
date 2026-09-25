@@ -62,7 +62,7 @@ struct LayoutPlanTests {
         return CGFloat(side) * step
     }
 
-    @Test("1–5, 7, 8: every window keeps a ≥120pt exclusive square in ANY stacking order", arguments: [1, 2, 3, 4, 5, 7, 8])
+    @Test("1–5, 8: every window keeps a ≥120pt exclusive square in ANY stacking order", arguments: [1, 2, 3, 4, 5, 8])
     func alwaysClickable(n: Int) {
         let f = LayoutPlan.frames(count: n, in: area)
         for i in f.indices { #expect(Self.exclusiveSquare(i, f) >= 112, "n=\(n) window \(i)") }
@@ -76,25 +76,25 @@ struct LayoutPlanTests {
         return covering - r.minY
     }
 
-    @Test("6, 9–11: in canonical stacking (top < middle < bottom) every window shows ≥140pt", arguments: [6, 9, 10, 11])
+    @Test("6, 7, 9–11: in canonical stacking (top < middle < bottom) every window shows ≥110pt", arguments: [6, 7, 9, 10, 11])
     func canonicalVisible(n: Int) {
         let f = LayoutPlan.frames(count: n, in: area), rows = LayoutPlan.rows(count: n)
-        for i in f.indices { #expect(Self.visibleBand(i, f, rows: rows) >= 140, "n=\(n) window \(i) shows \(Self.visibleBand(i, f, rows: rows))") }
+        for i in f.indices { #expect(Self.visibleBand(i, f, rows: rows) >= 110, "n=\(n) window \(i) shows \(Self.visibleBand(i, f, rows: rows))") }
+    }
+
+    @Test("6, 7: Keng's brick layout — quarter width, rows 120 apart, same height", arguments: [6, 7])
+    func brick(n: Int) {
+        let f = LayoutPlan.frames(count: n, in: area)
+        #expect(f.allSatisfy { $0.width == 480 && $0.height == area.height - 240 })
+        #expect(Set(f.map(\.minY)) == [30, 150, 270])
+        let top = f.filter { $0.minY == 30 }.map(\.minX), bottom = f.filter { $0.minY == 270 }.map(\.minX)
+        #expect(top == [0, 960] && bottom == [480, 1440])
+        #expect(f.filter { $0.minY == 150 }.count == n - 4)
     }
 
     @Test("6–11: every overlapping window has the same height (Keng: 一樣高)", arguments: 6...11)
     func sameHeight(n: Int) {
-        let f = LayoutPlan.frames(count: n, in: area)
-        #expect(Set(f.map(\.height)).count == 1)
-        #expect(f[0].height == area.height - LayoutPlan.rowReveal)
-    }
-
-    @Test("6: two half-width card piles, 3 per side, fanned downward")
-    func sixCards() {
-        let f = LayoutPlan.frames(count: 6, in: area)
-        #expect(f.allSatisfy { $0.width == 960 })
-        #expect(f.filter { $0.minX == 0 }.count == 3 && f.filter { $0.minX == 960 }.count == 3)
-        #expect(Set(f.map(\.minY)).count == 3)
+        #expect(Set(LayoutPlan.frames(count: n, in: area).map(\.height)).count == 1)
     }
 
     @Test("9–11: quarter width, 4-3-4 with the middle row shifted half a window", arguments: 9...11)
