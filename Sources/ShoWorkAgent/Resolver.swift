@@ -18,6 +18,8 @@ struct Placement: Hashable, Sendable {
     let wid: CGWindowID
     /// the terminal-side tty of the tab (for tmux this is the client tty, not the pane tty)
     let tabTTY: String
+    /// Ghostty only: AppleScript terminal id, used to ask "is this tab selected?" without probing
+    var ghosttyTerminalID: String? = nil
 }
 
 /// tty → on-screen placement(s). M0-verified methods:
@@ -75,7 +77,8 @@ final class Resolver {
                 end tell
                 """).map(CGWindowID.init)
         case .ghostty:
-            wid = GhosttyProbe.wid(forTTY: tty, ghosttyPID: pid)
+            guard let g = GhosttyProbe.resolve(tty: tty, ghosttyPID: pid) else { return nil }
+            return Placement(app: app, pid: pid, wid: g.wid, tabTTY: tty, ghosttyTerminalID: g.terminalID)
         }
         guard let wid else { return nil }
         return Placement(app: app, pid: pid, wid: wid, tabTTY: tty)
@@ -88,8 +91,25 @@ enum GhosttyProbe {
     /// Writes a nonce cwd (OSC 7) into the tty, finds the AX window whose AXDocument shows it,
     /// then writes the real cwd back. Only the SELECTED tab of a window reports its cwd, so a
     /// background tab resolves through the AppleScript tab tree instead.
+    struct Hit { let wid: CGWindowID; let terminalID: String? }
+
     @MainActor
-    static func wid(forTTY tty: String, ghosttyPID: pid_t) -> CGWindowID? {
+    static func resolve(tty: String, ghosttyPID: pid_t) -> Hit? {
+        var tid: String?
+        let w = wid(forTTY: tty, ghosttyPID: ghosttyPID) { nonce in
+            tid = Script.string("""
+                tell application id "com.mitchellh.ghostty"
+                  repeat with t in terminals
+                    if (working directory of t) contains "\(nonce)" then return id of t
+                  end repeat
+                end tell
+                """)
+        }
+        return w.map { Hit(wid: $0, terminalID: tid) }
+    }
+
+    @MainActor
+    static func wid(forTTY tty: String, ghosttyPID: pid_t, whileProbed: (String) -> Void = { _ in }) -> CGWindowID? {
         let realCWD = ProcTree.cwd(ofForegroundOn: tty) ?? FileManager.default.homeDirectoryForCurrentUser.path
         let nonce = "SW42-" + String(UInt32.random(in: .min ... .max), radix: 16)
         // must be the exact system hostname: Ghostty compares case-sensitively and ignores OSC 7 from
@@ -98,6 +118,7 @@ enum GhosttyProbe {
         let host = String(cString: hb)
         defer { TTYWrite.osc7(tty, host: host, path: realCWD) }
         guard TTYWrite.osc7(tty, host: host, path: "/tmp/\(nonce)") else { return nil }
+        defer { whileProbed(nonce) }                           // runs before the cwd-restoring defer above
 
         for _ in 0..<10 {                                     // Ghostty applies OSC 7 asynchronously
             usleep(30_000)
