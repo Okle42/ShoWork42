@@ -74,13 +74,27 @@ def unmerge(data):
     if changed and "hooks" in data and not data["hooks"]: del data["hooks"]
     return changed
 
+def signing_identity():
+    """First "Apple Development"/"Developer ID Application" identity, else ad-hoc ("-")."""
+    out = subprocess.run(["security", "find-identity", "-v", "-p", "codesigning"], capture_output=True, text=True).stdout
+    for key in ("Developer ID Application", "Apple Development"):
+        for line in out.splitlines():
+            if key in line: return line.split()[1]
+    return "-"
+
 def install_agent():
     subprocess.run(["swift", "build", "-c", "release"], cwd=ROOT, check=True, stdout=subprocess.DEVNULL)
     os.makedirs(BIN, exist_ok=True)
+    ident = signing_identity()
     for name in ("showork", "ShoWorkAgent"):
         src = os.path.join(ROOT, ".build/release", name)
         tmp = os.path.join(BIN, "." + name + ".new")
-        shutil.copy2(src, tmp); os.replace(tmp, os.path.join(BIN, name))   # atomic swap, never a half-copied binary
+        shutil.copy2(src, tmp)
+        # sign with a real identity + fixed identifier: macOS keys Accessibility on the signature's
+        # designated requirement, so rebuilt binaries keep the permission (ad-hoc would lose it)
+        subprocess.run(["codesign", "-f", "-s", ident, "--identifier", f"ai.okle42.showork.{name.lower()}", tmp],
+                       check=True, stderr=subprocess.DEVNULL)
+        os.replace(tmp, os.path.join(BIN, name))                # atomic swap, never a half-copied binary
     os.makedirs(os.path.dirname(PLIST), exist_ok=True)
     plist = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -96,7 +110,16 @@ def install_agent():
     with open(PLIST, "w") as f: f.write(plist)
     uid = str(os.getuid())
     subprocess.run(["launchctl", "bootout", f"gui/{uid}/{LABEL}"], stderr=subprocess.DEVNULL)
-    subprocess.run(["launchctl", "bootstrap", f"gui/{uid}", PLIST], check=True)
+    # bootout is asynchronous; bootstrapping before it finishes fails with EIO (5)
+    for _ in range(50):
+        if subprocess.run(["launchctl", "print", f"gui/{uid}/{LABEL}"], capture_output=True).returncode != 0: break
+        time.sleep(0.1)
+    for attempt in range(5):
+        r = subprocess.run(["launchctl", "bootstrap", f"gui/{uid}", PLIST], capture_output=True, text=True)
+        if r.returncode == 0: break
+        time.sleep(0.5 * (attempt + 1))
+    else:
+        raise SystemExit(f"launchctl bootstrap failed: {r.stderr.strip()}")
 
 def uninstall_agent():
     subprocess.run(["launchctl", "bootout", f"gui/{os.getuid()}/{LABEL}"], stderr=subprocess.DEVNULL)
