@@ -27,6 +27,28 @@ struct StateLook: Codable, Equatable {
     var speed: Double
     /// animation durations are multiplied by this
     var period: Double { 1 / max(0.4, min(speed, 2.5)) }
+    /// 0.3…1.6, 1 = default — how strong the light is (inner ring and outer glow)
+    var brightness: Double = 1
+    /// 0.5…2, 1 = default — how far the outer glow spreads
+    var width: Double = 1
+
+    var b: CGFloat { CGFloat(max(0.3, min(brightness, 1.6))) }
+    var w: CGFloat { CGFloat(max(0.5, min(width, 2))) }
+
+    init(enabled: Bool, hex: String, style: GlowStyle, speed: Double, brightness: Double = 1, width: Double = 1) {
+        self.enabled = enabled; self.hex = hex; self.style = style; self.speed = speed
+        self.brightness = brightness; self.width = width
+    }
+    // older saves have no brightness/width — keep the user's colour/style/speed and default the rest
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        enabled = try c.decode(Bool.self, forKey: .enabled)
+        hex = try c.decode(String.self, forKey: .hex)
+        style = try c.decode(GlowStyle.self, forKey: .style)
+        speed = try c.decode(Double.self, forKey: .speed)
+        brightness = try c.decodeIfPresent(Double.self, forKey: .brightness) ?? 1
+        width = try c.decodeIfPresent(Double.self, forKey: .width) ?? 1
+    }
 
     var color: NSColor {
         let v = UInt32(hex.dropFirst(), radix: 16) ?? 0xFFFFFF
