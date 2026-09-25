@@ -3,6 +3,9 @@ import ShoWorkCore
 
 let argv = CommandLine.arguments
 
+// Internal: exit 0 if this binary is trusted for Accessibility (used by the permission wait loop)
+if argv.count == 2, argv[1] == "--ax-check" { exit(AXIsProcessTrusted() ? 0 : 1) }
+
 // Debug: ShoWorkAgent --arrange-dry   → prints the frames it WOULD apply (moves nothing)
 if argv.count == 2, argv[1] == "--arrange-dry" {
     MainActor.assumeIsolated {
@@ -64,8 +67,19 @@ if argv.count == 3, argv[1] == "--resolve" {
 if !AXIsProcessTrusted() {
     FileHandle.standardError.write(Data("ShoWorkAgent: waiting for Accessibility permission (System Settings → Privacy & Security → Accessibility → ShoWorkAgent)\n".utf8))
     _ = AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary)
-    while !AXIsProcessTrusted() { Thread.sleep(forTimeInterval: 2) }
-    FileHandle.standardError.write(Data("ShoWorkAgent: Accessibility granted\n".utf8))
+    // AXIsProcessTrusted() can keep answering false inside this process even after the user flips the
+    // switch (seen 09-26). Ask TCC fresh through a short-lived child instead, then re-exec ourselves.
+    while true {
+        Thread.sleep(forTimeInterval: 2)
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: CommandLine.arguments[0])
+        p.arguments = ["--ax-check"]
+        try? p.run(); p.waitUntilExit()
+        if p.terminationStatus == 0 { break }
+    }
+    FileHandle.standardError.write(Data("ShoWorkAgent: Accessibility granted — restarting to pick it up\n".utf8))
+    let args = CommandLine.arguments.map { strdup($0) } + [nil]
+    execv(CommandLine.arguments[0], args)
 }
 
 MainActor.assumeIsolated {
