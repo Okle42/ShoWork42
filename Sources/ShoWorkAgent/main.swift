@@ -90,6 +90,12 @@ MainActor.assumeIsolated {
     let titles = TitleWatcher(engine: engine)
     titles.start()
     Menu.shared.install()
+    // lets tests / scripts open the settings panel without driving the menu (09-26: a blind Return in
+    // the status menu hit「結束 ShoWork42」)
+    DistributedNotificationCenter.default().addObserver(forName: Notification.Name("ai.okle42.showork.showSettings"),
+                                                        object: nil, queue: .main) { _ in
+        MainActor.assumeIsolated { SettingsPanel.shared.show() }
+    }
     Arranger.shared.start()
     let server = Server { m in DispatchQueue.main.async { MainActor.assumeIsolated { engine.handle(m) } } }
     do { try server.start() } catch {

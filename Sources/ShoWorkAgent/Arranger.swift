@@ -317,12 +317,7 @@ final class Menu: NSObject {
         menu.addItem(.separator())
         let a = Arranger.shared
         menu.addItem(withTitle: "立即排版", action: #selector(arrangeNow), keyEquivalent: "l").keyEquivalentModifierMask = [.control, .option]
-        let auto = menu.addItem(withTitle: "視窗數量變動時自動排版", action: #selector(toggleAuto), keyEquivalent: "")
-        auto.state = a.autoArrange ? .on : .off
-        menu.addItem(.separator())
-        menu.addItem(withTitle: "4 個視窗時：", action: nil, keyEquivalent: "").isEnabled = false
-        let c = menu.addItem(withTitle: "　四等分直欄", action: #selector(fourColumns), keyEquivalent: ""); c.state = a.fourStyle == .columns ? .on : .off
-        let g = menu.addItem(withTitle: "　上下左右 2×2", action: #selector(fourGrid), keyEquivalent: ""); g.state = a.fourStyle == .grid ? .on : .off
+        menu.addItem(withTitle: "設定⋯", action: #selector(openSettings), keyEquivalent: ",")
         menu.addItem(.separator())
         menu.addItem(withTitle: "結束 ShoWork42", action: #selector(quit), keyEquivalent: "")
         menu.items.forEach { if $0.action != nil && $0.target == nil { $0.target = self } }
@@ -337,8 +332,6 @@ final class Menu: NSObject {
     }
 
     @objc private func arrangeNow() { Arranger.shared.arrange() }
-    @objc private func toggleAuto() { Arranger.shared.autoArrange.toggle() }
-    @objc private func fourColumns() { Arranger.shared.fourStyle = .columns; Arranger.shared.arrange() }
-    @objc private func fourGrid() { Arranger.shared.fourStyle = .grid; Arranger.shared.arrange() }
+    @objc private func openSettings() { SettingsPanel.shared.toggle() }
     @objc private func quit() { NSApp.terminate(nil) }
 }
