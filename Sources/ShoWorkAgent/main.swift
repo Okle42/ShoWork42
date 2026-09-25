@@ -18,8 +18,11 @@ if argv.count >= 2, argv[1] == "--arrange-once" {
     MainActor.assumeIsolated {
         let a = Arranger.shared
         if argv.count == 3, let s = LayoutPlan.FourStyle(rawValue: argv[2]) { a.fourStyle = s }
+        guard Arranger.onlyWIDs != nil else {       // the test entry point never runs without a whitelist
+            FileHandle.standardError.write(Data("--arrange-once requires SHOWORK_ONLY_WIDS\n".utf8)); exit(3)
+        }
         let p = a.plan()
-        a.arrange()
+        guard a.arrange() else { exit(4) }
         for (t, f) in p { print(AXQuery.wid(t.el), Int(f.minX), Int(f.minY), Int(f.width), Int(f.height)) }
         exit(0)
     }

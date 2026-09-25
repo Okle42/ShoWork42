@@ -105,12 +105,39 @@ final class Arranger {
         return Array(zip(ts, LayoutPlan.frames(count: ts.count, in: mainAreaAX(), four: fourStyle)))
     }
 
-    func arrange() {
+    /// Test mode: SHOWORK_ONLY_WIDS="w1,w2,…" ⇒ refuse to touch ANYTHING if a window outside the
+    /// list is on screen (09-26 incident: a test moved Keng's windows). Enforced here, not in scripts.
+    static var onlyWIDs: Set<CGWindowID>? {
+        ProcessInfo.processInfo.environment["SHOWORK_ONLY_WIDS"].map { Set($0.split(separator: ",").compactMap { CGWindowID($0) }) }
+    }
+
+    @discardableResult
+    func arrange() -> Bool {
         let pairs = plan()
         let ts = pairs.map(\.0)
         let frames = pairs.map(\.1)
-        for (t, f) in zip(ts, frames) {
-            set(t.el, position: f.origin); set(t.el, size: f.size); set(t.el, position: f.origin)   // size can nudge origin
+        if let allow = Arranger.onlyWIDs {
+            let foreign = ts.map { AXQuery.wid($0.el) }.filter { !allow.contains($0) }
+            guard foreign.isEmpty else {
+                FileHandle.standardError.write(Data("REFUSED: windows outside SHOWORK_ONLY_WIDS on screen: \(foreign)\n".utf8))
+                return false
+            }
+        }
+        // guard-only mode: everything above ran, nothing below moves a window
+        if ProcessInfo.processInfo.environment["SHOWORK_ARRANGE_NOOP"] != nil {
+            FileHandle.standardError.write(Data("NOOP: would arrange \(ts.count) windows\n".utf8)); return true
+        }
+        // shrink first, then move, then size again: moving a tall window low first lets AppKit clamp it
+        // to the screen bottom and the later size change doesn't fully take (M1b bug: 567 vs 483)
+        for attempt in 0..<3 {
+            var wrong = 0
+            for (t, f) in zip(ts, frames) {
+                guard let cur = axFrame(t.el), !close(cur, f) else { continue }
+                wrong += 1
+                set(t.el, size: f.size); set(t.el, position: f.origin); set(t.el, size: f.size)
+            }
+            if wrong == 0 { break }
+            if attempt < 2 { usleep(120_000) }                       // some terminals resize asynchronously
         }
         // later windows on top so staggered title bars stay visible (per app; cross-app order is the user's)
         for t in ts { AXUIElementPerformAction(t.el, kAXRaiseAction as CFString) }
@@ -118,6 +145,13 @@ final class Arranger {
            let fw = Selection.focusedWID(pid: front), let el = ts.first(where: { AXQuery.wid($0.el) == fw })?.el {
             AXUIElementPerformAction(el, kAXRaiseAction as CFString)       // keep the window you're in on top
         }
+        return true
+    }
+
+    /// Origin exact; size may be a little smaller (terminals snap to their character grid), never bigger.
+    private func close(_ a: CGRect, _ b: CGRect) -> Bool {
+        abs(a.minX - b.minX) <= 2 && abs(a.minY - b.minY) <= 2 &&
+        (-25...2).contains(a.width - b.width) && (-25...2).contains(a.height - b.height)
     }
 
     // MARK: AX helpers
