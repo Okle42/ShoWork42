@@ -62,6 +62,14 @@ enum ProcTree {
         return out.sorted()
     }
 
+    /// Leader of the tty's foreground process group (the AI the user started), if any.
+    static func foregroundLeader(on tty: String) -> pid_t? {
+        guard let dev = ttyDev(tty) else { return nil }
+        let procs = processes(onTTY: dev)
+        guard let tp = procs.first?.tpgid, tp > 0, procs.contains(where: { $0.pid == tp }) else { return procs.map(\.pid).min() }
+        return tp
+    }
+
     static func alive(_ pid: pid_t) -> Bool { kill(pid, 0) == 0 || errno == EPERM }
 
     // MARK: primitives

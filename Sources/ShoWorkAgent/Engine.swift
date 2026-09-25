@@ -59,7 +59,11 @@ final class Engine {
 
     // MARK: events
 
+    /// ttys that ever sent a real hook event — the title fallback leaves them alone
+    private(set) var hookTTYs = Set<String>()
+
     func handle(_ m: WireMessage) {
+        if m.agent != "claude-title" { hookTTYs.insert(m.tty) }
         var tab = tabs[m.tty] ?? Tab(state: .idle, agentPID: m.pid, agent: m.agent, placements: [])
         tab.agentPID = m.pid; tab.agent = m.agent
         if m.event != .clear {

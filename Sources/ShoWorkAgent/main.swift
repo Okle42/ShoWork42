@@ -87,6 +87,8 @@ MainActor.assumeIsolated {
     app.setActivationPolicy(.accessory)                       // no Dock icon, no menu bar
     let engine = Engine()
     engine.start()
+    let titles = TitleWatcher(engine: engine)
+    titles.start()
     Menu.shared.install()
     Arranger.shared.start()
     let server = Server { m in DispatchQueue.main.async { MainActor.assumeIsolated { engine.handle(m) } } }
@@ -95,5 +97,5 @@ MainActor.assumeIsolated {
         exit(1)
     }
     FileHandle.standardError.write(Data("ShoWorkAgent listening on \(Paths.socket.path)\n".utf8))
-    withExtendedLifetime(server) { app.run() }
+    withExtendedLifetime((server, titles)) { app.run() }
 }

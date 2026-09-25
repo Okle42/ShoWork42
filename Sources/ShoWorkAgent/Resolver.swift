@@ -144,6 +144,37 @@ enum GhosttyProbe {
         return fullProbe(ghosttyPID: ghosttyPID)[tty]
     }
 
+    /// tty → Ghostty AppleScript terminal id for every tab (same nonce trick, ids instead of windows).
+    @MainActor
+    static func terminalIDs(ghosttyPID: pid_t) -> [String: String] {
+        var hb = [CChar](repeating: 0, count: 256); gethostname(&hb, hb.count)
+        let host = String(cString: hb)
+        var ttyOf: [String: String] = [:]
+        for t in ProcTree.ttys(under: ghosttyPID) {
+            let n = "SW42-" + String(UInt32.random(in: .min ... .max), radix: 16)
+            if TTYWrite.osc7(t, host: host, path: "/tmp/\(n)") { ttyOf[n] = t }
+        }
+        usleep(200_000)
+        let out = Script.string("""
+            tell application id "com.mitchellh.ghostty"
+              set o to ""
+              repeat with t in terminals
+                set o to o & (id of t) & (character id 9) & (working directory of t) & (character id 10)
+              end repeat
+              return o
+            end tell
+            """) ?? ""
+        var result: [String: String] = [:]
+        for line in out.split(separator: "\n") {
+            let c = line.split(separator: "\t", maxSplits: 1)
+            guard c.count == 2, let r = c[1].range(of: "SW42-") else { continue }
+            let n = String(c[1][r.lowerBound...]).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            if let t = ttyOf[n] { result[t] = String(c[0]) }
+        }
+        for (_, t) in ttyOf { TTYWrite.osc7(t, host: host, path: ProcTree.cwd(ofForegroundOn: t) ?? FileManager.default.homeDirectoryForCurrentUser.path) }
+        return result
+    }
+
     /// tty → wid for every Ghostty tab: a distinct OSC 7 nonce per tty, then
     ///   AX:  window.AXDocument          → nonce of that window's selected tab → wid
     ///   AS:  window → all its terminals → every tab of the window gets that wid
