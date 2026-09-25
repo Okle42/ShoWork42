@@ -8,3 +8,5 @@ spikes/**/iterm_resolve
 spikes/**/ghostty_resolve
 spikes/**/axdoc_find
 spikes/**/tmux_resolve
+.build/
+.swiftpm/
