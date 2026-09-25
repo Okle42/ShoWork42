@@ -13,7 +13,27 @@ final class Engine {
     private var watchdog: Timer?
     private var reaper: Timer?
 
+    // MARK: persistence — an agent restart (update, crash) must not forget who is working
+    private var stateURL: URL { Paths.supportDir.appendingPathComponent("state.json") }
+    private struct Saved: Codable { let tty: String; let state: WorkState; let pid: Int32; let agent: String }
+
+    private func save() {
+        let s = tabs.map { Saved(tty: $0.key, state: $0.value.state, pid: $0.value.agentPID, agent: $0.value.agent) }
+        if let d = try? JSONEncoder().encode(s) { try? d.write(to: stateURL, options: .atomic) }
+    }
+
+    private func restore() {
+        guard let d = try? Data(contentsOf: stateURL), let s = try? JSONDecoder().decode([Saved].self, from: d) else { return }
+        for x in s where ProcTree.alive(x.pid) && x.state != .idle {
+            let p = resolver.placements(for: x.tty)
+            tabs[x.tty] = Tab(state: x.state, agentPID: x.pid, agent: x.agent, placements: p)
+            Log.note("RESTORE \(x.tty) \(x.state.rawValue) → \(p.map { "\($0.app)#\($0.wid)" })")
+        }
+        render()
+    }
+
     func start() {
+        restore()
         // ONE watchdog for all glows (M0: one per glow cost 0.13% each)
         watchdog = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.checkStacking() }
@@ -58,8 +78,12 @@ final class Engine {
     func acknowledgeLooked() {
         var changed = false
         for (tty, t) in tabs where t.state.needsAcknowledgement {
-            guard t.placements.contains(where: { Selection.isLooking(at: $0) }) else { continue }
+            guard let seen = t.placements.first(where: { Selection.isLooking(at: $0) }) else { continue }
             let n = StateMachine.acknowledge(t.state)
+            if n != t.state {
+                let front = NSWorkspace.shared.frontmostApplication
+                Log.note("ACK \(tty) \(t.state.rawValue)→\(n.rawValue) because looking at \(seen.app)#\(seen.wid); front=\(front?.localizedName ?? "?") focused=\(front.flatMap { Selection.focusedWID(pid: $0.processIdentifier) }.map(String.init) ?? "nil")")
+            }
             if n != t.state { changed = true; tabs[tty] = n == .idle ? nil : Tab(state: n, agentPID: t.agentPID, agent: t.agent, placements: t.placements) }
         }
         if changed { render() }
@@ -68,6 +92,7 @@ final class Engine {
     private func reapDeadAgents() {
         let dead = tabs.filter { !ProcTree.alive($0.value.agentPID) }.map(\.key)
         guard !dead.isEmpty else { return }
+        for d in dead { Log.note("REAP \(d) \(tabs[d]?.state.rawValue ?? "?") agent pid \(tabs[d]?.agentPID ?? 0) is gone") }
         dead.forEach { tabs[$0] = nil; resolver.forget($0) }
         render()
     }
@@ -93,6 +118,7 @@ final class Engine {
             g.state = s
         }
         updateEdge()
+        save()
         StatusFile.write(tabs: tabs, glows: glows)
     }
 
@@ -159,9 +185,14 @@ enum StatusFile {
 }
 
 enum Log {
+    static func note(_ s: String) {
+        guard ProcessInfo.processInfo.environment["SHOWORK_DEBUG"] != nil else { return }
+        let f = DateFormatter(); f.dateFormat = "HH:mm:ss"
+        FileHandle.standardError.write(Data("[\(f.string(from: Date()))] \(s)\n".utf8))
+    }
     static func event(_ m: WireMessage, looking: Bool, result: WorkState, placements: [Placement]) {
         guard ProcessInfo.processInfo.environment["SHOWORK_DEBUG"] != nil else { return }
         let ws = placements.map { "\($0.app)#\($0.wid)" }.joined(separator: ",")
-        FileHandle.standardError.write(Data("[\(Date())] \(m.agent) \(m.tty) \(m.event.rawValue) looking=\(looking) → \(result.rawValue) [\(ws)]\n".utf8))
+        note("EVT \(m.agent) \(m.tty) pid=\(m.pid) \(m.event.rawValue) looking=\(looking) → \(result.rawValue) [\(ws)]")
     }
 }

@@ -103,7 +103,7 @@ def install_agent():
   <key>ProgramArguments</key><array><string>{AGENT}</string></array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
-  <key>ProcessType</key><string>Interactive</string>
+  <key>ProcessType</key><string>Interactive</string>{"" if not os.environ.get("SHOWORK_DEBUG") else chr(10) + "  <key>EnvironmentVariables</key><dict><key>SHOWORK_DEBUG</key><string>1</string></dict>"}
   <key>StandardErrorPath</key><string>{SUPPORT}/agent.log</string>
 </dict></plist>
 """

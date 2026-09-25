@@ -11,9 +11,9 @@ struct StateMachineTests {
         #expect(StateMachine.next(s, on: .clear, userIsLooking: false) == .idle)
     }
 
-    @Test("a turn that finishes while you watch needs no reminder", arguments: WorkState.allCases)
+    @Test("done stays gold even if the window is in front (cleared only by a key/click)", arguments: WorkState.allCases)
     func doneWhileLooking(from s: WorkState) {
-        #expect(StateMachine.next(s, on: .done, userIsLooking: true) == .idle)
+        #expect(StateMachine.next(s, on: .done, userIsLooking: true) == .done)
     }
 
     @Test("red stays red even while looking — the AI is blocked on you")

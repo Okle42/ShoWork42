@@ -31,12 +31,12 @@ public enum WorkEvent: String, Codable, Sendable, CaseIterable {
 
 /// Pure state transitions, so they can be tested without any UI.
 public enum StateMachine {
-    /// - Parameter userIsLooking: the tab is selected AND its window is focused right now.
-    ///   A turn that finishes while you're watching it needs no reminder.
+    /// - Parameter userIsLooking: kept for adapters/tests; the glow no longer auto-clears on focus alone
+    ///   (09-26: a focused window is not proof you saw it — clear only on a key/click inside it).
     public static func next(_ current: WorkState, on event: WorkEvent, userIsLooking: Bool) -> WorkState {
         switch event {
         case .working: return .working
-        case .done: return userIsLooking ? .idle : .done
+        case .done: return .done            // Keng: stays gold until a key/click in that window, even if it's in front
         case .input: return .input          // red even while looking: the AI is blocked on you
         case .clear: return .idle
         }
