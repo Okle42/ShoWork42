@@ -5,7 +5,7 @@ import ShoWorkCore
 // MARK: - Look — colours and styles come from GlowSettings (the settings panel)
 
 enum Look {
-    static let pad: CGFloat = 64            // room for the glow to fade out completely (no hard edge at the overlay border)
+    static let pad: CGFloat = 100           // room for the widest glow (width 2×) to fade out completely — no hard edge
     static let spread: CGFloat = 12
     static let corner: CGFloat = 12
 
@@ -25,6 +25,10 @@ final class GlowView: NSView {
     private(set) var state: WorkState = .idle
     private var look: StateLook?
     private var builtSize: CGSize = .zero
+    private var bf: CGFloat = 1          // brightness factor (settings)
+    private var wf: CGFloat = 1          // width factor (settings)
+    private func A(_ a: CGFloat) -> CGFloat { min(1, a * bf) }          // alpha scaled by brightness
+    private func A(_ a: Float) -> Float { min(1, a * Float(bf)) }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -63,7 +67,8 @@ final class GlowView: NSView {
         edge.removeAllAnimations()
         guard let look, state != .idle, bounds.width > 2 * Look.pad else { edge.strokeColor = nil; edge.shadowColor = nil; return }
         let c = look.color
-        edge.strokeColor = c.withAlphaComponent(0.95).cgColor; edge.shadowColor = c.cgColor
+        bf = look.b; wf = look.w
+        edge.strokeColor = c.withAlphaComponent(A(0.95)).cgColor; edge.shadowColor = c.cgColor; edge.shadowOpacity = A(Float(0.9))
         let still = Look.reduceMotion
         let k = look.period
         switch still ? .breathe : look.style {
@@ -80,16 +85,16 @@ final class GlowView: NSView {
     private func breathe(_ c: NSColor, k: Double, still: Bool) {
         let halo = CAShapeLayer()
         halo.frame = bounds; halo.path = outlinePath(); halo.fillColor = nil
-        halo.strokeColor = c.withAlphaComponent(0.35).cgColor; halo.lineWidth = 6
-        halo.shadowColor = c.cgColor; halo.shadowOpacity = 1; halo.shadowOffset = .zero; halo.shadowRadius = Look.spread
+        halo.strokeColor = c.withAlphaComponent(A(0.35)).cgColor; halo.lineWidth = 6 * wf
+        halo.shadowColor = c.cgColor; halo.shadowOpacity = A(Float(0.9)); halo.shadowOffset = .zero; halo.shadowRadius = Look.spread * wf
         fx.addSublayer(halo)
         guard !still else { return }
         let g = CAAnimationGroup()
         // Keng 09-26: "太延伸、末端有一層" — keep the widest breath (radius 20 ⇒ visible ~2×20pt) well inside
         // the 64pt pad so it fades to nothing instead of being cut at the overlay's edge
-        let radius = CABasicAnimation(keyPath: "shadowRadius"); radius.fromValue = Look.spread * 0.75; radius.toValue = Look.spread * 1.65
-        let bright = CABasicAnimation(keyPath: "shadowOpacity"); bright.fromValue = 0.55; bright.toValue = 0.95
-        let width = CABasicAnimation(keyPath: "lineWidth"); width.fromValue = 4; width.toValue = 8
+        let radius = CABasicAnimation(keyPath: "shadowRadius"); radius.fromValue = Look.spread * 0.75 * wf; radius.toValue = Look.spread * 1.65 * wf
+        let bright = CABasicAnimation(keyPath: "shadowOpacity"); bright.fromValue = A(Float(0.55)); bright.toValue = A(Float(0.95))
+        let width = CABasicAnimation(keyPath: "lineWidth"); width.fromValue = 4 * wf; width.toValue = 8 * wf
         g.animations = [radius, bright, width]
         g.duration = 1.6 * k; g.autoreverses = true; g.repeatCount = .infinity
         g.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
@@ -134,21 +139,21 @@ final class GlowView: NSView {
     // B. 流光繞行 — a bright arc runs around the frame
     private func orbit(_ c: NSColor, k: Double) {
         let base = CAShapeLayer()
-        base.frame = bounds; base.path = outlinePath(); base.fillColor = nil; base.strokeColor = c.withAlphaComponent(0.25).cgColor
-        base.lineWidth = 6; base.shadowColor = c.cgColor; base.shadowOpacity = 0.7; base.shadowOffset = .zero; base.shadowRadius = 10
+        base.frame = bounds; base.path = outlinePath(); base.fillColor = nil; base.strokeColor = c.withAlphaComponent(A(0.25)).cgColor
+        base.lineWidth = 6 * wf; base.shadowColor = c.cgColor; base.shadowOpacity = A(Float(0.7)); base.shadowOffset = .zero; base.shadowRadius = 10 * wf
         fx.addSublayer(base)
-        let holder = CALayer(); holder.frame = bounds
+        let holder = CALayer(); holder.frame = bounds; holder.opacity = A(Float(1))
         holder.addSublayer(spinningConic([.clear, .clear, c.withAlphaComponent(0.6), c, .white.withAlphaComponent(0.9), .clear],
                                          stops: [0, 0.62, 0.8, 0.9, 0.93, 1], period: 3.4 * k))
-        holder.mask = featherMask(inner: -2, outer: 30)
+        holder.mask = featherMask(inner: -2, outer: 30 * wf)
         fx.addSublayer(holder)
     }
 
     // C. 漣漪外擴 — rings leave the frame and fade
     private func ripple(_ c: NSColor, k: Double) {
         let base = CAShapeLayer()
-        base.frame = bounds; base.path = outlinePath(); base.fillColor = nil; base.strokeColor = c.withAlphaComponent(0.4).cgColor
-        base.lineWidth = 6; base.shadowColor = c.cgColor; base.shadowOpacity = 0.9; base.shadowOffset = .zero; base.shadowRadius = 12
+        base.frame = bounds; base.path = outlinePath(); base.fillColor = nil; base.strokeColor = c.withAlphaComponent(A(0.4)).cgColor
+        base.lineWidth = 6 * wf; base.shadowColor = c.cgColor; base.shadowOpacity = A(Float(0.9)); base.shadowOffset = .zero; base.shadowRadius = 12 * wf
         fx.addSublayer(base)
         let d = 3.0 * k
         for i in 0..<3 {
@@ -157,8 +162,8 @@ final class GlowView: NSView {
             r.strokeColor = c.cgColor; r.lineWidth = 2; r.opacity = 0
             r.shadowColor = c.cgColor; r.shadowOpacity = 1; r.shadowOffset = .zero; r.shadowRadius = 4
             let grow = CABasicAnimation(keyPath: "path")
-            grow.fromValue = outlinePath(); grow.toValue = outlinePath(outline.insetBy(dx: -(Look.pad - 6), dy: -(Look.pad - 6)))
-            let fade = CABasicAnimation(keyPath: "opacity"); fade.fromValue = 0.9; fade.toValue = 0
+            grow.fromValue = outlinePath(); grow.toValue = outlinePath(outline.insetBy(dx: -40 * wf, dy: -40 * wf))
+            let fade = CABasicAnimation(keyPath: "opacity"); fade.fromValue = A(Float(0.9)); fade.toValue = 0
             let g = CAAnimationGroup(); g.animations = [grow, fade]; g.duration = d; g.repeatCount = .infinity
             g.timingFunction = CAMediaTimingFunction(name: .easeOut)
             g.beginTime = CACurrentMediaTime() + Double(i) * d / 3
@@ -175,10 +180,10 @@ final class GlowView: NSView {
         let light = c.blended(withFraction: 0.35, of: .white) ?? c
         for (i, p) in spots.enumerated() {
             let b = CALayer()
-            let w = min(o.width, o.height) * 0.55
+            let w = min(o.width, o.height) * 0.55 * min(wf, 1.4)
             b.frame = CGRect(x: p.x - w / 2, y: p.y - w * 0.3, width: w, height: w * 0.6)
             b.shadowPath = CGPath(ellipseIn: CGRect(origin: .zero, size: b.frame.size), transform: nil)
-            b.shadowColor = (i % 2 == 0 ? c : light).cgColor; b.shadowOpacity = 0.75; b.shadowRadius = 26; b.shadowOffset = .zero
+            b.shadowColor = (i % 2 == 0 ? c : light).cgColor; b.shadowOpacity = A(Float(0.75)); b.shadowRadius = 26 * wf; b.shadowOffset = .zero
             let m = CABasicAnimation(keyPath: "position")
             m.fromValue = b.position
             m.toValue = CGPoint(x: b.position.x + CGFloat([22, -18, 16, -20][i]), y: b.position.y + CGFloat([-12, 14, 10, -14][i]))
@@ -192,8 +197,8 @@ final class GlowView: NSView {
     // E. 微光粒子 — sparks float off the frame and fade
     private func sparkle(_ c: NSColor, k: Double) {
         let base = CAShapeLayer()
-        base.frame = bounds; base.path = outlinePath(); base.fillColor = nil; base.strokeColor = c.withAlphaComponent(0.35).cgColor
-        base.lineWidth = 5; base.shadowColor = c.cgColor; base.shadowOpacity = 0.8; base.shadowOffset = .zero; base.shadowRadius = 10
+        base.frame = bounds; base.path = outlinePath(); base.fillColor = nil; base.strokeColor = c.withAlphaComponent(A(0.35)).cgColor
+        base.lineWidth = 5 * wf; base.shadowColor = c.cgColor; base.shadowOpacity = A(Float(0.8)); base.shadowOffset = .zero; base.shadowRadius = 10 * wf
         fx.addSublayer(base)
         let e = CAEmitterLayer()
         e.frame = bounds
@@ -207,10 +212,11 @@ final class GlowView: NSView {
         cell.contents = dot.cgImage(forProposedRect: nil, context: nil, hints: nil)
         cell.color = (c.blended(withFraction: 0.3, of: .white) ?? c).cgColor
         cell.birthRate = Float(10 / k); cell.lifetime = Float(2.6 * k)
-        cell.velocity = 14; cell.velocityRange = 8; cell.emissionRange = .pi * 2
+        cell.velocity = 14 * wf; cell.velocityRange = 8 * wf; cell.emissionRange = .pi * 2
         cell.scale = 0.45; cell.scaleRange = 0.25; cell.alphaSpeed = -Float(0.38 / k)
         e.emitterCells = [cell]
-        e.shadowColor = c.cgColor; e.shadowOpacity = 1; e.shadowRadius = 4; e.shadowOffset = .zero
+        e.shadowColor = c.cgColor; e.shadowOpacity = A(Float(1)); e.shadowRadius = 4; e.shadowOffset = .zero
+        e.opacity = A(Float(1))
         fx.addSublayer(e)
     }
 
@@ -218,10 +224,10 @@ final class GlowView: NSView {
     private func aurora(_ c: NSColor, k: Double) {
         let light = c.blended(withFraction: 0.45, of: .white) ?? c
         let deep = c.blended(withFraction: 0.35, of: .black) ?? c
-        let holder = CALayer(); holder.frame = bounds
+        let holder = CALayer(); holder.frame = bounds; holder.opacity = A(Float(0.85))
         holder.addSublayer(spinningConic([c, light, deep, c, light, deep, c],
                                          stops: [0, 0.17, 0.33, 0.5, 0.67, 0.83, 1], period: 9 * k))
-        holder.mask = featherMask(inner: -2, outer: 34)
+        holder.mask = featherMask(inner: -2, outer: 34 * wf)
         fx.addSublayer(holder)
     }
 }
@@ -289,9 +295,10 @@ final class Glow {
         ring.path = CGPath(roundedRect: ring.frame.insetBy(dx: 1.5, dy: 1.5), cornerWidth: Look.corner - 1,
                            cornerHeight: Look.corner - 1, transform: nil)
         ring.fillColor = nil
-        ring.strokeColor = c.withAlphaComponent(0.95).cgColor
+        let bright = CGFloat(GlowSettings.shared.look(s).b)
+        ring.strokeColor = c.withAlphaComponent(min(1, 0.95 * bright)).cgColor
         ring.lineWidth = 3
-        ring.shadowColor = c.cgColor; ring.shadowRadius = 8; ring.shadowOpacity = 1; ring.shadowOffset = .zero
+        ring.shadowColor = c.cgColor; ring.shadowRadius = 8; ring.shadowOpacity = Float(min(1, bright)); ring.shadowOffset = .zero
         l.addSublayer(ring)
         guard !Look.reduceMotion else { return }
         let a = CABasicAnimation(keyPath: "opacity")
