@@ -1,3 +1,5 @@
 spikes/**/m0_glow
 .DS_Store
 .build/
+spikes/**/m0_verify
+docs/*.log
