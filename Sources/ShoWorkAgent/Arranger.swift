@@ -111,9 +111,11 @@ final class Arranger {
         ProcessInfo.processInfo.environment["SHOWORK_ONLY_WIDS"].map { Set($0.split(separator: ",").compactMap { CGWindowID($0) }) }
     }
 
+    /// `pairs` lets a caller act on exactly the plan it already showed (a new window still sliding
+    /// into place can change the reading order between two plan() calls — M1b n=10 bug).
     @discardableResult
-    func arrange() -> Bool {
-        let pairs = plan()
+    func arrange(_ given: [(Target, CGRect)]? = nil) -> Bool {
+        let pairs = given ?? plan()
         let ts = pairs.map(\.0)
         let frames = pairs.map(\.1)
         if let allow = Arranger.onlyWIDs {

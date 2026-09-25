@@ -22,7 +22,7 @@ if argv.count >= 2, argv[1] == "--arrange-once" {
             FileHandle.standardError.write(Data("--arrange-once requires SHOWORK_ONLY_WIDS\n".utf8)); exit(3)
         }
         let p = a.plan()
-        guard a.arrange() else { exit(4) }
+        guard a.arrange(p) else { exit(4) }
         for (t, f) in p { print(AXQuery.wid(t.el), Int(f.minX), Int(f.minY), Int(f.width), Int(f.height)) }
         exit(0)
     }

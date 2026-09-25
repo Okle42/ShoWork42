@@ -1,35 +1,46 @@
 #!/bin/zsh
-# M1b e2e: arrange 1…11 terminal windows (Ghostty + Terminal + iTerm2 mixed) and check the real
-# frames against the plan. Runs on an EMPTY Space and refuses to arrange if any window that the
-# test did not open is on screen — it must never move the user's own windows.
+# M1b e2e: arrange 1…11 terminal windows (Ghostty + Terminal + iTerm2 mixed) on an EMPTY Space and
+# compare real frames with the plan.
+#
+# SAFETY (after the 09-26 incidents, see memory feedback_排版測試不可搬使用者視窗):
+#   • the user's terminal windows on ALL Spaces are snapshotted first (FORBID) and diffed at the end
+#   • no "adopt unknown windows" logic anywhere; Terminal/iTerm2 are only used if they were NOT running
+#   • before every arrange: every on-screen terminal window must be ours, otherwise ABORT the whole test
+#   • the agent itself enforces SHOWORK_ONLY_WIDS (code-level whitelist) — belt and braces
 set -u
 ROOT=${0:A:h:h:h}
 AG=$ROOT/.build/debug/ShoWorkAgent
-AXT=$ROOT/spikes/m0_glow/axtitle
+WB=$ROOT/spikes/m0_glow/wbounds
 ST=$(mktemp -d /tmp/sw42-lay.XXXX)
 MAXN=${1:-11}
 pass=0 fail=0
 ok()  { (( pass++ )); print "ok   $*"; }
 bad() { (( fail++ )); print "FAIL $*"; }
+strings $AG | grep -q 'requires SHOWORK_ONLY_WIDS' || { print "ABORT: agent binary lacks the whitelist guard — rebuild first"; exit 1; }
+
 running() { osascript -e "tell application \"System Events\" to (name of processes) contains \"$1\"" 2>/dev/null; }
 TERM_WAS=$(running Terminal); ITERM_WAS=$(running iTerm2)
-typeset -a MINE      # wids we opened
-space() { osascript -e "tell application \"System Events\" to key code $1 using control down" >/dev/null; sleep 1.6; }
-count_now() { $AG --arrange-dry 2>/dev/null | sed -n 's/.*windows \([0-9]*\).*/\1/p'; }
-foreign() {          # any on-screen terminal window that is not ours?
-  local w
-  for w in $($AG --arrange-dry 2>/dev/null | awk 'NR>1{print $2}'); do (( ${MINE[(Ie)$w]} )) || { print $w; return 0; }; done
-  return 1
+
+# FORBID: every terminal window on every Space, with full frames
+cat > $ST/allwins.swift <<'EOF'
+import CoreGraphics
+let owners: Set<String> = ["Ghostty", "Terminal", "iTerm2", "終端機"]
+for w in (CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]]) ?? [] {
+  guard owners.contains(w[kCGWindowOwnerName as String] as? String ?? ""), (w[kCGWindowLayer as String] as? Int) == 0,
+        let b = w[kCGWindowBounds as String] as? [String: Any], (b["Width"] as? Double ?? 0) > 200 else { continue }
+  print(w[kCGWindowNumber as String]!, Int(b["X"] as! Double), Int(b["Y"] as! Double), Int(b["Width"] as! Double), Int(b["Height"] as! Double))
 }
+EOF
+swiftc -O -o $ST/allwins $ST/allwins.swift 2>/dev/null || { print "ABORT: helper build failed"; exit 1; }
+$ST/allwins | sort > $ST/forbid.before
+typeset -a FORBID MINE
+FORBID=($(awk '{print $1}' $ST/forbid.before))
+print "   protecting ${#FORBID} existing terminal windows"
 
-# ── find an empty Space (right, else left)
-BACK=123
-space 124
-if (( $(count_now) != 0 )); then space 123; space 123; BACK=124
-  if (( $(count_now) != 0 )); then space 124; print "ABORT: no empty Space found — refusing to touch your windows"; exit 1; fi
-fi
-ok "on an empty Space"
+space() { osascript -e "tell application \"System Events\" to key code $1 using control down" >/dev/null; sleep 1.6; }
+onscreen() { $AG --arrange-dry 2>/dev/null | awk 'NR>1{print $2}'; }
 
+abort() { print "ABORT: $1"; exit 1; }
 cleanup() {
   osascript -e 'tell application "Ghostty"
     set ids to id of (every window whose name starts with "SW42L")
@@ -37,53 +48,66 @@ cleanup() {
       close window (first window whose id is (contents of i))
     end repeat
   end tell' >/dev/null 2>&1
-  [[ $TERM_WAS == false ]] && osascript -e 'tell application id "com.apple.Terminal" to close every window saving no' >/dev/null 2>&1
-  [[ $ITERM_WAS == false ]] && osascript -e 'tell application id "com.googlecode.iterm2" to close every window' >/dev/null 2>&1
-  for id in ${MINE[@]}; do
-    osascript -e "tell application id \"com.apple.Terminal\" to close (every window whose id is $id) saving no" >/dev/null 2>&1
-    osascript -e "tell application id \"com.googlecode.iterm2\" to close (every window whose id is $id)" >/dev/null 2>&1
-  done
-  sleep 1
-  [[ $TERM_WAS == false ]] && osascript -e 'tell application id "com.apple.Terminal" to quit' >/dev/null 2>&1
+  [[ $TERM_WAS == false ]] && osascript -e 'tell application id "com.apple.Terminal" to quit saving no' >/dev/null 2>&1
   [[ $ITERM_WAS == false ]] && osascript -e 'tell application id "com.googlecode.iterm2" to quit' >/dev/null 2>&1
-  space $BACK
+  sleep 1.5
+  # the user's windows must be exactly where they were
+  $ST/allwins | sort > $ST/forbid.after
+  local moved=$(join $ST/forbid.before $ST/forbid.after | awk '$2!=$6||$3!=$7||$4!=$8||$5!=$9')
+  if [[ -z $moved ]]; then print "ok   none of your ${#FORBID} windows moved"; else print "FAIL your windows moved:"; print $moved; fi
+  [[ -n ${BACK:-} ]] && space $BACK
   rm -rf $ST
 }
 trap cleanup EXIT INT TERM
 
-open_one() {   # open_one <i> : Ghostty, except #3 Terminal.app and #5 iTerm2 (mixed apps)
-  local i=$1 f=$ST/tty$1
-  case $i in
-    3) osascript -e "tell application id \"com.apple.Terminal\" to do script \"tty > $f\"" >/dev/null ;;
-    5) osascript -e "tell application id \"com.googlecode.iterm2\" to create window with default profile command \"/bin/zsh -c 'tty > $f; exec /bin/zsh -i'\"" >/dev/null ;;
-    *) osascript -e "tell application \"Ghostty\"
-         set cfg to new surface configuration
-         set command of cfg to \"/bin/zsh -c \\\"tty > $f; exec /bin/zsh -i\\\"\"
-         new window with configuration cfg
-       end tell" >/dev/null ;;
-  esac
-  for _ in {1..30}; do [[ -s $f ]] && break; sleep 0.2; done
-  printf '\033]0;SW42L-%d\007' $i > $(<$f)
-  sleep 0.6
-  local w=$($AG --resolve $(<$f) 2>/dev/null | awk '{print $3; exit}')
-  [[ -n $w ]] && MINE+=$w
-  print "   opened #$i tty=$(<$f) wid=${w:-UNRESOLVED}" >> $ST/diag
-  # a freshly launched Terminal/iTerm2 also opens its own default window here — ours too
-  if [[ $i == 3 && $TERM_WAS == false ]] || [[ $i == 5 && $ITERM_WAS == false ]]; then
-    for x in $($AG --arrange-dry 2>/dev/null | awk 'NR>1{print $2}'); do (( ${MINE[(Ie)$x]} )) || MINE+=$x; done
-  fi
+# ── find an empty Space
+BACK=123; space 124
+if [[ -n $(onscreen) ]]; then space 123; space 123; BACK=124; [[ -z $(onscreen) ]] || abort "no empty Space found"; fi
+ok "on an empty Space"
+
+guard() {   # every on-screen terminal window must be ours
+  local w
+  for w in $(onscreen); do
+    (( ${FORBID[(Ie)$w]} )) && abort "one of YOUR windows ($w) is on screen — macOS switched Spaces"
+    (( ${MINE[(Ie)$w]} )) || abort "unknown window $w on screen"
+  done
 }
 
-check_layout() {   # check_layout <label> [style]
-  local f=$(foreign)
-  if [[ -n $f ]]; then bad "$1: foreign window $f on screen — NOT arranging"; cat $ST/diag; $AG --arrange-dry | sed 's/^/   dry: /'; return; fi
-  $AG --arrange-once ${2:-columns} > $ST/plan 2>/dev/null; sleep 1.0
-  $ROOT/spikes/m0_glow/wbounds $(awk '{print $1}' $ST/plan) > $ST/actual
-  if [[ -n ${SW42_SECOND_PASS:-} ]]; then
-    print "   1st pass: $(paste -sd' ' $ST/actual)" >> $ST/diag
-    $AG --arrange-once ${2:-columns} > /dev/null 2>&1; sleep 1.0
-    $ROOT/spikes/m0_glow/wbounds $(awk '{print $1}' $ST/plan) > $ST/actual
-  fi
+open_one() {   # Ghostty; #3 Terminal.app and #5 iTerm2 only if the test launches them itself
+  local i=$1 f=$ST/tty$1 app=ghostty
+  # Terminal/iTerm2 are NOT mixed in: macOS puts a background app's new windows on the Space it
+  # already lives on, so they never appear on the empty test Space (M1b finding). Their AX
+  # move/resize is covered by M0 ⑥⑦ (60 rounds each); the arranger code path is app-agnostic.
+  [[ -n ${SW42_MIX_APPS:-} && $i == 3 && $TERM_WAS == false ]] && app=terminal
+  [[ -n ${SW42_MIX_APPS:-} && $i == 5 && $ITERM_WAS == false ]] && app=iterm
+  case $app in
+    terminal) osascript -e "tell application id \"com.apple.Terminal\" to do script \"tty > $f\"" >/dev/null ;;
+    iterm)    osascript -e "tell application id \"com.googlecode.iterm2\" to create window with default profile command \"/bin/zsh -c 'tty > $f; exec /bin/zsh -i'\"" >/dev/null ;;
+    ghostty)  osascript -e "tell application \"Ghostty\"
+                set cfg to new surface configuration
+                set command of cfg to \"/bin/zsh -c \\\"tty > $f; exec /bin/zsh -i\\\"\"
+                new window with configuration cfg
+              end tell" >/dev/null ;;
+  esac
+  for _ in {1..30}; do [[ -s $f ]] && break; sleep 0.2; done
+  printf '\033]0;SW42L-%d\007' $i > $(<$f); sleep 0.6
+  case $app in      # these apps were NOT running before the test ⇒ every window they own is ours
+    terminal) MINE+=($(osascript -e 'tell application id "com.apple.Terminal" to get id of windows' | tr -d ',')) ;;
+    iterm)    MINE+=($(osascript -e 'tell application id "com.googlecode.iterm2" to get id of windows' | tr -d ',')) ;;
+    ghostty)  local w=$($AG --resolve $(<$f) 2>/dev/null | awk '{print $3; exit}'); [[ -n $w ]] && MINE+=$w ;;
+  esac
+}
+
+check() {   # check <label> [style]
+  guard
+  SHOWORK_ONLY_WIDS=${(j:,:)MINE} $AG --arrange-once ${2:-columns} > $ST/plan 2>$ST/err; local rc=$?
+  (( rc == 0 )) || { bad "$1: agent refused/failed rc=$rc $(<$ST/err)"; return; }
+  local want=${1#n=}; want=${want%% *}
+  local got=$(wc -l < $ST/plan | tr -d ' ')
+  (( got == want )) || { bad "$1: arranged $got windows, expected $want (some test windows are not on this Space)"; return; }
+  sleep 1.0
+  [[ -n ${SW42_SHOTS:-} ]] && screencapture -x "$SW42_SHOTS/${1// /_}.png"
+  $WB $(awk '{print $1}' $ST/plan) > $ST/actual
   python3 - $ST/plan $ST/actual <<'PY' && ok "$1" || bad "$1"
 import sys
 plan = {l.split()[0]: list(map(int, l.split()[1:])) for l in open(sys.argv[1]) if l.strip()}
@@ -93,7 +117,6 @@ for wid, (x, y, w, h) in plan.items():
     a = act.get(wid, ["gone"])
     if a[0] == "gone": errs.append(f"{wid} gone"); continue
     X, Y, W, H = map(int, a)
-    # origin exact (±3); size may shrink to the terminal's cell grid (≤25) but never grow (≤3)
     if abs(X-x) > 3 or abs(Y-y) > 3 or not (-25 <= W-w <= 3) or not (-25 <= H-h <= 3):
         errs.append(f"{wid} want {x},{y} {w}x{h} got {X},{Y} {W}x{H}")
 if not plan: errs.append("empty plan")
@@ -103,8 +126,7 @@ PY
 
 for n in $(seq 1 $MAXN); do
   open_one $n
-  if (( n == 4 )); then check_layout "n=4 columns" columns; check_layout "n=4 grid" grid; check_layout "n=4 back to columns" columns
-  else check_layout "n=$n"; fi
+  if (( n == 4 )); then check "n=4 columns" columns; check "n=4 grid" grid; check "n=4 back to columns" columns
+  else check "n=$n"; fi
 done
-[[ -n ${SW42_SECOND_PASS:-} ]] && sed 's/^/   /' $ST/diag | grep -E '1st pass' | tail -3
 print "RESULT pass=$pass fail=$fail"
