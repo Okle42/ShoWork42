@@ -13,3 +13,4 @@ spikes/**/tmux_resolve
 spikes/**/axraise
 spikes/**/wbounds
 spikes/**/setframe
+docs/decisions/img/
