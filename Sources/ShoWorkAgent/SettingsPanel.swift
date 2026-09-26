@@ -8,31 +8,24 @@ import ShoWorkCore
 // everything applies the moment you change it.
 
 enum SettingsTab: String, CaseIterable {
-    case working, done, input, layout, about
+    case glow, layout, about
     var title: String {
         switch self {
-        case .working: "工作中"
-        case .done: "已完成"
-        case .input: "等你回答"
+        case .glow: "光暈"
         case .layout: "排版"
         case .about: "關於與檢查"
         }
     }
     var symbol: String {
         switch self {
-        case .working: "sparkles"
-        case .done: "checkmark.circle"
-        case .input: "exclamationmark.bubble"
+        case .glow: "sparkles"
         case .layout: "rectangle.3.group"
         case .about: "stethoscope"
         }
     }
-    var state: WorkState? {
-        switch self { case .working: .working; case .done: .done; case .input: .input; default: nil }
-    }
     static let key = "settings.tab"
     static var last: SettingsTab {
-        (UserDefaults(suiteName: "ai.okle42.showork")?.string(forKey: key)).flatMap(SettingsTab.init(rawValue:)) ?? .working
+        (UserDefaults(suiteName: "ai.okle42.showork")?.string(forKey: key)).flatMap(SettingsTab.init(rawValue:)) ?? .glow   // old "working/done/input" ⇒ glow
     }
 }
 
@@ -95,28 +88,33 @@ struct SettingsPage: View {
     let tab: SettingsTab
     var body: some View {
         Group {
-            if let s = tab.state { StatePage(state: s) }
+            if tab == .glow { GlowPage() }
             else if tab == .layout { LayoutPage() }
             else { AboutPage() }
         }
-        .frame(width: 560)
+        .frame(width: 620)
     }
 }
 
-/// One state: on/off, colour, style, speed, brightness, width + a big live preview (the real GlowView).
-struct StatePage: View {
-    let state: WorkState
+/// Keng 09-26: all three states on ONE page. Three live preview cards side by side (name + on/off each);
+/// click a card to tune that state below — colour, style, brightness, width, speed.
+struct GlowPage: View {
     @ObservedObject private var glow = GlowSettings.shared
+    @State private var state: WorkState = .working
+    private let states: [WorkState] = [.working, .done, .input]
 
-    private var hint: String {
-        switch state {
+    private func name(_ s: WorkState) -> String {
+        switch s { case .working: "工作中"; case .done: "已完成"; case .input: "等你回答"; case .idle: "" }
+    }
+    private func hint(_ s: WorkState) -> String {
+        switch s {
         case .working: "AI 正在處理時，視窗外圍的光。"
-        case .done: "AI 做完了、等你來看時的光。點進那個視窗、在裡面按鍵或點擊就會消失。"
-        case .input: "AI 卡住在等你回覆或允許權限時的光。要等 AI 繼續才會消失。"
+        case .done: "AI 做完了、等你來看時的光。在那個視窗裡按鍵或點擊就會消失。"
+        case .input: "AI 在等你回覆或允許權限時的光。要等 AI 繼續才會消失。"
         case .idle: ""
         }
     }
-    private var look: Binding<StateLook> { Binding(get: { glow.look(state) }, set: { glow.looks[state] = $0 }) }
+    private func look(_ s: WorkState) -> Binding<StateLook> { Binding(get: { glow.look(s) }, set: { glow.looks[s] = $0 }) }
     private var color: Binding<Color> {
         Binding(get: { Color(nsColor: glow.look(state).color) },
                 set: { var l = glow.look(state); l.hex = StateLook.hex(NSColor($0)); glow.looks[state] = l })
@@ -125,36 +123,52 @@ struct StatePage: View {
     var body: some View {
         Form {
             Section {
-                GlowPreview(state: state, look: glow.look(state))
-                    .frame(maxWidth: .infinity).frame(height: 190)
-                    .opacity(glow.look(state).enabled ? 1 : 0.3)
-                    .accessibilityLabel("光芒預覽")
-            } footer: { Text(hint).foregroundStyle(.secondary) }
+                HStack(spacing: 12) { ForEach(states, id: \.self) { card($0) } }
+            } footer: { Text(hint(state)).foregroundStyle(.secondary) }
 
-            Section {
-                Toggle("顯示這個狀態的光", isOn: look.enabled).toggleStyle(.switch).controlSize(.mini)
-            }
-            Section("外觀") {
+            Section("\(name(state))　外觀") {
                 ColorPicker("顏色", selection: color, supportsOpacity: false)
-                Picker("款式", selection: look.style) { ForEach(GlowStyle.allCases) { Text($0.title).tag($0) } }
-                slider("亮度", look.brightness, 0.3...1.6, low: "淡", high: "亮")
-                slider("寬度", look.width, 0.5...2, low: "窄", high: "寬")
-                slider("速度", look.speed, 0.4...2.5, low: "慢", high: "快")
+                Picker("款式", selection: look(state).style) { ForEach(GlowStyle.allCases) { Text($0.title).tag($0) } }
+                slider("亮度", look(state).brightness, 0.3...1.6, low: "淡", high: "亮")
+                slider("寬度", look(state).width, 0.5...2, low: "窄", high: "寬")
+                slider("速度", look(state).speed, 0.4...2.5, low: "慢", high: "快")
             }
             .disabled(!glow.look(state).enabled)
             Section {
-                HStack { Spacer(); Button("回復這一頁的預設值") { glow.looks[state] = GlowSettings.defaults[state] } }
+                HStack { Spacer(); Button("回復「\(name(state))」的預設值") { glow.looks[state] = GlowSettings.defaults[state] } }
             }
         }
         .formStyle(.grouped)
-        .frame(height: 620)
+        .frame(height: 560)
+    }
+
+    private func card(_ s: WorkState) -> some View {
+        let selected = s == state
+        return VStack(spacing: 8) {
+            GlowPreview(state: s, look: glow.look(s))
+                .frame(height: 118)
+                .opacity(glow.look(s).enabled ? 1 : 0.3)
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(selected ? Color.accentColor : .clear, lineWidth: 2))
+                .contentShape(Rectangle())
+                .onTapGesture { state = s }
+                .accessibilityElement().accessibilityLabel("\(name(s))光芒預覽").accessibilityAddTraits(.isButton)
+                .accessibilityAction { state = s }
+            HStack {
+                Text(name(s)).fontWeight(selected ? .semibold : .regular)
+                Spacer()
+                Toggle("顯示\(name(s))的光", isOn: look(s).enabled).labelsHidden().toggleStyle(.switch).controlSize(.mini)
+            }
+            .contentShape(Rectangle())
+            .onTapGesture { state = s }
+        }
+        .frame(maxWidth: .infinity)
     }
 
     private func slider(_ title: String, _ v: Binding<Double>, _ r: ClosedRange<Double>, low: String, high: String) -> some View {
         LabeledContent(title) {
             HStack(spacing: 8) {
                 Text(low).font(.caption).foregroundStyle(.secondary)
-                Slider(value: v, in: r).frame(width: 200).accessibilityLabel(title)
+                Slider(value: v, in: r).frame(width: 220).accessibilityLabel(title)
                 Text(high).font(.caption).foregroundStyle(.secondary)
                 Text(String(format: "%.1f×", v.wrappedValue)).font(.body.monospacedDigit()).foregroundStyle(.secondary)
                     .frame(width: 40, alignment: .trailing)
@@ -239,7 +253,8 @@ struct GlowPreview: NSViewRepresentable {
         required init?(coder: NSCoder) { fatalError() }
         override func layout() {
             super.layout()
-            let w = CGRect(x: bounds.midX - 110, y: bounds.midY - 55, width: 220, height: 110)
+            let ww = min(220, bounds.width * 0.5), wh = min(110, bounds.height * 0.45)   // small cards on the glow page
+            let w = CGRect(x: bounds.midX - ww / 2, y: bounds.midY - wh / 2, width: ww, height: wh)
             win.frame = w
             glow.frame = w.insetBy(dx: -(Look.pad - 1), dy: -(Look.pad - 1))
         }
