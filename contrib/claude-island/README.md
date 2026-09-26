@@ -27,6 +27,7 @@
 
 ## 從 ShoWork42 借來的概念
 1. **tty 精準對到視窗**：hook 往上找父程序的 tty，Terminal／iTerm2 用 AppleScript 問哪個視窗（視窗 id＝CGWindowID）。
+   Ghostty 照 ShoWork42 的 OSC 7 記號法：往 tty 寫一次性記號 → AppleScript 找 `working directory` 含記號的 terminal → 用視窗名稱比對 CGWindowList（同名時暫時用 OSC 2 標題記號分辨）→ 還原工作資料夾與標題。
 2. **內側燈條**：重疊排列時外暈被蓋住，內光還在。
 3. **完成要看過才清**：切到該視窗、在裡面點擊、點膠囊、或送出新訊息才清除。
 4. **同一個視窗多個分頁取最緊急**：授權 > 完成 > 處理中。
@@ -44,7 +45,9 @@
 - ✅ macOS 13.7.8、Terminal.app、同時 6 個 Claude 分頁：對到視窗、三種狀態、看過清除、程序結束清除、選單列。
 - ✅ CPU：有處理中膠囊時約 12%（SwiftUI 小動畫 30fps），只剩完成時約 1%，全部清掉後程式結束。
 - ⚠️ iTerm2 的 AppleScript 有寫但沒實測。
-- ❌ Ghostty 沒有做對應（會退回「送出訊息當下最前面的視窗」）；ShoWork42 的 OSC 7＋AXDocument 做法可以直接套進 `Term.windowID`。
+- ✅ Ghostty 1.3.1（macOS 13.7）：OSC 7 記號對應。開兩個 Ghostty 視窗、把另一個放最前面，仍對到跑 Claude 的那個；工作資料夾有還原。點膠囊用 `focus terminal id` 跳過去。
+- ⚠️ Ghostty 讀視窗名稱需要「螢幕錄製」權限（第一次會跳詢問，權限算在 Ghostty 上）；沒給的話退回「送出訊息當下最前面的 Ghostty 視窗」。沒用 AXDocument，所以不需要輔助使用權限。
+- ⚠️ Ghostty 背景分頁（不是選中的分頁）而且多個視窗同名時，OSC 2 分辨法看不到，會退回最前面視窗。
 - ❌ 全螢幕、跨桌面、tmux 都沒處理。
 
 ## 試用

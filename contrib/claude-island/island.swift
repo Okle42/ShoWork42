@@ -85,11 +85,66 @@ enum Term {
         }
     }
 
+    // MARK: Ghostty（AppleScript 查不到 tty → 照 ShoWork42：往 tty 寫一次性 OSC 7 記號，找出帶記號的分頁）
+    static let ghosttyID = "com.mitchellh.ghostty"
+
+    static func writeTTY(_ tty: String, _ s: String) {
+        let fd = open(tty, O_WRONLY | O_NOCTTY | O_NONBLOCK)
+        guard fd >= 0 else { return }
+        _ = s.withCString { write(fd, $0, strlen($0)) }
+        close(fd)
+    }
+    static var host: String { var b = [CChar](repeating: 0, count: 256); gethostname(&b, 255); return String(cString: b) }
+
+    static func ghosttyNames(_ list: [[String: Any]], pid: pid_t) -> [(Int, String?)] {
+        list.filter { ($0[kCGWindowOwnerPID as String] as? Int32) == pid && ($0[kCGWindowLayer as String] as? Int) == 0 }
+            .compactMap { w in (w[kCGWindowNumber as String] as? Int).map { ($0, w[kCGWindowName as String] as? String) } }
+    }
+
+    /// 回傳（視窗 CGWindowID, Ghostty terminal id）
+    static func ghostty(tty: String, pid: Int32) -> (Int?, String?) {
+        guard tty.hasPrefix("/dev/tty"),
+              let app = NSRunningApplication.runningApplications(withBundleIdentifier: ghosttyID).first else { return (nil, nil) }
+        let nonce = "island-probe-\(UInt32.random(in: 100000...999999))"
+        writeTTY(tty, "\u{1b}]7;file://\(host)/\(nonce)\u{07}")
+        Thread.sleep(forTimeInterval: 0.12)
+        let r = run("""
+            tell application id "com.mitchellh.ghostty"
+              repeat with w in windows
+                repeat with t in terminals of w
+                  if working directory of t contains "\(nonce)" then return {id of t, name of w, name of t}
+                end repeat
+              end repeat
+            end tell
+            """)
+        let cwd = pid > 0 ? (processCWD(pid) ?? NSHomeDirectory()) : NSHomeDirectory()
+        writeTTY(tty, "\u{1b}]7;file://\(host)\(cwd)\u{07}")               // 還原工作資料夾
+        guard let r = r, r.numberOfItems == 3, let tid = r.atIndex(1)?.stringValue else { return (nil, nil) }
+        let wname = r.atIndex(2)?.stringValue ?? "", tname = r.atIndex(3)?.stringValue ?? ""
+        let names = ghosttyNames(windows(), pid: app.processIdentifier)
+        if names.allSatisfy({ $0.1 == nil }), !CGPreflightScreenCaptureAccess() {
+            _ = CGRequestScreenCaptureAccess()                                // 視窗標題要「螢幕錄製」權限才讀得到
+            log("Ghostty：需要螢幕錄製權限才能讀視窗標題，先用最前面的視窗")
+            return (nil, tid)
+        }
+        let same = names.filter { $0.1 == wname }.map { $0.0 }
+        if same.count == 1 { return (same[0], tid) }
+        // 好幾個視窗同名：暫時把這個分頁的標題改成記號，看是哪個視窗，再改回來
+        writeTTY(tty, "\u{1b}]2;\(nonce)\u{07}")
+        Thread.sleep(forTimeInterval: 0.15)
+        let hit = ghosttyNames(windows(), pid: app.processIdentifier).first { $0.1 == nonce }?.0
+        writeTTY(tty, "\u{1b}]2;\(tname)\u{07}")
+        return (hit, tid)
+    }
+
     /// Claude 會把分頁標題設成對話主題（前面帶 ✳ 或轉圈符號），拿來當膠囊名稱最好認
-    static func topic(bundle: String, tty: String) -> String? {
+    static func topic(bundle: String, tty: String, gid: String? = nil) -> String? {
         guard tty.hasPrefix("/dev/tty") else { return nil }
         let src: String
         switch bundle {
+        case ghosttyID:
+            guard let gid = gid else { return nil }
+            src = "tell application id \"com.mitchellh.ghostty\" to return name of terminal id \"\(gid)\""
         case "com.apple.Terminal":
             src = """
                 tell application id "com.apple.Terminal"
@@ -124,7 +179,10 @@ enum Term {
     }
 
     /// 跳到那個視窗、選到那個分頁
-    static func jump(bundle: String, tty: String) {
+    static func jump(bundle: String, tty: String, gid: String? = nil) {
+        if bundle == ghosttyID, let gid = gid {
+            _ = run("tell application id \"com.mitchellh.ghostty\" to focus terminal id \"\(gid)\"")
+        }
         if let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundle).first {
             app.activate(options: [.activateIgnoringOtherApps])
         }
@@ -202,6 +260,7 @@ final class Session: ObservableObject, Identifiable {
     var tty: String
     var pid: Int32
     var wid: Int?
+    var gid: String?          // Ghostty 的 terminal id
     var lastEvent = Date()
     var folder = ""
     var pending: DispatchWorkItem?
@@ -225,7 +284,7 @@ final class Session: ObservableObject, Identifiable {
         if p.phase == .hidden { hub?.remove(self, "SessionEnd"); return }
         pending?.cancel()
         if !p.project.isEmpty { folder = p.project }
-        project = Term.topic(bundle: bundle, tty: tty) ?? folder
+        project = Term.topic(bundle: bundle, tty: tty, gid: gid) ?? folder
         withAnimation(spring) {
             compact = false
             switch p.phase {
@@ -249,7 +308,7 @@ final class Session: ObservableObject, Identifiable {
     }
 
     func tapped() {
-        Term.jump(bundle: bundle, tty: tty)
+        Term.jump(bundle: bundle, tty: tty, gid: gid)
         if phase == .done { hub?.remove(self, "點膠囊") }
     }
 }
@@ -281,10 +340,12 @@ final class Hub: NSObject, ObservableObject {
         if let s = sessions.first(where: { $0.id == p.session }) { s.apply(p); return }
         guard p.phase == .running || p.phase == .waiting || p.phase == .done else { return }
         let s = Session(id: p.session, bundle: p.bundle, tty: p.tty, pid: p.pid, hub: self)
-        s.wid = Term.windowID(bundle: p.bundle, tty: p.tty)
+        if p.bundle == Term.ghosttyID { (s.wid, s.gid) = Term.ghostty(tty: p.tty, pid: p.pid) }
+        else { s.wid = Term.windowID(bundle: p.bundle, tty: p.tty) }
+        s.wid = s.wid
             ?? NSRunningApplication.runningApplications(withBundleIdentifier: p.bundle).first
                 .flatMap { Term.frontWindow(pid: $0.processIdentifier, in: Term.windows()) }
-        log("新增 \(Term.topic(bundle: p.bundle, tty: p.tty) ?? p.project) tty=\(p.tty) pid=\(p.pid) wid=\(s.wid.map(String.init) ?? "nil")")
+        log("新增 \(Term.topic(bundle: p.bundle, tty: p.tty, gid: s.gid) ?? p.project) [\(p.bundle)] tty=\(p.tty) pid=\(p.pid) wid=\(s.wid.map(String.init) ?? "nil")")
         withAnimation(spring) { sessions.insert(s, at: 0) }      // 新的放最上面，跟系統通知一樣
         s.apply(p)
     }
@@ -332,7 +393,7 @@ final class Hub: NSObject, ObservableObject {
         for g in glows.values { g.follow(list) }
         let frontApp = NSWorkspace.shared.frontmostApplication
         var front: Int?
-        if let app = frontApp, ["com.apple.Terminal", "com.googlecode.iterm2"].contains(app.bundleIdentifier ?? "") {
+        if let app = frontApp, ["com.apple.Terminal", "com.googlecode.iterm2", "com.mitchellh.ghostty"].contains(app.bundleIdentifier ?? "") {
             front = Term.frontWindow(pid: app.processIdentifier, in: list)
         }
         if front != lastFront, let f = front {
@@ -345,7 +406,7 @@ final class Hub: NSObject, ObservableObject {
 
     func clickCheck() {
         guard let app = NSWorkspace.shared.frontmostApplication,
-              ["com.apple.Terminal", "com.googlecode.iterm2"].contains(app.bundleIdentifier ?? ""),
+              ["com.apple.Terminal", "com.googlecode.iterm2", "com.mitchellh.ghostty"].contains(app.bundleIdentifier ?? ""),
               let f = Term.frontWindow(pid: app.processIdentifier, in: Term.windows()) else { return }
         for s in sessions where s.phase == .done && s.wid == f { remove(s, "在視窗 \(f) 點擊") }
     }
