@@ -409,7 +409,7 @@ final class Glow {
     }
 }
 
-// MARK: - Screen-edge glow while a full-screen Space hides the other windows (Keng: ≈3pt, gold/red)
+// MARK: - Screen-edge glow while a full-screen Space hides the other windows (Keng: ≈3pt, green/red)
 
 @MainActor
 final class EdgeGlow {

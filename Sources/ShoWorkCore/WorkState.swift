@@ -4,10 +4,10 @@ import Foundation
 public enum WorkState: String, Codable, Sendable, CaseIterable {
     case idle      // no glow
     case working   // purple, breathing
-    case done      // gold, steady — waits for the user to look
+    case done      // green, steady — waits for the user to look
     case input     // red, pulsing — the AI is blocked on the user
 
-    /// Higher wins when several tabs share one window (red > gold > purple > none).
+    /// Higher wins when several tabs share one window (red > green > purple > none).
     public var priority: Int {
         switch self {
         case .idle: 0
@@ -36,7 +36,7 @@ public enum StateMachine {
     public static func next(_ current: WorkState, on event: WorkEvent, userIsLooking: Bool) -> WorkState {
         switch event {
         case .working: return .working
-        case .done: return .done            // Keng: stays gold until a key/click in that window, even if it's in front
+        case .done: return .done            // Keng: stays green until a key/click in that window, even if it's in front
         case .input: return .input          // red even while looking: the AI is blocked on you
         case .clear: return .idle
         }

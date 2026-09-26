@@ -48,15 +48,15 @@ away
 emit working;           expect "working (not looking)" working
 geom && ok "purple glow geometry + stacking" || bad "purple glow geometry/stacking"
 emit done;              expect "done while away" done
-geom && ok "gold glow geometry + stacking" || bad "gold glow geometry/stacking"
-look;                   expect "user looks at the window → gold cleared" none
+geom && ok "green glow geometry + stacking" || bad "green glow geometry/stacking"
+look;                   expect "user looks at the window → green cleared" none
 emit working; emit done; expect "done while looking → no reminder" none
 away; emit input;       expect "input → red" input
 look;                   expect "looking does NOT clear red (AI is blocked on you)" input
 emit working;           expect "AI resumes → purple" working
 emit clear;             expect "clear → none" none
 
-# key press inside the focused window clears gold (window already focused when done arrives
+# key press inside the focused window clears green (window already focused when done arrives
 # counts as looking, so make it arrive while away, then come back and type)
 away; emit done;        expect "done while away (2)" done
 look;                   expect "focus clears it" none

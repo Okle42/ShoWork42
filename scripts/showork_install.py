@@ -31,7 +31,7 @@ def our_hooks():
         "PreToolUse":       [{"matcher": "*", "hooks": [cmd("working")]}],
         "PostToolUse":      [{"matcher": "*", "hooks": [cmd("working")]}],
         "Stop":             [{"hooks": [cmd("done")]}],
-        # permission prompts / questions only — the 60 s idle reminder would turn gold into red
+        # permission prompts / questions only — the 60 s idle reminder would turn green into red
         "Notification":     [{"matcher": "permission_prompt|elicitation_dialog", "hooks": [cmd("input")]}],
         "SessionEnd":       [{"hooks": [cmd("clear")]}],
     }

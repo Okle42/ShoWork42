@@ -81,7 +81,7 @@ final class Engine {
         render()
     }
 
-    /// The user looked (focus change, key, click). Clear gold on every tab they can now see.
+    /// The user looked (focus change, key, click). Clear green on every tab they can now see.
     func acknowledgeLooked() {
         var changed = false
         for (tty, t) in tabs where t.state.needsAcknowledgement {
@@ -106,7 +106,7 @@ final class Engine {
 
     // MARK: rendering
 
-    /// window state = the most urgent of its tabs (red > gold > purple)
+    /// window state = the most urgent of its tabs (red > green > purple)
     func windowStates() -> [CGWindowID: (WorkState, pid_t)] {
         var out: [CGWindowID: (WorkState, pid_t)] = [:]
         // a state switched off in settings doesn't light anything; the window shows its next lit state
@@ -146,7 +146,7 @@ final class Engine {
     }
 
     /// Full-screen Space in front ⇒ the other windows' glows are invisible. Show the most urgent
-    /// gold/red among windows that are NOT on screen as a thin screen-edge line.
+    /// green/red among windows that are NOT on screen as a thin screen-edge line.
     private func updateEdge() {
         guard let front = NSWorkspace.shared.frontmostApplication?.processIdentifier,
               let fw = Selection.focusedWID(pid: front),

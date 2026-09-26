@@ -29,7 +29,7 @@ struct TitleSignalTests {
         #expect(TitleSignal.event(from: .busy, to: .idle) == .done)
         #expect(TitleSignal.event(from: .busy, to: .busy) == nil)
         #expect(TitleSignal.event(from: .idle, to: .idle) == nil)
-        #expect(TitleSignal.event(from: .unknown, to: .idle) == nil)    // first sight of a finished session: no gold
+        #expect(TitleSignal.event(from: .unknown, to: .idle) == nil)    // first sight of a finished session: no green
         #expect(TitleSignal.event(from: .busy, to: .unknown) == nil)
     }
 }
