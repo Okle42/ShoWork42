@@ -36,7 +36,7 @@ public enum StateMachine {
     public static func next(_ current: WorkState, on event: WorkEvent, userIsLooking: Bool) -> WorkState {
         switch event {
         case .working: return .working
-        case .done: return .done            // Keng: stays green until a key/click in that window, even if it's in front
+        case .done: return .done            // Kang: stays green until a key/click in that window, even if it's in front
         case .input: return .input          // red even while looking: the AI is blocked on you
         case .clear: return .idle
         }

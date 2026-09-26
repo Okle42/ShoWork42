@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 import ShoWorkCore
 
-// Settings window, same structure as cool42's (Keng 09-26: 「像這樣做成分頁」):
+// Settings window, same structure as cool42's (Kang 09-26: 「像這樣做成分頁」):
 // NSTabViewController with .toolbar tabs (the System-Settings-style icon row) + one SwiftUI grouped Form
 // per page. The title follows the tab, the last tab is remembered, no resize/minimize (HIG Settings),
 // everything applies the moment you change it.
@@ -96,7 +96,7 @@ struct SettingsPage: View {
     }
 }
 
-/// Keng 09-26: all three states on ONE page. Three live preview cards side by side (name + on/off each);
+/// Kang 09-26: all three states on ONE page. Three live preview cards side by side (name + on/off each);
 /// click a card to tune that state below — colour, style, brightness, width, speed.
 struct GlowPage: View {
     @ObservedObject private var glow = GlowSettings.shared

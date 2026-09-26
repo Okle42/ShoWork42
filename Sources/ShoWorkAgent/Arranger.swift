@@ -3,7 +3,7 @@ import Carbon.HIToolbox
 import ShoWorkCore
 
 /// Arranges every terminal window (Ghostty / Terminal / iTerm2), each screen on its own.
-/// Keng 09-26: all terminal windows; auto on count change (can be switched off); ⌃⌥L now;
+/// Kang 09-26: all terminal windows; auto on count change (can be switched off); ⌃⌥L now;
 /// with 4 windows ⌃⌥L toggles columns ⇄ 2×2.
 @MainActor
 final class Arranger {
@@ -135,7 +135,7 @@ final class Arranger {
     }
 
     /// Test mode: SHOWORK_ONLY_WIDS="w1,w2,…" ⇒ refuse to touch ANYTHING if a window outside the
-    /// list is on screen (09-26 incident: a test moved Keng's windows). Enforced here, not in scripts.
+    /// list is on screen (09-26 incident: a test moved Kang's windows). Enforced here, not in scripts.
     static var onlyWIDs: Set<CGWindowID>? {
         ProcessInfo.processInfo.environment["SHOWORK_ONLY_WIDS"].map { Set($0.split(separator: ",").compactMap { CGWindowID($0) }) }
     }
@@ -190,10 +190,10 @@ final class Arranger {
         (-25...2).contains(a.width - b.width) && (-25...2).contains(a.height - b.height)
     }
 
-    // MARK: canonical stacking (Keng 09-26: click a bottom window ⇒ middle row re-emerges above top row)
+    // MARK: canonical stacking (Kang 09-26: click a bottom window ⇒ middle row re-emerges above top row)
 
     /// The row you're in goes on top; the closer another row is to yours, the higher it sits
-    /// (Keng 09-26: click a top window ⇒ the middle row shows its lower half right beneath it;
+    /// (Kang 09-26: click a top window ⇒ the middle row shows its lower half right beneath it;
     /// click a bottom window ⇒ the middle row re-emerges above the top row). Yours is topmost.
     func restack(focused: CGWindowID) {
         guard !restacking, let me = arranged.first(where: { $0.wid == focused }) else { return }

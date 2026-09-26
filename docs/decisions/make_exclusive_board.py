@@ -3,8 +3,8 @@
 Geometry mirrors Sources/ShoWorkCore/LayoutPlan.swift (overlapRows) exactly."""
 import math, os
 
-W, AREA_Y, AREA_H = 1920, 30, 964          # Keng's main screen, visible area
-LINE = 17                                   # ≈ one text line in Keng's Ghostty
+W, AREA_Y, AREA_H = 1920, 30, 964          # Kang's main screen, visible area
+LINE = 17                                   # ≈ one text line in Kang's Ghostty
 TITLE = 28
 
 def overlap_rows(rows, M, half_shift):
