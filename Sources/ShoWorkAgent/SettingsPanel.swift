@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 import ShoWorkCore
 
-// Settings window, same structure as cool91's (Keng 09-26: 「像這樣做成分頁」):
+// Settings window, same structure as cool42's (Keng 09-26: 「像這樣做成分頁」):
 // NSTabViewController with .toolbar tabs (the System-Settings-style icon row) + one SwiftUI grouped Form
 // per page. The title follows the tab, the last tab is remembered, no resize/minimize (HIG Settings),
 // everything applies the moment you change it.
