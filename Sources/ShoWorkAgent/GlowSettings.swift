@@ -17,13 +17,13 @@ enum GlowStyle: String, CaseIterable, Codable, Identifiable {
     }
 }
 
-/// How one state (working / done / input) looks. Keng 09-26: every state is tuned on its own —
+/// How one state (working / done / input) looks. Kang 09-26: every state is tuned on its own —
 /// on/off, colour, style, speed.
 struct StateLook: Codable, Equatable {
     var enabled: Bool
     var hex: String
     var style: GlowStyle
-    /// 0.4…2.5, 1 = normal; higher = faster (Keng 09-26: 光的快慢要可以調)
+    /// 0.4…2.5, 1 = normal; higher = faster (Kang 09-26: 光的快慢要可以調)
     var speed: Double
     /// animation durations are multiplied by this
     var period: Double { 1 / max(0.4, min(speed, 2.5)) }
@@ -66,7 +66,7 @@ final class GlowSettings: ObservableObject {
     static let changed = Notification.Name("sw42.glowSettingsChanged")
     static let defaults: [WorkState: StateLook] = [
         .working: StateLook(enabled: true, hex: "#9E66FF", style: .breathe, speed: 1),
-        .done:    StateLook(enabled: true, hex: "#30D158", style: .breathe, speed: 1),   // Keng 09-26：完成由金改綠
+        .done:    StateLook(enabled: true, hex: "#30D158", style: .breathe, speed: 1),   // Kang 09-26：完成由金改綠
         .input:   StateLook(enabled: true, hex: "#FF4040", style: .breathe, speed: 1),
     ]
     private let store = UserDefaults(suiteName: "ai.okle42.showork") ?? .standard
@@ -83,7 +83,7 @@ final class GlowSettings: ObservableObject {
         if let d = store.data(forKey: "glowLooks.v2"), let saved = try? JSONDecoder().decode([[String: StateLook]].self, from: d) {
             for m in saved { for (k, v) in m { if let s = WorkState(rawValue: k) { l[s] = v } } }
         }
-        // Keng 09-26: done changed from gold to green. Saves that still carry the old default gold get the new
+        // Kang 09-26: done changed from gold to green. Saves that still carry the old default gold get the new
         // green once; every other tweak (speed, style, brightness, width) is kept. A colour the user picked stays.
         if !store.bool(forKey: Self.doneGreenMigrated) {
             if var d = l[.done], d.hex.uppercased() == Self.oldDoneGold {

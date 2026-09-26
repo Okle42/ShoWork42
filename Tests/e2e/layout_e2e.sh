@@ -129,7 +129,7 @@ for n in $(seq 1 $MAXN); do
   if (( n == 4 )); then check "n=4 columns" columns; check "n=4 grid" grid; check "n=4 back to columns" columns
   else check "n=$n"; fi
 done
-# ── restacking (Keng 09-26): arrange 11, click a TOP window, then a BOTTOM window ⇒
+# ── restacking (Kang 09-26): arrange 11, click a TOP window, then a BOTTOM window ⇒
 #    bottom-clicked window on top; other rows back to top < middle < bottom
 if (( MAXN >= 11 )); then
   cat > $ST/zorder.swift <<'EOF2'

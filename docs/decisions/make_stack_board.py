@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""stack_board.html — confirms Keng's 11-window stacking logic and picks row heights.
-Keng 09-26: 300pt exposed per row; purple(top row) and green(bottom row) may overlap; clicking a green
+"""stack_board.html — confirms Kang's 11-window stacking logic and picks row heights.
+Kang 09-26: 300pt exposed per row; purple(top row) and green(bottom row) may overlap; clicking a green
 window must make the yellow(middle) windows re-emerge ABOVE purple and BELOW green."""
 import os
 

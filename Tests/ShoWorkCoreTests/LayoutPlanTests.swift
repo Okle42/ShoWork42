@@ -4,7 +4,7 @@ import CoreGraphics
 
 @Suite("LayoutPlan")
 struct LayoutPlanTests {
-    // Keng's screen: 1920×1080, menu bar 30, Dock ≈ 80 → visible 1920×970 at y=30
+    // Kang's screen: 1920×1080, menu bar 30, Dock ≈ 80 → visible 1920×970 at y=30
     let area = CGRect(x: 0, y: 30, width: 1920, height: 970)
 
     @Test("every frame stays inside the visible area", arguments: 1...14)
@@ -82,7 +82,7 @@ struct LayoutPlanTests {
         for i in f.indices { #expect(Self.visibleBand(i, f, rows: rows) >= 110, "n=\(n) window \(i) shows \(Self.visibleBand(i, f, rows: rows))") }
     }
 
-    @Test("6, 7: Keng's brick layout — quarter width, rows 120 apart, same height", arguments: [6, 7])
+    @Test("6, 7: Kang's brick layout — quarter width, rows 120 apart, same height", arguments: [6, 7])
     func brick(n: Int) {
         let f = LayoutPlan.frames(count: n, in: area)
         #expect(f.allSatisfy { $0.width == 480 && $0.height == area.height - 240 })
@@ -92,7 +92,7 @@ struct LayoutPlanTests {
         #expect(f.filter { $0.minY == 150 }.count == n - 4)
     }
 
-    @Test("6–11: every overlapping window has the same height (Keng: 一樣高)", arguments: 6...11)
+    @Test("6–11: every overlapping window has the same height (Kang: 一樣高)", arguments: 6...11)
     func sameHeight(n: Int) {
         #expect(Set(LayoutPlan.frames(count: n, in: area).map(\.height)).count == 1)
     }

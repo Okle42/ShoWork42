@@ -90,7 +90,7 @@ final class GlowView: NSView {
         fx.addSublayer(halo)
         guard !still else { return }
         let g = CAAnimationGroup()
-        // Keng 09-26: "太延伸、末端有一層" — keep the widest breath (radius 20 ⇒ visible ~2×20pt) well inside
+        // Kang 09-26: "太延伸、末端有一層" — keep the widest breath (radius 20 ⇒ visible ~2×20pt) well inside
         // the 64pt pad so it fades to nothing instead of being cut at the overlay's edge
         let radius = CABasicAnimation(keyPath: "shadowRadius"); radius.fromValue = Look.spread * 0.75 * wf; radius.toValue = Look.spread * 1.65 * wf
         let bright = CABasicAnimation(keyPath: "shadowOpacity"); bright.fromValue = A(Float(0.55)); bright.toValue = A(Float(0.95))
@@ -280,7 +280,7 @@ final class Glow {
         w.contentView = v
         return w
     }
-    /// Inner light on ALL four edges (Keng 09-26: the top had light inside and out, the other sides only
+    /// Inner light on ALL four edges (Kang 09-26: the top had light inside and out, the other sides only
     /// outside — make every side the same). A stroked rounded rect whose glow is clipped to the window,
     /// drawn in a click-through window directly above the target.
     private func paintBar(_ s: WorkState) {
@@ -409,7 +409,7 @@ final class Glow {
     }
 }
 
-// MARK: - Screen-edge glow while a full-screen Space hides the other windows (Keng: ≈3pt, green/red)
+// MARK: - Screen-edge glow while a full-screen Space hides the other windows (Kang: ≈3pt, green/red)
 
 @MainActor
 final class EdgeGlow {

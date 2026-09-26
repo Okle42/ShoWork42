@@ -1,5 +1,10 @@
 # ShoWork42
 
+> [!WARNING]
+> **開發中（M0 技術驗證階段）**：尚未簽章與公證、還沒有打包好的安裝檔，行為與設定格式都可能變動。歡迎看看、試玩或回報問題，但請先不要用在正式工作環境。
+>
+> **Work in progress (M0 technical validation)**: not yet signed or notarized, no packaged installer, and behavior and settings may still change. Feel free to look, try it and report issues, but please don't rely on it for real work yet.
+
 > 終端機裡的 AI 在工作、做完了、在等你回答——不用切過去看，視窗外圍的光就告訴你。
 
 macOS 常駐小工具。每個跑著 AI（Claude Code、Codex、Gemini⋯⋯）的終端機視窗，依 AI 當下狀態在外圍發光：
