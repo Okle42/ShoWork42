@@ -11,7 +11,7 @@ struct StateMachineTests {
         #expect(StateMachine.next(s, on: .clear, userIsLooking: false) == .idle)
     }
 
-    @Test("done stays gold even if the window is in front (cleared only by a key/click)", arguments: WorkState.allCases)
+    @Test("done stays green even if the window is in front (cleared only by a key/click)", arguments: WorkState.allCases)
     func doneWhileLooking(from s: WorkState) {
         #expect(StateMachine.next(s, on: .done, userIsLooking: true) == .done)
     }
@@ -21,7 +21,7 @@ struct StateMachineTests {
         #expect(StateMachine.next(.working, on: .input, userIsLooking: true) == .input)
     }
 
-    @Test("acknowledging clears gold only")
+    @Test("acknowledging clears green only")
     func acknowledge() {
         #expect(StateMachine.acknowledge(.done) == .idle)
         #expect(StateMachine.acknowledge(.input) == .input)
@@ -29,7 +29,7 @@ struct StateMachineTests {
         #expect(StateMachine.acknowledge(.idle) == .idle)
     }
 
-    @Test("window shows the most urgent tab: red > gold > purple > none")
+    @Test("window shows the most urgent tab: red > green > purple > none")
     func windowPriority() {
         #expect(StateMachine.windowState([.working, .done]) == .done)
         #expect(StateMachine.windowState([.done, .input, .working]) == .input)

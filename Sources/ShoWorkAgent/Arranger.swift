@@ -281,7 +281,7 @@ final class Menu: NSObject {
     /// (state, placement) for every lit tab — set by the Engine after each render
     var summary: [(WorkState, Placement)] = []
 
-    /// Menu bar shows how many windows are purple / gold / red; the menu lists them, click to go there.
+    /// Menu bar shows how many windows are purple / green / red; the menu lists them, click to go there.
     private func paintButton() {
         guard let b = item?.button else { return }
         let counts = [WorkState.working, .done, .input].map { s in (s, Set(summary.filter { $0.0 == s }.map(\.1.wid)).count) }

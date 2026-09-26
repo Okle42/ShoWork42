@@ -66,7 +66,7 @@ final class GlowSettings: ObservableObject {
     static let changed = Notification.Name("sw42.glowSettingsChanged")
     static let defaults: [WorkState: StateLook] = [
         .working: StateLook(enabled: true, hex: "#9E66FF", style: .breathe, speed: 1),
-        .done:    StateLook(enabled: true, hex: "#FFC23D", style: .breathe, speed: 1),
+        .done:    StateLook(enabled: true, hex: "#30D158", style: .breathe, speed: 1),   // Keng 09-26：完成由金改綠
         .input:   StateLook(enabled: true, hex: "#FF4040", style: .breathe, speed: 1),
     ]
     private let store = UserDefaults(suiteName: "ai.okle42.showork") ?? .standard
@@ -83,8 +83,20 @@ final class GlowSettings: ObservableObject {
         if let d = store.data(forKey: "glowLooks.v2"), let saved = try? JSONDecoder().decode([[String: StateLook]].self, from: d) {
             for m in saved { for (k, v) in m { if let s = WorkState(rawValue: k) { l[s] = v } } }
         }
+        // Keng 09-26: done changed from gold to green. Saves that still carry the old default gold get the new
+        // green once; every other tweak (speed, style, brightness, width) is kept. A colour the user picked stays.
+        if !store.bool(forKey: Self.doneGreenMigrated) {
+            if var d = l[.done], d.hex.uppercased() == Self.oldDoneGold {
+                d.hex = Self.defaults[.done]!.hex
+                l[.done] = d
+                if let data = try? JSONEncoder().encode(l.map { [$0.key.rawValue: $0.value] }) { store.set(data, forKey: "glowLooks.v2") }
+            }
+            store.set(true, forKey: Self.doneGreenMigrated)
+        }
         looks = l
     }
+    private static let oldDoneGold = "#FFC23D"
+    private static let doneGreenMigrated = "migrated.doneGreen"
 
     func look(_ s: WorkState) -> StateLook { looks[s] ?? Self.defaults[s] ?? Self.defaults[.working]! }
     func reset() { looks = Self.defaults }
