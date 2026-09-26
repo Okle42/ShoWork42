@@ -10,6 +10,12 @@ public enum LayoutPlan {
     /// canonical — top row < middle row < bottom row, the window you're using on top of all.
     public static let rowReveal: CGFloat = 300
 
+    /// rowReveal / brickStep were tuned on Keng's 1080p screen (visible height 960–970). Taller screens
+    /// (1440p, 5K…) scale them up so the layout keeps its proportions; 1080p-class and smaller screens keep
+    /// the tuned values, which are what guarantee every window a band of its own.
+    public static let referenceHeight: CGFloat = 1000
+    static func scale(_ a: CGRect) -> CGFloat { max(1, a.height / referenceHeight) }
+
     /// Frames for `n` windows inside `area` (the screen's visible frame, top-left origin).
     public static func frames(count n: Int, in area: CGRect, four: FourStyle = .columns) -> [CGRect] {
         guard n > 0, area.width > 0, area.height > 0 else { return [] }
@@ -42,8 +48,9 @@ public enum LayoutPlan {
     /// visible band of d at its top; the bottom row is fully visible.
     static func overlapRows(_ rows: [Int], in a: CGRect, halfShiftMiddle: Bool, extra: Int = 0) -> [CGRect] {
         let R = rows.count
-        let h = a.height - rowReveal
-        let d = R > 1 ? rowReveal / CGFloat(R - 1) : 0
+        let reveal = (rowReveal * scale(a)).rounded()
+        let h = a.height - reveal
+        let d = R > 1 ? reveal / CGFloat(R - 1) : 0
         let mx = rows.max() ?? 1
         var out: [CGRect] = []
         for (r, count) in rows.enumerated() {
@@ -70,11 +77,12 @@ public enum LayoutPlan {
     public static let brickStep: CGFloat = 120
 
     static func brick(_ n: Int, in a: CGRect) -> [CGRect] {
-        let w = a.width / 4, h = a.height - 2 * brickStep
+        let step = (brickStep * scale(a)).rounded()
+        let w = a.width / 4, h = a.height - 2 * step
         let xs: [[CGFloat]] = n == 7 ? [[0, 2 * w], [w / 2, 1.5 * w, 2.5 * w], [w, 3 * w]]
                                      : [[0, 2 * w], [w / 2, 2.5 * w], [w, 3 * w]]
         return xs.enumerated().flatMap { r, row in
-            row.map { CGRect(x: a.minX + $0, y: a.minY + CGFloat(r) * brickStep, width: w, height: h).integral }
+            row.map { CGRect(x: a.minX + $0, y: a.minY + CGFloat(r) * step, width: w, height: h).integral }
         }
     }
 

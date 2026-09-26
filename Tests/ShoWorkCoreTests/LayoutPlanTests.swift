@@ -103,4 +103,37 @@ struct LayoutPlanTests {
         #expect(f.allSatisfy { $0.width == 480 })
         #expect(f[4].minX == 240 && f[4].minY > f[0].minY)
     }
+
+    // Other screens (visible frame, menu bar + Dock excluded): 13" MacBook Air, 14" MacBook Pro,
+    // 1440p monitor, 27" 5K, a TV at 1080p with the Dock hidden.
+    static let otherScreens: [CGRect] = [
+        CGRect(x: 0, y: 33, width: 1470, height: 830),
+        CGRect(x: 0, y: 38, width: 1512, height: 862),
+        CGRect(x: 0, y: 25, width: 2560, height: 1330),
+        CGRect(x: 0, y: 25, width: 2560, height: 1350),
+        CGRect(x: 1920, y: 0, width: 1920, height: 1080),
+    ]
+
+    @Test("other screens: inside, 1–5 & 8 clickable, 6–11 each show a band", arguments: otherScreens)
+    func otherScreen(a: CGRect) {
+        for n in 1...14 {
+            let f = LayoutPlan.frames(count: n, in: a)
+            #expect(f.count == n)
+            for r in f { #expect(a.insetBy(dx: -1, dy: -1).contains(r), "\(a) n=\(n) \(r)") }
+            if [1, 2, 3, 4, 5, 8].contains(n) {
+                for i in f.indices { #expect(Self.exclusiveSquare(i, f) >= 112, "\(a) n=\(n) window \(i)") }
+            } else if n <= 11 {
+                let rows = LayoutPlan.rows(count: n)
+                for i in f.indices { #expect(Self.visibleBand(i, f, rows: rows) >= 110, "\(a) n=\(n) window \(i)") }
+            }
+        }
+    }
+
+    @Test("taller screens keep the 1080p proportions; 1080p-class keeps the tuned values")
+    func scaling() {
+        let big = CGRect(x: 0, y: 25, width: 2560, height: 1330)
+        let f = LayoutPlan.frames(count: 8, in: big)
+        #expect(abs((big.height - f[0].height) / big.height - 300.0 / 1000) < 0.01)
+        #expect(LayoutPlan.frames(count: 8, in: area)[0].height == area.height - 300)
+    }
 }

@@ -155,7 +155,20 @@ final class Engine {
         guard (v as? Bool) == true else { edge.hide(); return }
         let hidden = glows.values.filter { $0.wid != fw && $0.state.needsAcknowledgement && !$0.targetOnScreen }
         let s = StateMachine.windowState(hidden.map(\.state))
-        if s.needsAcknowledgement, let screen = NSScreen.main { edge.show(s, on: screen) } else { edge.hide() }
+        // the full-screen window's own screen — NSScreen.main follows OUR key window, not the user's (multi-display)
+        if s.needsAcknowledgement, let screen = Engine.screen(of: el) ?? NSScreen.main { edge.show(s, on: screen) } else { edge.hide() }
+    }
+
+    /// Screen holding the AX window's centre (AX coordinates: top-left of the primary screen).
+    static func screen(of el: AXUIElement) -> NSScreen? {
+        var pv: CFTypeRef?, sv: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(el, kAXPositionAttribute as CFString, &pv) == .success,
+              AXUIElementCopyAttributeValue(el, kAXSizeAttribute as CFString, &sv) == .success,
+              let H = NSScreen.screens.first?.frame.height else { return nil }
+        var p = CGPoint.zero, z = CGSize.zero
+        AXValueGetValue(pv as! AXValue, .cgPoint, &p); AXValueGetValue(sv as! AXValue, .cgSize, &z)
+        let c = CGPoint(x: p.x + z.width / 2, y: H - (p.y + z.height / 2))       // → Cocoa bottom-left
+        return NSScreen.screens.first { $0.frame.contains(c) }
     }
 }
 
