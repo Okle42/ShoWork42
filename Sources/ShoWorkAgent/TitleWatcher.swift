@@ -3,7 +3,7 @@ import ShoWorkCore
 
 /// Fallback for AI sessions that send no hook events (09-26: a Claude started before ShoWork42 was
 /// installed never loaded the hooks, so its window stayed dark while it worked). Every 2 s it reads all
-/// Ghostty tab titles in ONE AppleScript call and turns Claude's spinner/sparkle into working/done.
+/// Ghostty tab titles in ONE Apple event and turns Claude's spinner/sparkle into working/done.
 /// Tabs that ever sent a real hook event are left to the hooks.
 @MainActor
 final class TitleWatcher {
@@ -24,21 +24,21 @@ final class TitleWatcher {
     private func tick() {
         guard let engine, let ghostty = NSRunningApplication.runningApplications(withBundleIdentifier: TerminalApp.ghostty.rawValue).first
         else { return }
+        // ONE Apple event for every id and every title (09-26: looping per terminal and concatenating in
+        // AppleScript was ~80% of the agent's CPU — 0.30 s vs 0.10 s per tick with 7 tabs, same output)
         guard let out = Script.string("""
-            tell application id "com.mitchellh.ghostty"
-              set o to ""
-              repeat with t in terminals
-                set o to o & (id of t) & (character id 9) & (name of t) & (character id 10)
-              end repeat
-              return o
-            end tell
+            tell application id "com.mitchellh.ghostty" to set {ids, names} to {id, name} of terminals
+            set AppleScript's text item delimiters to (character id 10)
+            return (ids as text) & (character id 30) & (names as text)
             """) else { return }
+        let halves = out.split(separator: "\u{1E}", omittingEmptySubsequences: false)
+        guard halves.count == 2 else { return }
+        let ids = halves[0].split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        let names = halves[1].split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        guard ids.count == names.count else { return }              // a title with a newline: skip this tick
         var seen = Set<String>()
         var needProbe = false
-        for line in out.split(separator: "\n") {
-            let cols = line.split(separator: "\t", maxSplits: 1).map(String.init)
-            guard cols.count == 2 else { continue }
-            let (tid, title) = (cols[0], cols[1])
+        for (tid, title) in zip(ids, names) where !tid.isEmpty {
             seen.insert(tid)
             let sig = TitleSignal.classify(title)
             // don't remember a signal for a tab we can't place yet — otherwise its first busy edge is
