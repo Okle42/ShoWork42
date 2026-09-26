@@ -4,7 +4,7 @@
    python3 adapters/claude/hooks.py /abs/path/to/showork  > settings-fragment.json
 
 Only permission prompts / questions turn the glow red. The 60-second "waiting for your input"
-idle notification is deliberately NOT mapped — it would turn a finished (gold) window red.
+idle notification is deliberately NOT mapped — it would turn a finished (green) window red.
 """
 import json, sys
 
