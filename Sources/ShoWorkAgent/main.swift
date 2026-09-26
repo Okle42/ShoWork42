@@ -11,7 +11,7 @@ if argv.count == 2, argv[1] == "--arrange-dry" {
     MainActor.assumeIsolated {
         let a = Arranger.shared
         let p = a.plan()
-        print("area", a.mainAreaAX(), "windows", p.count)
+        print("screens", a.screenAreasAX(), "windows", p.count)
         for (t, f) in p { print(t.app, AXQuery.wid(t.el), "now", t.frame, "→", f) }
         exit(0)
     }

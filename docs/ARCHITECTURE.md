@@ -19,7 +19,7 @@
    │    ├─ ClearWatcher  前景視窗裡按鍵／點擊 ⇒ acknowledge（綠清除）
    │    └─ reaper        每 5 秒清掉已結束的 AI 行程
    ├─ TitleWatcher   後備：每 2 秒一次 AppleScript 讀 Ghostty 全部分頁標題
-   ├─ Arranger       終端機視窗自動排版（幾何在 ShoWorkCore/LayoutPlan）
+   ├─ Arranger       終端機視窗自動排版，每台螢幕各自排（幾何在 ShoWorkCore/LayoutPlan）
    ├─ Menu           選單列 ●數量＋清單跳轉
    └─ SettingsPanel  分頁式設定視窗（GlowSettings 存 UserDefaults，改了即時套用）
 
@@ -46,7 +46,7 @@
 | | `GlowSettings.swift` | 每種狀態的外觀設定、舊存檔遷移 |
 | | `SettingsPanel.swift` | 設定視窗 |
 | | `TitleWatcher.swift` | 標題後備偵測 |
-| | `Arranger.swift` | 排版執行、疊放整理、⌃⌥L、測試白名單 |
+| | `Arranger.swift` | 排版執行（每台螢幕獨立一組）、疊放整理（只動你所在的螢幕）、⌃⌥L、測試白名單 |
 | **scripts** | `showork_install.py` | 編譯、簽章、LaunchAgent、合併／移除 Claude hooks |
 | **adapters** | `claude/hooks.py` | 產生 Claude hooks 片段 |
 
@@ -82,6 +82,12 @@ AX 視窗 → CGWindowID 用私有 `_AXUIElementGetWindow`。
 7. 切換 App 後疊放順序會晚一拍：分段重排（0.05／0.25／0.6 秒）＋單一 0.5 秒看門狗。
 8. `NSGlassEffectView` 在非 .app 的 agent 不會繪製，設定視窗改用 `NSVisualEffectView`。
 9. `ghostty -e …` 會啟動第二份 Ghostty；這時 `application id` 會對到新的那份（待修：改以 pid 對應）。
+
+## 多螢幕與螢幕尺寸
+
+- 每個視窗歸屬「中心點所在的螢幕」，每台螢幕各自套用 1–11 個視窗的排法。
+- 重疊排法的兩個常數（每排露出 300pt、砌磚每排 120pt）以 1080p 級螢幕（可用高度 ≤ 1000pt）為準；更高的螢幕按高度比例放大，更小的螢幕維持原值（保證每個視窗有自己的露出帶）。單元測試涵蓋 13"／14" MacBook、1440p、5K、外接 1080p。
+- 光暈座標一律以主螢幕左上為原點換算，跨螢幕不需特別處理；全螢幕邊緣細光畫在該全螢幕視窗所在的螢幕。
 
 ## 資料位置
 

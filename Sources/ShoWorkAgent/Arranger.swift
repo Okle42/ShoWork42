@@ -2,7 +2,7 @@ import AppKit
 import Carbon.HIToolbox
 import ShoWorkCore
 
-/// Arranges every terminal window (Ghostty / Terminal / iTerm2) on the main screen.
+/// Arranges every terminal window (Ghostty / Terminal / iTerm2), each screen on its own.
 /// Keng 09-26: all terminal windows; auto on count change (can be switched off); ⌃⌥L now;
 /// with 4 windows ⌃⌥L toggles columns ⇄ 2×2.
 @MainActor
@@ -21,13 +21,13 @@ final class Arranger {
 
     private var lastCount = -1
     /// Windows placed by the last overlapping layout, with their row (0 = top). Drives restacking.
-    private(set) var arranged: [(wid: CGWindowID, pid: pid_t, el: AXUIElement, row: Int)] = []
+    private(set) var arranged: [(wid: CGWindowID, pid: pid_t, el: AXUIElement, row: Int, screen: Int)] = []
     private var restacking = false
     private var focusObservers: [pid_t: AXObserver] = [:]
     private var pending: DispatchWorkItem?
     private var poll: Timer?
 
-    struct Target { let app: TerminalApp; let pid: pid_t; let el: AXUIElement; let frame: CGRect }
+    struct Target { let app: TerminalApp; let pid: pid_t; let el: AXUIElement; let frame: CGRect; let screen: Int }
 
     func start() {
         HotKey.register(keyCode: UInt32(kVK_ANSI_L), modifiers: UInt32(controlKey | optionKey)) { [weak self] in
@@ -48,7 +48,7 @@ final class Arranger {
     }
 
     func hotkey() {
-        if targets().count == 4 { fourStyle = fourStyle == .columns ? .grid : .columns }
+        if Dictionary(grouping: targets(), by: \.screen).values.contains(where: { $0.count == 4 }) { fourStyle = fourStyle == .columns ? .grid : .columns }
         arrange()
     }
 
@@ -82,38 +82,56 @@ final class Arranger {
         }
     }
 
-    /// Normal windows only: standard subrole, not minimized, not full screen, on this Space, on the main screen.
+    /// Normal windows only: standard subrole, not minimized, not full screen, on this Space.
+    /// Each window belongs to the screen that holds its centre (nearest screen if it's off all of them).
     func targets() -> [Target] {
-        let main = mainAreaAX()
+        let areas = screenAreasAX()
+        guard !areas.isEmpty else { return [] }
         return runningTerminals().flatMap { app, pid in
             AXQuery.windows(ofPID: pid).compactMap { el -> Target? in
                 guard AXQuery.string(el, kAXSubroleAttribute) == kAXStandardWindowSubrole as String,
                       !axBool(el, kAXMinimizedAttribute), !axBool(el, "AXFullScreen"),
-                      WindowList.onScreen(AXQuery.wid(el)),
-                      let f = axFrame(el), main.insetBy(dx: -200, dy: -200).contains(CGPoint(x: f.midX, y: f.midY)) else { return nil }
-                return Target(app: app, pid: pid, el: el, frame: f)
+                      WindowList.onScreen(AXQuery.wid(el)), let f = axFrame(el) else { return nil }
+                return Target(app: app, pid: pid, el: el, frame: f, screen: Arranger.screenIndex(of: f, in: areas))
             }
         }
     }
 
-    /// Visible frame of the main screen (menu bar and Dock excluded) in AX top-left coordinates.
-    func mainAreaAX() -> CGRect {
-        guard let s = NSScreen.screens.first else { return .zero }
-        let v = s.visibleFrame, H = s.frame.height
-        return CGRect(x: v.minX, y: H - v.maxY, width: v.width, height: v.height)
+    static func screenIndex(of f: CGRect, in areas: [CGRect]) -> Int {
+        let c = CGPoint(x: f.midX, y: f.midY)
+        if let i = areas.firstIndex(where: { $0.contains(c) }) { return i }
+        func dist(_ a: CGRect) -> CGFloat { hypot(max(a.minX - c.x, 0, c.x - a.maxX), max(a.minY - c.y, 0, c.y - a.maxY)) }
+        return areas.indices.min { dist(areas[$0]) < dist(areas[$1]) } ?? 0
     }
 
+    /// Visible frame of every screen (menu bar and Dock excluded) in AX top-left coordinates
+    /// (origin = top-left of the PRIMARY screen, as AX and CGWindowList use).
+    func screenAreasAX() -> [CGRect] {
+        guard let H = NSScreen.screens.first?.frame.height else { return [] }
+        return NSScreen.screens.map { s in
+            let v = s.visibleFrame
+            return CGRect(x: v.minX, y: H - v.maxY, width: v.width, height: v.height)
+        }
+    }
+
+    func mainAreaAX() -> CGRect { screenAreasAX().first ?? .zero }
+
     /// Reading order (top→bottom, left→right) keeps windows near where they were.
-    func ordered() -> [Target] {
-        targets().sorted {
+    func ordered(_ ts: [Target]) -> [Target] {
+        ts.sorted {
             let ra = ($0.frame.minY / 80).rounded(), rb = ($1.frame.minY / 80).rounded()
             return ra != rb ? ra < rb : $0.frame.minX < $1.frame.minX
         }
     }
 
+    /// One independent layout per screen, screens in NSScreen order.
     func plan() -> [(Target, CGRect)] {
-        let ts = ordered()
-        return Array(zip(ts, LayoutPlan.frames(count: ts.count, in: mainAreaAX(), four: fourStyle)))
+        let areas = screenAreasAX()
+        let byScreen = Dictionary(grouping: targets(), by: \.screen)
+        return byScreen.keys.sorted().flatMap { i -> [(Target, CGRect)] in
+            let ts = ordered(byScreen[i]!)
+            return Array(zip(ts, LayoutPlan.frames(count: ts.count, in: areas[i], four: fourStyle)))
+        }
     }
 
     /// Test mode: SHOWORK_ONLY_WIDS="w1,w2,…" ⇒ refuse to touch ANYTHING if a window outside the
@@ -152,8 +170,11 @@ final class Arranger {
             if wrong == 0 { break }
             if attempt < 2 { usleep(120_000) }                       // some terminals resize asynchronously
         }
-        let rows = LayoutPlan.rows(count: ts.count)
-        arranged = ts.count >= 6 ? zip(ts, rows).map { (AXQuery.wid($0.el), $0.pid, $0.el, $1) } : []
+        // rows per screen (plan() keeps each screen's windows together, in layout order)
+        arranged = Dictionary(grouping: ts, by: \.screen).values.flatMap { group -> [(wid: CGWindowID, pid: pid_t, el: AXUIElement, row: Int, screen: Int)] in
+            guard group.count >= 6 else { return [] }
+            return zip(group, LayoutPlan.rows(count: group.count)).map { (AXQuery.wid($0.el), $0.pid, $0.el, $1, $0.screen) }
+        }
         // later windows on top so staggered title bars stay visible (per app; cross-app order is the user's)
         for t in ts { AXUIElementPerformAction(t.el, kAXRaiseAction as CFString) }
         if let front = NSWorkspace.shared.frontmostApplication?.processIdentifier,
@@ -175,9 +196,9 @@ final class Arranger {
     /// (Keng 09-26: click a top window ⇒ the middle row shows its lower half right beneath it;
     /// click a bottom window ⇒ the middle row re-emerges above the top row). Yours is topmost.
     func restack(focused: CGWindowID) {
-        guard !restacking, arranged.count >= 6, let me = arranged.first(where: { $0.wid == focused }) else { return }
+        guard !restacking, let me = arranged.first(where: { $0.wid == focused }) else { return }
         restacking = true
-        let order = arranged.sorted {                       // raise farthest rows first, nearest last
+        let order = arranged.filter { $0.screen == me.screen }.sorted {       // only the screen you're on                       // raise farthest rows first, nearest last
             let da = abs($0.row - me.row), db = abs($1.row - me.row)
             return da != db ? da > db : $0.row < $1.row
         }
