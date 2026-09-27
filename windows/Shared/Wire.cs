@@ -1,9 +1,9 @@
 namespace ShoWork;
 
 /// Shared by showork.exe (sender) and ShoWorkAgent.exe (receiver): one line of JSON over a named pipe.
-///   {"v":1,"event":"working","agent":"claude","pid":1234}\n
+///   {"v":1,"event":"working","agent":"claude","pid":1234,"t":134035392000000000}\n
 /// The pid is the AI process (claude.exe). It plays the role of the Mac version's tty: one AI session,
-/// one entry; the agent maps it to a window.
+/// one entry; the agent maps it to a window. t = when the AI started the hook (FILETIME, 0 = unknown).
 static class Wire
 {
     public static readonly string[] Events = { "working", "done", "input", "clear" };

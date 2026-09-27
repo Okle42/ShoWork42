@@ -5,7 +5,8 @@ using System.Text.Json;
 
 namespace ShoWork;
 
-public readonly record struct WireMessage(WorkEvent Event, string Agent, int Pid);
+/// Stamp = when the AI started this hook (FILETIME of the hook shell), 0 = unknown.
+public readonly record struct WireMessage(WorkEvent Event, string Agent, int Pid, long Stamp = 0);
 
 /// Named pipe \\.\pipe\ShoWork42-<SID>, the Windows counterpart of the Mac agent.sock (0600):
 /// CurrentUserOnly puts an ACL on it that admits only this user. The first instance is created with
@@ -89,10 +90,12 @@ sealed class PipeServer
             var agent = r.GetProperty("agent").GetString() ?? "";
             var pid = r.GetProperty("pid").GetInt32();
             if (ev == null || !Wire.ValidAgent(agent) || pid <= 0) return null;
-            return new WireMessage(ev.Value, agent, pid);
+            var stamp = r.TryGetProperty("t", out var t) && t.TryGetInt64(out var tv) && tv > 0 ? tv : 0;
+            return new WireMessage(ev.Value, agent, pid, stamp);
         }
         catch { return null; }
     }
 
-    public static string Describe(WireMessage m) => $"{m.Agent} pid={m.Pid} {m.Event.ToString().ToLowerInvariant()}";
+    public static string Describe(WireMessage m) =>
+        $"{m.Agent} pid={m.Pid} {m.Event.ToString().ToLowerInvariant()}{(m.Stamp == 0 ? "" : $" hook@{DateTime.FromFileTime(m.Stamp):HH:mm:ss.fff}")}";
 }
