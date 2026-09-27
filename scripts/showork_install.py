@@ -22,13 +22,18 @@ AGENT = os.path.join(BIN, "ShoWorkAgent")
 LABEL = "ai.okle42.showork.agent"
 PLIST = os.path.join(HOME, "Library/LaunchAgents", LABEL + ".plist")
 MARK = "/ShoWork42/bin/showork"          # how we recognise our own hook commands
+ASK_TOOL = "AskUserQuestion"             # Claude's built-in "ask the user" tool
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def our_hooks():
     def cmd(ev): return {"type": "command", "command": f'"{SHOWORK}" emit {ev} --agent claude', "timeout": 2}
     return {
         "UserPromptSubmit": [{"hooks": [cmd("working")]}],
-        "PreToolUse":       [{"matcher": "*", "hooks": [cmd("working")]}],
+        # AskUserQuestion puts its question on screen at PreToolUse; Claude's elicitation Notification only
+        # comes ~6 s later (agent.log 09-28), so red is sent here. The catch-all excludes it: hooks of one
+        # event run in parallel, and a racing "working" could land after "input".
+        "PreToolUse":       [{"matcher": ASK_TOOL, "hooks": [cmd("input")]},
+                             {"matcher": f"^(?!{ASK_TOOL}$)", "hooks": [cmd("working")]}],
         "PostToolUse":      [{"matcher": "*", "hooks": [cmd("working")]}],
         "Stop":             [{"hooks": [cmd("done")]}],
         # permission prompts / questions only — the 60 s idle reminder would turn green into red
@@ -54,12 +59,14 @@ def save(path, data):
     os.replace(tmp, path)
 
 def merge(data):
+    """Add our groups; if an older ShoWork42 left different ones, replace only ours (others untouched)."""
     hooks = data.setdefault("hooks", {})
     changed = False
     for ev, groups in our_hooks().items():
         lst = hooks.setdefault(ev, [])
-        if not any(is_ours(g) for g in lst):
-            lst.extend(groups); changed = True
+        if [g for g in lst if is_ours(g)] == groups: continue
+        lst[:] = [g for g in lst if not is_ours(g)] + groups
+        changed = True
     return changed
 
 def unmerge(data):
@@ -142,7 +149,7 @@ def main():
     else:
         n = sum(is_ours(g) for gs in (data.get("hooks") or {}).values() for g in gs)
         running = subprocess.run(["launchctl", "print", f"gui/{os.getuid()}/{LABEL}"], capture_output=True).returncode == 0
-        print(f"hooks installed: {n}/6   agent loaded: {running}   binaries: {os.path.exists(AGENT)}")
+        print(f"hooks installed: {n}/{sum(map(len, our_hooks().values()))}  agent loaded: {running}   binaries: {os.path.exists(AGENT)}")
 
 if __name__ == "__main__":
     main()

@@ -13,7 +13,10 @@ def cmd(event): return {"type": "command", "command": f"{json.dumps(showork)[1:-
 
 hooks = {
     "UserPromptSubmit": [{"hooks": [cmd("working")]}],
-    "PreToolUse":       [{"matcher": "*", "hooks": [cmd("working")]}],
+    # AskUserQuestion: red right when the question appears (the Notification is ~6 s late);
+    # the catch-all excludes it so a parallel "working" can't race past "input".
+    "PreToolUse":       [{"matcher": "AskUserQuestion", "hooks": [cmd("input")]},
+                         {"matcher": "^(?!AskUserQuestion$)", "hooks": [cmd("working")]}],
     "PostToolUse":      [{"matcher": "*", "hooks": [cmd("working")]}],
     "Stop":             [{"hooks": [cmd("done")]}],
     "Notification":     [{"matcher": "permission_prompt|elicitation_dialog", "hooks": [cmd("input")]}],

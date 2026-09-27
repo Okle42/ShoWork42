@@ -54,9 +54,11 @@
 
 | 事件 | 來源（Claude） | 結果 |
 |---|---|---|
-| `working` | UserPromptSubmit、PreToolUse、PostToolUse | 紫 |
+| `working` | UserPromptSubmit、PreToolUse（`AskUserQuestion` 以外）、PostToolUse | 紫 |
 | `done` | Stop | 綠，直到該視窗內按鍵／點擊（視窗在前景也一樣） |
-| `input` | Notification（`permission_prompt`、`elicitation_dialog`） | 紅，直到 AI 發下一個事件 |
+| `input` | PreToolUse `AskUserQuestion`；Notification（`permission_prompt`、`elicitation_dialog`） | 紅，直到 AI 發下一個事件 |
+
+`AskUserQuestion` 的問題在 PreToolUse 當下就出現，Claude 的 `elicitation_dialog` Notification 要晚約 6 秒才到（09-28 agent.log 實測），所以紅色改在 PreToolUse 送。同一事件的 hook 是並行跑的，catch-all 用 matcher `^(?!AskUserQuestion$)` 排除它，免得並行的 `working` 比 `input` 晚到把紅蓋掉。舊版安裝重跑 `install` 會自動把自己的舊 hook 群組換成新的。
 | `clear` | SessionEnd | 無 |
 
 刻意**不**對應 60 秒閒置提醒，否則已完成的綠會被改成紅。
