@@ -60,6 +60,50 @@ static class Native
     [DllImport("kernel32.dll")] public static extern bool FreeConsole();
     [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();
 
+    public const uint GW_OWNER = 4, GA_ROOT = 2;
+    public const int WH_KEYBOARD_LL = 13, WH_MOUSE_LL = 14;
+    public const int WM_KEYDOWN = 0x100, WM_SYSKEYDOWN = 0x104, WM_LBUTTONDOWN = 0x201;
+    public const uint SYNCHRONIZE = 0x100000, PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
+
+    public delegate IntPtr HookProc(int code, IntPtr wParam, IntPtr lParam);
+    public delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr lParam);
+
+    [DllImport("user32.dll")] public static extern IntPtr SetWindowsHookEx(int id, HookProc proc, IntPtr hmod, uint thread);
+    [DllImport("user32.dll")] public static extern bool UnhookWindowsHookEx(IntPtr hook);
+    [DllImport("user32.dll")] public static extern IntPtr CallNextHookEx(IntPtr hook, int code, IntPtr wParam, IntPtr lParam);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr GetModuleHandle(string? name);
+    [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(POINT p);
+    [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
+    [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc cb, IntPtr lParam);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassName(IntPtr hwnd, System.Text.StringBuilder s, int n);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr hwnd, System.Text.StringBuilder s, int n);
+    [DllImport("kernel32.dll", SetLastError = true)] public static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
+    [DllImport("kernel32.dll")] public static extern bool GetProcessTimes(IntPtr h, out long creation, out long exit, out long kernel, out long user);
+    [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr h);
+    [DllImport("user32.dll")] public static extern bool DestroyIcon(IntPtr h);
+
+    public static string ClassOf(IntPtr hwnd)
+    {
+        var s = new System.Text.StringBuilder(256);
+        return GetClassName(hwnd, s, s.Capacity) > 0 ? s.ToString() : "";
+    }
+
+    public static string TitleOf(IntPtr hwnd)
+    {
+        var s = new System.Text.StringBuilder(1024);
+        GetWindowText(hwnd, s, s.Capacity);
+        return s.ToString();
+    }
+
+    /// Process creation time (FILETIME); with the pid it identifies a process even after the pid is reused. 0 = gone.
+    public static long CreationTime(int pid)
+    {
+        var h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, (uint)pid);
+        if (h == IntPtr.Zero) return 0;
+        try { return GetProcessTimes(h, out var c, out _, out _, out _) ? c : 0; }
+        finally { CloseHandle(h); }
+    }
+
     /// The window as you see it. GetWindowRect includes Windows 10/11's invisible resize borders (~7px),
     /// which would put the glow a few pixels away from the real edge.
     public static RECT VisibleRect(IntPtr hwnd)

@@ -4,8 +4,6 @@ using static ShoWork.Native;
 
 namespace ShoWork;
 
-public enum WorkState { Idle, Working, Done, Input }
-
 /// The glow around one target window: a click-through, never-activated layered window kept directly
 /// BELOW the target in z-order, so the target covers the middle and only the ring around it shows
 /// (same idea as the Mac version's `order(.below, relativeTo:)`).

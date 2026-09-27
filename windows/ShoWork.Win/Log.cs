@@ -4,7 +4,7 @@ namespace ShoWork;
 static class Log
 {
     static readonly string? path = Environment.GetEnvironmentVariable("SHOWORK_DEBUG") == "1"
-        ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ShoWork42", "agent.log") : null;
+        ? Path.Combine(Wire.SupportDir, "agent.log") : null;
 
     public static void Note(string s)
     {
