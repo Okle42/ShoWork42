@@ -1,2 +1,5 @@
 bin/
 obj/
+tests/w1_result.txt
+tests/w1_console.txt
+tests/w1_agent.log

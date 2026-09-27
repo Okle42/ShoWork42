@@ -25,6 +25,9 @@ sealed class Engine
     readonly Control ui;
     readonly Dictionary<int, Tab> tabs = new();
     readonly Dictionary<IntPtr, GlowWindow> glows = new();
+    // console of each AI process seen so far, kept after its glow is cleared: the next prompt lights up
+    // at once instead of after another helper run. Pruned when the process is gone.
+    readonly Dictionary<(int pid, long created), IntPtr> consoles = new();
     readonly System.Windows.Forms.Timer watchdog = new() { Interval = 250 };
     readonly ClearWatcher clear;
     readonly List<IntPtr> winHooks = new();
@@ -71,6 +74,8 @@ sealed class Engine
         {
             if (m.Event == WorkEvent.Clear) return;
             t = new Tab { Pid = m.Pid, Created = created, Agent = m.Agent };
+            foreach (var k in consoles.Keys.Where(k => CreationTime(k.pid) != k.created).ToList()) consoles.Remove(k);
+            if (consoles.TryGetValue((m.Pid, created), out var known) && IsWindow(known)) t.Console = known;
             if (!Watch(t)) return;
             tabs[m.Pid] = t;
         }
@@ -129,6 +134,7 @@ sealed class Engine
             t.Resolving = false;
             var info = r.Result.FirstOrDefault(x => x.Pid == t.Pid);
             t.Console = info.Hwnd;
+            if (info.Hwnd != IntPtr.Zero) consoles[(t.Pid, t.Created)] = info.Hwnd;
             Log.Note($"RESOLVE pid={t.Pid} console={info.Hwnd} [{(info.Hwnd == IntPtr.Zero ? "" : ClassOf(info.Hwnd))}] window={t.Window}");
             if (tabs.ContainsKey(t.Pid)) Render();
         }, TaskScheduler.FromCurrentSynchronizationContext());
@@ -138,6 +144,7 @@ sealed class Engine
     /// pane on screen (see Resolver.LooksSelected); red stays until the AI moves on.
     void Looked(IntPtr window)
     {
+        Log.Note($"LOOKED {window} [{ClassOf(window)}]");
         var greens = tabs.Values.Where(t => t.State == WorkState.Done && t.Window == window).ToList();
         if (greens.Count == 0) return;
         var panes = Resolver.IsTerminal(window) ? Resolver.PanesOf(window) : new List<IntPtr>();
@@ -310,7 +317,12 @@ sealed class Engine
                 clearWatcher = clear.Active,
             };
             File.WriteAllText(path + ".tmp", JsonSerializer.Serialize(o));
-            File.Move(path + ".tmp", path, overwrite: true);
+            // a test reading the file at that instant makes the replace fail: retry briefly
+            for (int i = 0; ; i++)
+            {
+                try { File.Move(path + ".tmp", path, overwrite: true); break; }
+                catch (IOException) when (i < 10) { Thread.Sleep(10); }
+            }
         }
         catch { }
     }
