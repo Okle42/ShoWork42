@@ -12,6 +12,11 @@ static class Wire
     public static string PipeName(string sid) =>
         Environment.GetEnvironmentVariable("SHOWORK_PIPE") is { Length: > 0 } p ? p : "ShoWork42-" + sid;
 
+    /// %LOCALAPPDATA%ShoWork42 (state, log, install snapshot). SHOWORK_HOME overrides it for tests.
+    public static string SupportDir =>
+        Environment.GetEnvironmentVariable("SHOWORK_HOME") is { Length: > 0 } h ? h
+            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ShoWork42");
+
     /// Agent names go into JSON and logs verbatim, so keep them boring.
     public static bool ValidAgent(string s) =>
         s.Length is > 0 and <= 32 && s.All(c => c is >= 'a' and <= 'z' or >= '0' and <= '9' or '-' or '_');
