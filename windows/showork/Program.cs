@@ -40,10 +40,11 @@ static class Cli
             else if (args[i] == "--pid") int.TryParse(args[i + 1], out pid);
         }
         if (!Wire.ValidAgent(agent)) return;
-        if (pid <= 0) pid = FindAI(agent);
+        long stamp = 0;
+        if (pid <= 0) (pid, stamp) = FindAI(agent);
         if (pid <= 0) return;                // not under an AI we know: nothing to light up
 
-        var line = Encoding.UTF8.GetBytes($"{{\"v\":1,\"event\":\"{ev}\",\"agent\":\"{agent}\",\"pid\":{pid}}}\n");
+        var line = Encoding.UTF8.GetBytes($"{{\"v\":1,\"event\":\"{ev}\",\"agent\":\"{agent}\",\"pid\":{pid},\"t\":{stamp}}}\n");
         var path = @"\\.\pipe\" + Wire.PipeName(UserSid());
         for (int attempt = 0; attempt < 2; attempt++)
         {
@@ -61,26 +62,28 @@ static class Cli
         }
     }
 
-    /// Walk up from our parent (Git Bash → … → claude.exe) to the AI process.
-    static int FindAI(string agent)
+    /// Walk up from our parent (Git Bash → … → claude.exe) to the AI process. Also returns when the AI
+    /// started this hook: the creation time of the process it spawned for it (the hook shell). Async hooks
+    /// can arrive out of order; the agent drops anything older than what it already has.
+    static (int pid, long stamp) FindAI(string agent)
     {
         var exe = agent switch { "claude" => "claude.exe", _ => null };
-        if (exe == null) return 0;
+        if (exe == null) return (0, 0);
         var procs = Snapshot();
         int me = Environment.ProcessId;
-        if (!procs.TryGetValue(me, out var cur)) return 0;
+        if (!procs.TryGetValue(me, out var cur)) return (0, 0);
         int child = me;
         for (int hop = 0; hop < 16; hop++)
         {
             int p = cur.ppid;
-            if (p <= 4 || !procs.TryGetValue(p, out var parent)) return 0;
+            if (p <= 4 || !procs.TryGetValue(p, out var parent)) return (0, 0);
             // a dead parent's pid can be reused by a younger process: a real parent is older than its child
-            if (!OlderThan(p, child)) return 0;
-            if (parent.exe.Equals(exe, StringComparison.OrdinalIgnoreCase)) return p;
+            if (!OlderThan(p, child)) return (0, 0);
+            if (parent.exe.Equals(exe, StringComparison.OrdinalIgnoreCase)) return (p, CreationTime(child));
             child = p;
             cur = parent;
         }
-        return 0;
+        return (0, 0);
     }
 
     static Dictionary<int, (int ppid, string exe)> Snapshot()

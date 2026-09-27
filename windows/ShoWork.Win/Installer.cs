@@ -37,31 +37,40 @@ static class Installer
 
     /// Claude Code on Windows runs hook commands with Git Bash: quote the path (the user folder has a
     /// space) and use forward slashes (a backslash is an escape character to bash).
+    ///
+    /// Git Bash + a .NET exe costs ~0.2 s per hook, so the purple hooks that fire on every tool call run
+    /// async (Claude doesn't wait for them); showork stamps each event with the hook's start time and the
+    /// agent drops a late, older one. The green/red/clear hooks stay synchronous, like the Mac version.
     public static JsonObject OurHooks(string showork)
     {
-        JsonObject Cmd(string ev) => new()
+        JsonObject Cmd(string ev, bool async)
         {
-            ["type"] = "command",
-            ["command"] = $"\"{showork.Replace('\\', '/')}\" emit {ev} --agent claude",
-            ["timeout"] = 2,
-        };
-        JsonArray Group(string? matcher, string ev)
+            var c = new JsonObject
+            {
+                ["type"] = "command",
+                ["command"] = $"\"{showork.Replace('\\', '/')}\" emit {ev} --agent claude",
+                ["timeout"] = 2,
+            };
+            if (async) c["async"] = true;
+            return c;
+        }
+        JsonArray Group(string? matcher, string ev, bool async = false)
         {
             var g = new JsonObject();
             if (matcher != null) g["matcher"] = matcher;
-            g["hooks"] = new JsonArray(Cmd(ev));
+            g["hooks"] = new JsonArray(Cmd(ev, async));
             return new JsonArray(g);
         }
         // The question dialog (AskUserQuestion) shows at once, but its elicitation Notification arrives
         // ~6 s later (Mac, 09-28), so its PreToolUse turns red directly — and the catch-all "working"
         // excludes it, or a late purple could land on top of the red. Permission prompts have no such delay.
         var pre = Group("AskUserQuestion", "input");
-        pre.Add(Group("^(?!AskUserQuestion$).*", "working")[0]!.DeepClone());
+        pre.Add(Group("^(?!AskUserQuestion$).*", "working", async: true)[0]!.DeepClone());
         return new JsonObject
         {
-            ["UserPromptSubmit"] = Group(null, "working"),
+            ["UserPromptSubmit"] = Group(null, "working", async: true),
             ["PreToolUse"] = pre,
-            ["PostToolUse"] = Group("*", "working"),
+            ["PostToolUse"] = Group("*", "working", async: true),
             ["Stop"] = Group(null, "done"),
             // permission prompts / questions only — the 60 s idle reminder would turn green into red
             ["Notification"] = Group("permission_prompt|elicitation_dialog", "input"),

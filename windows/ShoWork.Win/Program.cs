@@ -77,7 +77,8 @@ static class Program
         var hooks = Installer.InstallHooks(settings, Path.Combine(bin, "showork.exe"));
         Installer.SetAutostart(true, agent);
         if (!Process.GetProcessesByName("ShoWorkAgent").Any(p => p.Id != Environment.ProcessId))
-            Process.Start(new ProcessStartInfo(agent) { UseShellExecute = false, WorkingDirectory = bin });
+            // ShellExecute: the agent must not inherit our stdout (a caller piping us would wait forever)
+            Process.Start(new ProcessStartInfo(agent) { UseShellExecute = true, WorkingDirectory = bin });
         return $"installed to {bin}; hooks: {hooks}; autostart: on; agent: running";
     }
 
@@ -105,7 +106,7 @@ static class Program
             reload: () =>
             {
                 engine.Stop();
-                Process.Start(new ProcessStartInfo(Environment.ProcessPath!, $"--after {Environment.ProcessId}") { UseShellExecute = false });
+                Process.Start(new ProcessStartInfo(Environment.ProcessPath!, $"--after {Environment.ProcessId}") { UseShellExecute = true });
                 Application.Exit();
             },
             quit: () => { engine.Stop(); Application.Exit(); });

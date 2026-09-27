@@ -14,7 +14,8 @@ sealed class Engine
         public required long Created;             // pid + creation time = this process, even after pid reuse
         public required string Agent;
         public WorkState State;
-        public IntPtr Console;                    // ConsoleWindowClass or PseudoConsoleWindow; 0 = not resolved yet
+        public long LastStamp;                    // when the AI started the newest hook applied so far
+        public IntPtr Console;                   // ConsoleWindowClass or PseudoConsoleWindow; 0 = not resolved yet
         public bool Resolving;
         public RegisteredWaitHandle? Wait;
         public WaitHandle? Process;
@@ -73,6 +74,9 @@ sealed class Engine
             if (!Watch(t)) return;
             tabs[m.Pid] = t;
         }
+        // async hooks race: a PostToolUse "working" started before Stop may land after it
+        if (m.Stamp != 0 && m.Stamp < t.LastStamp) { Log.Note($"EVT {PipeServer.Describe(m)} dropped: older than the last event"); return; }
+        if (m.Stamp != 0) t.LastStamp = m.Stamp;
         var before = t.State;
         t.State = StateMachine.Next(t.State, m.Event);
         Log.Note($"EVT {PipeServer.Describe(m)} {before}→{t.State} console={t.Console} window={t.Window}");
