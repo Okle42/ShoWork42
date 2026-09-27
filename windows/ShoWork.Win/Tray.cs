@@ -15,10 +15,15 @@ sealed class Tray : IDisposable
 
     public Tray(Action reload, Action quit)
     {
-        var menu = new ContextMenuStrip();
-        menu.Items.Add("重新載入", null, (_, _) => reload());
-        menu.Items.Add("結束", null, (_, _) => quit());
-        icon.ContextMenuStrip = menu;
+        // the menu (ToolStrip) is a big part of WinForms: build it the first time someone clicks the icon
+        icon.MouseDown += (_, _) =>
+        {
+            if (icon.ContextMenuStrip != null) return;
+            var menu = new ContextMenuStrip();
+            menu.Items.Add("重新載入", null, (_, _) => reload());
+            menu.Items.Add("結束", null, (_, _) => quit());
+            icon.ContextMenuStrip = menu;
+        };
         Update(0, 0, 0);
         icon.Visible = true;
     }

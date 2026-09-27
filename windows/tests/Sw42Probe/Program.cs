@@ -43,7 +43,9 @@ static class Probe
                 case "front":
                 {
                     var h = new IntPtr(long.Parse(a[1]));
-                    Tap(0x10);
+                    // being the last input lifts the foreground lock; a zero-distance mouse move is input
+                    // but not a key or click, so it doesn't acknowledge green in whatever window is in front
+                    mouse_event(1, 0, 0, 0, UIntPtr.Zero);
                     SetForegroundWindow(h);
                     Thread.Sleep(250);
                     o.WriteLine(GetForegroundWindow() == h ? "ok" : "failed");

@@ -11,6 +11,11 @@
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <AssemblyName>ShoWorkAgent</AssemblyName>
     <RootNamespace>ShoWork</RootNamespace>
+    <!-- a resident tray agent: small footprint over peak throughput (idle target < 60 MB) -->
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+    <TieredPGO>false</TieredPGO>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <UseSystemResourceKeys>true</UseSystemResourceKeys>
   </PropertyGroup>
 
   <ItemGroup>
