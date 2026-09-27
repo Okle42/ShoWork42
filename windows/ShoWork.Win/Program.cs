@@ -34,7 +34,7 @@ static class Program
             case "--install": return Report(() => Install(settings));
             case "--uninstall": return Report(() => Uninstall(settings));
             case "--status":
-                return Report(() => $"hooks installed: {Installer.CountOurs(settings)}/7   autostart: {Installer.Autostart() ?? "off"}   " +
+                return Report(() => $"hooks installed: {Installer.CountOurs(settings)}/{Installer.OurHooks("x").Sum(kv => kv.Value!.AsArray().Count)}   autostart: {Installer.Autostart() ?? "off"}   " +
                                     $"agent running: {Process.GetProcessesByName("ShoWorkAgent").Any(p => p.Id != Environment.ProcessId)}");
         }
         if (args.Length == 3 && args[0] == "--console-hwnd")
