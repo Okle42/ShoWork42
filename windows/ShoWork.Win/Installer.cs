@@ -70,6 +70,9 @@ static class Installer
         {
             ["UserPromptSubmit"] = Group(null, "working", async: true),
             ["PreToolUse"] = pre,
+            // Windows 09-28: the permission_prompt Notification also comes ~6 s after the dialog appears;
+            // PermissionRequest fires as the dialog opens. (Answer within 6 s and the Notification never comes.)
+            ["PermissionRequest"] = Group(null, "input"),
             ["PostToolUse"] = Group("*", "working", async: true),
             ["Stop"] = Group(null, "done"),
             // permission prompts / questions only — the 60 s idle reminder would turn green into red
