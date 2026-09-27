@@ -13,4 +13,10 @@
     <RootNamespace>ShoWork</RootNamespace>
   </PropertyGroup>
 
+  <ItemGroup>
+    <Compile Include="..\Shared\Wire.cs" Link="Wire.cs" />
+    <!-- showork.exe (the hook CLI and console helper) must sit next to ShoWorkAgent.exe -->
+    <ProjectReference Include="..\showork\showork.csproj" />
+  </ItemGroup>
+
 </Project>
