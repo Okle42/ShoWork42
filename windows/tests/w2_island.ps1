@@ -4,6 +4,7 @@
 # 用法：powershell -ExecutionPolicy Bypass -File w2_island.ps1 -Agent <ShoWorkAgent.exe> -Out <資料夾>
 param([string]$Agent, [string]$Out)
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'guard.ps1')
 New-Item -ItemType Directory -Force $Out | Out-Null
 $showork = Join-Path (Split-Path $Agent) 'showork.exe'
 Add-Type -ReferencedAssemblies System.Drawing @'

@@ -3,6 +3,7 @@
 # 用法（要在使用者桌面的互動工作階段執行）：powershell -File w0_e2e.ps1 <ShoWorkAgent.exe 路徑> <結果檔>
 param([string]$Agent, [string]$Out)
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'guard.ps1')
 $Host.UI.RawUI.WindowTitle = 'ShoWork42 W0 驗收（Claude Code）'
 Add-Type @'
 using System; using System.Runtime.InteropServices;

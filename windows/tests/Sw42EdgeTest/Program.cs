@@ -16,6 +16,19 @@ static class EdgeTest
     [STAThread]
     static int Main(string[] a)
     {
+        // same guard as tests\guard.ps1: with the user's own auto-arrange on, our test windows would make it
+        // rearrange the user's terminals
+        try
+        {
+            var real = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ShoWork42", "settings.json");
+            if (File.Exists(real) && System.Text.Json.JsonDocument.Parse(File.ReadAllText(real)).RootElement
+                    .TryGetProperty("general", out var g) && g.TryGetProperty("autoArrange", out var on) && on.GetBoolean())
+            {
+                Console.WriteLine("拒絕執行：你自己的 ShoWork42 開著「自動排版」，請先在系統匣選單取消勾選。");
+                return 2;
+            }
+        }
+        catch (Exception e) when (e is IOException or System.Text.Json.JsonException or InvalidOperationException) { }
         var bin = a[0]; var outFile = a[1];
         var work = Path.Combine(Path.GetTempPath(), "sw42-edge-" + DateTime.Now.ToString("yyyyMMdd-HHmmss"));
         Directory.CreateDirectory(Path.Combine(work, "home"));

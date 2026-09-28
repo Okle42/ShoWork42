@@ -119,7 +119,13 @@ static class Program
         TrayHooks.GetAutoArrange = () => settings.General.AutoArrange;
         TrayHooks.SetAutoArrange = on => settings.SetGeneral(settings.General with { AutoArrange = on });
         Arranger.Start();                                      // W3: Ctrl+Alt+L, auto arrange (stops itself on exit)
-        if (Environment.GetEnvironmentVariable("SHOWORK_OPEN_SETTINGS") == "1") ui.BeginInvoke(SettingsWindow.ShowSingleton);   // W2 tests
+        // W2 tests: SHOWORK_OPEN_SETTINGS=1 opens the settings window at start, =N (seconds) opens it later, like a user would
+        if (int.TryParse(Environment.GetEnvironmentVariable("SHOWORK_OPEN_SETTINGS"), out var openAfter) && openAfter > 0)
+        {
+            var open = new System.Windows.Forms.Timer { Interval = openAfter == 1 ? 1 : openAfter * 1000 };
+            open.Tick += (_, _) => { open.Dispose(); SettingsWindow.ShowSingleton(); };
+            open.Start();
+        }
         Application.Run();
         return 0;
     }

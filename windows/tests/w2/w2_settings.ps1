@@ -4,6 +4,7 @@
 # 用法：powershell -File w2_settings.ps1 -Agent <ShoWorkAgent.exe> -Work <暫存資料夾>
 param([string]$Agent, [string]$Work)
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot '..\guard.ps1')
 Add-Type -Path "$PSScriptRoot\Win.cs" -ReferencedAssemblies System.Drawing
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
 Add-Type @'
@@ -56,7 +57,8 @@ function Send($ev, $procId) {
   $p.Write($b, 0, $b.Length); $p.Dispose()
 }
 function StartAgent([bool]$settings) {
-  $env:SHOWORK_OPEN_SETTINGS = $(if ($settings) { '1' } else { '' })
+  # opened 4 s after start, the way a user opens it from the tray (not in the middle of the agent's own start-up)
+  $env:SHOWORK_OPEN_SETTINGS = $(if ($settings) { '4' } else { '' })
   $p = Start-Process $Agent -PassThru
   Start-Sleep 3
   return $p
@@ -115,9 +117,12 @@ try {
 
   # 2. agent + settings window
   $ag = StartAgent $true
+  # sample the working set every 200 ms from before the window opens until it is closed (not one lucky instant)
+  $sampler = Start-Job -ArgumentList $ag.Id -ScriptBlock {
+    param($id) $max = 0
+    while ($true) { $p = Get-Process -Id $id -ErrorAction SilentlyContinue; if (-not $p) { break }; if ($p.WorkingSet64 -gt $max) { $max = $p.WorkingSet64 }; $max; Start-Sleep -Milliseconds 200 }
+  }
   $win = SettingsWindow $ag
-  $ag.Refresh(); $openWs = $ag.WorkingSet64 / 1MB
-  Write-Host ('  info: working set with the settings window open {0:N1} MB' -f $openWs)
   Send 'working' $sh; Start-Sleep 2
   Check 'working lights purple' ((GlowState) -eq 'working') (GlowState)
   Send 'done' $kid; Start-Sleep 1
@@ -149,6 +154,10 @@ try {
   $runKey = (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -ErrorAction SilentlyContinue).ShoWork42
   Check '開機時啟動 shows the registry state (not changed by the test)' ((ToggleState $win '開機時啟動') -eq $(if ($runKey) { 'On' } else { 'Off' })) ''
 
+  $ag.Refresh()
+  $peak = (@(Receive-Job $sampler -Keep) | Measure-Object -Maximum).Maximum / 1MB
+  Stop-Job $sampler; Remove-Job $sampler
+  Check ('working set with the settings window open and used: peak {0:N1} MB < 60 MB' -f $peak) ($peak -lt 60) ('now {0:N1} MB, private {1:N1} MB (UIA client attached)' -f ($ag.WorkingSet64 / 1MB), ($ag.PrivateMemorySize64 / 1MB))
   $win.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern).Close(); Start-Sleep 3
   $ag.Refresh(); $closedWs = $ag.WorkingSet64 / 1MB
   Write-Host ('  info: working set after closing it {0:N1} MB' -f $closedWs)

@@ -17,7 +17,12 @@ sealed class SettingsWindow : Form
     /// Open the settings window, or bring the open one to the front. UI thread only.
     public static void ShowSingleton()
     {
-        if (instance == null || instance.IsDisposed) { instance = new SettingsWindow(); instance.Show(); }
+        if (instance == null || instance.IsDisposed)
+        {
+            TrimWorkingSet();                  // drop the agent's stale start-up pages first: opening costs ~15 MB on top
+            instance = new SettingsWindow();
+            instance.Show();
+        }
         else { instance.autostartOn = Installer.Autostart() != null; instance.FromSettings(); }   // --uninstall may have run meanwhile
         if (instance.WindowState == FormWindowState.Minimized) instance.WindowState = FormWindowState.Normal;
         instance.Activate();
@@ -283,6 +288,26 @@ sealed class SettingsWindow : Form
         base.OnKeyDown(e);
     }
 
+    /// The previews are built before the form is visible, so they can only start animating now. Once the window
+    /// is up, most of what opening it touched (JIT, control set-up, font loading) is never used again: trim the
+    /// working set once so the open window costs what it actually keeps using, not what it took to build it.
+    protected override void OnShown(EventArgs e)
+    {
+        base.OnShown(e);
+        foreach (var p in previews) p.Animate(glowPage.Visible);
+        var t = new System.Windows.Forms.Timer { Interval = 1500 };
+        t.Tick += (_, _) => { t.Dispose(); TrimWorkingSet(); };
+        t.Start();
+    }
+
+    static void TrimWorkingSet()
+    {
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        using var me = Process.GetCurrentProcess();
+        SetProcessWorkingSetSize(me.Handle, -1, -1);
+    }
+
     /// Minimised: the previews stop drawing.
     protected override void OnResize(EventArgs e)
     {
@@ -301,13 +326,7 @@ sealed class SettingsWindow : Form
         // hand the window's memory back while nobody looks: collect it, then trim the working set — the pages the
         // window touched (WinForms controls, fonts, GDI+) stay out until it opens again; whatever the agent itself
         // still uses comes back as cheap soft faults. What Windows does to a minimised app.
-        SynchronizationContext.Current?.Post(_ =>
-        {
-            GC.Collect();
-            GC.WaitForPendingFinalizers();
-            using var me = Process.GetCurrentProcess();
-            SetProcessWorkingSetSize(me.Handle, -1, -1);
-        }, null);
+        SynchronizationContext.Current?.Post(_ => TrimWorkingSet(), null);
     }
 
     [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
