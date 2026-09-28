@@ -35,8 +35,14 @@ public sealed record StateLook(bool Enabled, string Hex, GlowStyle Style, double
     };
 }
 
-/// Settings that are not about the glow. AutoArrange is off by default on Windows (the arranger reads it).
-public sealed record GeneralSettings(bool AutoArrange = false, bool Autostart = false);
+/// Where the light goes (Kang 09-29): Inward = from the window's edge towards its middle, drawn just ABOVE the
+/// window; Outward = around the window, drawn just below it (the W0–W4 look).
+public enum GlowDirection { Inward, Outward }
+
+/// Settings that are not about one state's look. AutoArrange is off by default on Windows (the arranger reads it).
+/// Direction is here, not per state: it decides where the glow sits in z-order (above or below the window), and a
+/// window changing state every few seconds should not have its glow jump between inside and outside.
+public sealed record GeneralSettings(bool AutoArrange = false, bool Autostart = false, GlowDirection Direction = GlowDirection.Inward);
 
 /// Glow looks and general settings, persisted as %LOCALAPPDATA%\ShoWork42\settings.json. Changes apply at once
 /// (Changed fires on the UI thread) and reach the disk shortly after, so dragging a slider is not a write per pixel.
@@ -60,6 +66,8 @@ sealed class GlowSettings
     /// Fired after any change, on the UI thread.
     public event Action? Changed;
     public GeneralSettings General { get; private set; } = new();
+    /// The glow shines into the window (the default) rather than around it.
+    public bool Inward => General.Direction == GlowDirection.Inward;
 
     public static string PathOnDisk => Path.Combine(Wire.SupportDir, "settings.json");
 
@@ -135,9 +143,27 @@ sealed class GlowSettings
                     try { if (l[Key(s)]?.Deserialize<StateLook>(Json) is { } v && v.Hex != null) looks[s] = v.Clamped(); }
                     catch (Exception e) { Log.Note($"SETTINGS {Key(s)}: {e.Message}"); }
             if (root?["general"] is JsonObject g)
+            {
+                // direction is read on its own: a bad value only resets it (to Inward), not 自動排版 with it
+                var dir = g["direction"];
+                g.Remove("direction");
                 try { General = g.Deserialize<GeneralSettings>(Json) ?? General; } catch (Exception e) { Log.Note($"SETTINGS general: {e.Message}"); }
+                General = General with { Direction = ParseDirection(dir) };
+            }
         }
         catch (Exception e) { Log.Note($"SETTINGS load {e.Message}"); }
+    }
+
+    /// "outward" (any case) ⇒ Outward; missing (settings from before 09-29), unknown or broken ⇒ Inward.
+    static GlowDirection ParseDirection(JsonNode? n)
+    {
+        try
+        {
+            return n is JsonValue v && v.GetValueKind() == JsonValueKind.String
+                   && string.Equals(v.GetValue<string>(), "outward", StringComparison.OrdinalIgnoreCase)
+                ? GlowDirection.Outward : GlowDirection.Inward;
+        }
+        catch { return GlowDirection.Inward; }
     }
 
     /// Windows "Animation effects" off (Settings › Accessibility › Visual effects) = the Mac's Reduce Motion:

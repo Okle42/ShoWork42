@@ -15,7 +15,7 @@ static class Native
     public const int ULW_ALPHA = 2;
     public const byte AC_SRC_OVER = 0, AC_SRC_ALPHA = 1;
     public const uint SWP_NOSIZE = 0x1, SWP_NOMOVE = 0x2, SWP_NOACTIVATE = 0x10, SWP_SHOWWINDOW = 0x40, SWP_HIDEWINDOW = 0x80;
-    public const uint GW_HWNDNEXT = 2;
+    public const uint GW_HWNDNEXT = 2, GW_HWNDPREV = 3;
     public const int DWMWA_EXTENDED_FRAME_BOUNDS = 9, DWMWA_CLOAKED = 14;
 
     public const uint EVENT_SYSTEM_FOREGROUND = 0x0003, EVENT_SYSTEM_MINIMIZESTART = 0x0016, EVENT_SYSTEM_MINIMIZEEND = 0x0017;
@@ -136,6 +136,14 @@ static class Native
     {
         var h = GetWindow(hwnd, GW_HWNDNEXT);
         for (int i = 0; i < 64 && h != IntPtr.Zero && !IsWindowVisible(h); i++) h = GetWindow(h, GW_HWNDNEXT);
+        return h;
+    }
+
+    /// First VISIBLE window above `hwnd` in z-order (the inward glow's check; same invisible helpers as below).
+    public static IntPtr NextVisibleAbove(IntPtr hwnd)
+    {
+        var h = GetWindow(hwnd, GW_HWNDPREV);
+        for (int i = 0; i < 64 && h != IntPtr.Zero && !IsWindowVisible(h); i++) h = GetWindow(h, GW_HWNDPREV);
         return h;
     }
 

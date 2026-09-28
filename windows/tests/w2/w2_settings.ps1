@@ -46,6 +46,9 @@ function Pick($root, $combo, $item) {
   (Find $c $item).GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select(); Start-Sleep -Milliseconds 200
   $c.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Collapse()
 }
+function Choose($root, $name) { (FindT $root $name ([System.Windows.Automation.ControlType]::RadioButton)).GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select(); Start-Sleep -Milliseconds 400 }
+function Chosen($root, $name) { (FindT $root $name ([System.Windows.Automation.ControlType]::RadioButton)).GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Current.IsSelected }
+function LastShow { (Select-String -Path "$Work\agent.log" -Pattern ' SHOW ' | Select-Object -Last 1).Line }
 function Page($root, $name) { (Find $root $name).GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select(); Start-Sleep -Milliseconds 400 }
 function Status { try { Get-Content "$Work\status.json" -Raw | ConvertFrom-Json } catch { $null } }
 function GlowState { $s = Status; if ($s -and $s.glows) { ($s.glows | Select-Object -First 1).state } else { 'none' } }
@@ -141,6 +144,12 @@ try {
   Pick $win '款式' '流光繞行'; Start-Sleep 1
   $log = Get-Content "$Work\agent.log" -Raw
   Check 'style change restyles the live glow' ($log -match 'style=Orbit parts=4') ''
+  # 光暈方向: 朝內 by default (no direction in settings.json yet); 朝外 re-stacks the live glow below the window at once
+  Check '光暈方向 shows 朝內 by default' ((Chosen $win '光暈方向朝內') -and -not (Chosen $win '光暈方向朝外')) ''
+  Check 'the live glow is inward' ((LastShow) -match 'inward depth=\d+ style=Orbit parts=4') (LastShow)
+  Shot $ag 'settings-glow-inward.png'
+  Choose $win '光暈方向朝外'; Start-Sleep 1
+  Check '朝外 turns the live glow outward at once' ((LastShow) -match 'outward pad=\d+ style=Orbit parts=4') (LastShow)
   SetRange $win '亮度' 12; SetRange $win '寬度' 15; SetRange $win '速度' 20; Start-Sleep 1
   Shot $ag 'settings-glow.png'
   Page $win '一般'
@@ -151,6 +160,7 @@ try {
   Check 'settings.json: done = orbit, brightness 1.2, width 1.5, speed 2.0' (($s.looks.done.style -eq 'orbit') -and ($s.looks.done.brightness -eq 1.2) -and ($s.looks.done.width -eq 1.5) -and ($s.looks.done.speed -eq 2)) ($s.looks.done | ConvertTo-Json -Compress)
   Check 'settings.json: working untouched' (($s.looks.working.style -eq 'breathe') -and ($s.looks.working.hex -eq '#9E66FF')) ($s.looks.working | ConvertTo-Json -Compress)
   Check 'settings.json: autoArrange on' ($s.general.autoArrange -eq $true) ($s.general | ConvertTo-Json -Compress)
+  Check 'settings.json: direction outward' ($s.general.direction -eq 'outward') ($s.general | ConvertTo-Json -Compress)
   $runKey = (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -ErrorAction SilentlyContinue).ShoWork42
   Check '開機時啟動 shows the registry state (not changed by the test)' ((ToggleState $win '開機時啟動') -eq $(if ($runKey) { 'On' } else { 'Off' })) ''
 
@@ -173,7 +183,11 @@ try {
   Check 'reload: 已完成 亮度 1.2 / 寬度 1.5 / 速度 2.0' (((GetRange $win '亮度') -eq 12) -and ((GetRange $win '寬度') -eq 15) -and ((GetRange $win '速度') -eq 20)) ''
   Page $win '一般'
   Check 'reload: autoArrange kept' ((ToggleState $win '視窗數量變動時自動排版') -eq 'On') ''
+  Page $win '光暈'
+  Check 'reload: 光暈方向 朝外 kept' ((Chosen $win '光暈方向朝外') -and -not (Chosen $win '光暈方向朝內')) ''
+  Choose $win '光暈方向朝內'
   $win.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern).Close(); Start-Sleep 1
+  Check 'settings.json: back to direction inward' ((Settings).general.direction -eq 'inward') ((Settings).general | ConvertTo-Json -Compress)
 }
 finally {
   if ($ag) { Stop-Process -Id $ag.Id -ErrorAction SilentlyContinue }
