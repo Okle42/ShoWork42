@@ -110,6 +110,7 @@ static class Program
                 Application.Exit();
             },
             quit: () => { engine.Stop(); Application.Exit(); });
+        if (Environment.GetEnvironmentVariable("SHOWORK_OPEN_SETTINGS") == "1") ui.BeginInvoke(SettingsWindow.ShowSingleton);   // W2 tests
         Application.Run();
         return 0;
     }
