@@ -18,6 +18,7 @@ sealed class SettingsWindow : Form
     public static void ShowSingleton()
     {
         if (instance == null || instance.IsDisposed) { instance = new SettingsWindow(); instance.Show(); }
+        else { instance.autostartOn = Installer.Autostart() != null; instance.FromSettings(); }   // --uninstall may have run meanwhile
         if (instance.WindowState == FormWindowState.Minimized) instance.WindowState = FormWindowState.Normal;
         instance.Activate();
     }
@@ -35,6 +36,7 @@ sealed class SettingsWindow : Form
     readonly GlowSettings settings = GlowSettings.Shared;
     WorkState editing = WorkState.Working;
     bool syncing;                                          // updating controls from settings: don't write back
+    bool autostartOn = Installer.Autostart() != null;      // the registry, read on open and after a change (not per slider tick)
 
     readonly RadioButton tabGlow, tabGeneral;
     readonly Panel glowPage, generalPage;
@@ -211,7 +213,7 @@ sealed class SettingsWindow : Form
             foreach (var c in new Control[] { colorButton, style, sliders[0].bar, sliders[1].bar, sliders[2].bar }) c.Enabled = l.Enabled;
             reset.Text = $"回復「{StateName(editing)}」的預設值";
             autoArrange.Checked = settings.General.AutoArrange;
-            autostart.Checked = Installer.Autostart() != null;          // the registry is the truth
+            autostart.Checked = autostartOn;                            // the registry is the truth
         }
         finally { syncing = false; }
     }
@@ -229,7 +231,9 @@ sealed class SettingsWindow : Form
         var installed = Path.Combine(Installer.InstallDir, "ShoWorkAgent.exe");
         try { Installer.SetAutostart(on, File.Exists(installed) ? installed : Environment.ProcessPath!); }
         catch (Exception e) { Log.Note($"AUTOSTART {e.Message}"); }
-        settings.SetGeneral(settings.General with { Autostart = Installer.Autostart() != null });
+        autostartOn = Installer.Autostart() != null;
+        settings.SetGeneral(settings.General with { Autostart = autostartOn });
+        FromSettings();            // always: when the write failed SetGeneral changes nothing, fires nothing, and the box would lie
     }
 
     // MARK: building blocks

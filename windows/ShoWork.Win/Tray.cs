@@ -15,8 +15,9 @@ sealed class Tray : IDisposable
     readonly Engine engine;
     readonly NotifyIcon icon = new();
     readonly List<(IntPtr h, Icon icon)> frames = new();
-    (int working, int done, int input) shown = (-1, -1, -1);
-    System.Windows.Forms.Timer? pulse, coalesce;
+    // the dot's colour is part of what is shown: the settings page can change it without any count changing
+    (int working, int done, int input, Color color) shown = (-1, -1, -1, Color.Empty);
+    System.Windows.Forms.Timer? pulse, coalesce, trim;
     int pulseAt;
     IslandFlyout? flyout;
     long flyoutClosedAt;
@@ -30,6 +31,7 @@ sealed class Tray : IDisposable
         icon.MouseDown += (_, e) => { if (e.Button == MouseButtons.Right && icon.ContextMenuStrip == null) icon.ContextMenuStrip = Menu(reload, quit); };
         icon.MouseClick += (_, e) => { if (e.Button == MouseButtons.Left) ToggleFlyout(); };
         engine.StateChanged += OnStateChanged;
+        GlowSettings.Shared.Changed += OnSettingsChanged;
         Update(0, 0, 0);
         icon.Visible = true;
     }
@@ -54,11 +56,15 @@ sealed class Tray : IDisposable
         return menu;
     }
 
+    /// A colour picked in the settings window: redraw now, whatever order the Changed handlers run in.
+    void OnSettingsChanged() => Update(shown.working, shown.done, shown.input);
+
     public void Update(int working, int done, int input)
     {
-        if (shown == (working, done, input)) return;
-        shown = (working, done, input);
         var top = input > 0 ? WorkState.Input : done > 0 ? WorkState.Done : working > 0 ? WorkState.Working : WorkState.Idle;
+        var color = DotColor(top);
+        if (shown == (working, done, input, color)) return;
+        shown = (working, done, input, color);
         var old = frames.ToList();
         frames.Clear();
         int n = working + done + input;
@@ -85,6 +91,8 @@ sealed class Tray : IDisposable
         icon.Icon = frames[PulseSeq[pulseAt] % frames.Count].icon;
     }
 
+    static Color DotColor(WorkState top) => top == WorkState.Idle ? Color.FromArgb(0x8E, 0x8E, 0x93) : GlowWindow.ColorOf(top);
+
     /// Pulse frame 0 is the plain dot; 1–3 fade the red towards a darker red, so the number stays readable.
     static IntPtr Draw(int count, WorkState top, int frame)
     {
@@ -94,7 +102,7 @@ sealed class Tray : IDisposable
         g.SmoothingMode = SmoothingMode.AntiAlias;
         g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
         g.Clear(Color.Transparent);
-        var c = top == WorkState.Idle ? Color.FromArgb(0x8E, 0x8E, 0x93) : GlowWindow.ColorOf(top);
+        var c = DotColor(top);
         if (frame > 0)
         {
             float t = frame * 0.14f;
@@ -119,7 +127,9 @@ sealed class Tray : IDisposable
         // clicking the icon while the flyout is open deactivates (closes) it first: that click means "close"
         if (Environment.TickCount64 - flyoutClosedAt < 400) return;
         pill?.Close();
-        var anchor = TrayPlace.IconRect(icon) ?? new Rectangle(Cursor.Position, new Size(1, 1));
+        // same on-screen check as the pill (an auto-hide taskbar can report an off-screen rect); a click falls back to the cursor
+        var anchor = TrayPlace.IconRect(icon) is { } r && Screen.AllScreens.Any(s => s.Bounds.IntersectsWith(r))
+            ? r : new Rectangle(Cursor.Position, new Size(1, 1));
         flyout = new IslandFlyout(engine, anchor);
         // a modeless form disposes itself on close
         flyout.FormClosed += (_, _) => { flyoutClosedAt = Environment.TickCount64; flyout = null; TrimLater(); };
@@ -134,7 +144,13 @@ sealed class Tray : IDisposable
     /// A pill already on screen absorbs later arrivals («+1») instead of a green one replacing a red one.
     void OnStateChanged(SessionView s, WorkState before)
     {
-        if (s.State is not (WorkState.Done or WorkState.Input)) return;
+        if (s.State is not (WorkState.Done or WorkState.Input))
+        {
+            // answered / looked at while waiting or on the pill: it must not keep saying so (or count it in «+N»)
+            pending.RemoveAll(p => p.Pid == s.Pid);
+            if (pill != null && onPill.RemoveAll(p => p.Pid == s.Pid) > 0) Retarget();
+            return;
+        }
         pending.RemoveAll(p => p.Pid == s.Pid);
         pending.Add(s);
         if (coalesce == null) { coalesce = new System.Windows.Forms.Timer { Interval = 400 }; coalesce.Tick += (_, _) => Flush(); }
@@ -167,14 +183,39 @@ sealed class Tray : IDisposable
         Log.Note($"PILL pid={top.Pid} {top.State} +{show.Count - 1} bounds={pill.Bounds}");
     }
 
-    /// Once the closing form is really gone (after its FormClosed handlers), on the UI thread.
-    static void TrimLater() => SynchronizationContext.Current?.Post(_ => TrayPlace.Trim(), null);
+    /// A session left the pill: show the most urgent one still waiting, or close it when none is.
+    void Retarget()
+    {
+        var live = engine.Sessions.ToDictionary(x => x.Pid);
+        var still = onPill.Where(p => live.TryGetValue(p.Pid, out var cur) && cur.State == p.State).Select(p => live[p.Pid]).ToList();
+        onPill.Clear();
+        onPill.AddRange(still);
+        if (still.Count == 0) { pill!.Close(); return; }
+        var top = still.OrderByDescending(p => StateMachine.Priority(p.State)).ThenByDescending(p => p.Since).First();
+        pill!.Pop(top, still.Count - 1, TrayPlace.Anchor(icon));
+        Log.Note($"PILL retarget pid={top.Pid} {top.State} +{still.Count - 1}");
+    }
+
+    /// After the island or pill closes, once things are quiet: one trim for a burst of closes (a pill closes ~4 s
+    /// after every done/input), not a full GC per event, and never while one of them is open again.
+    void TrimLater()
+    {
+        if (trim == null)
+        {
+            trim = new System.Windows.Forms.Timer { Interval = 2000 };
+            trim.Tick += (_, _) => { trim.Stop(); if (flyout == null && pill == null) TrayPlace.Trim(); };
+        }
+        trim.Stop();
+        trim.Start();
+    }
 
     public void Dispose()
     {
         engine.StateChanged -= OnStateChanged;
+        GlowSettings.Shared.Changed -= OnSettingsChanged;
         pulse?.Dispose();
         coalesce?.Dispose();
+        trim?.Dispose();
         flyout?.Close();
         pill?.Close();
         icon.Visible = false;

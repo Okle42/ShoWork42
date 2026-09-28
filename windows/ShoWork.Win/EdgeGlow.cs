@@ -14,8 +14,9 @@ namespace ShoWork;
 sealed class EdgeGlow : IDisposable
 {
     readonly EdgeStrip[] strips = new EdgeStrip[4];
-    (Rectangle mon, WorkState state, int dpi)? shown;
+    (Rectangle mon, WorkState state, int dpi, Color color)? shown;   // colour too: the settings page can change it while shown
     IntPtr raisedOver;                       // foreground window the strips were last put above
+    bool disposed;                           // a render queued before Stop can still arrive afterwards
 
     /// What the edge shows now (Idle = hidden), for the status file.
     public WorkState State => shown?.state ?? WorkState.Idle;
@@ -31,6 +32,7 @@ sealed class EdgeGlow : IDisposable
 
     void Apply(IEnumerable<GlowWindow> glows)
     {
+        if (disposed) return;
         var front = GetForegroundWindow();
         var mon = FullScreenMonitor(front);
         if (mon == IntPtr.Zero) { Hide(); return; }
@@ -48,9 +50,10 @@ sealed class EdgeGlow : IDisposable
     /// monitor by its resize borders when the taskbar auto-hides; that is not full screen.
     static IntPtr FullScreenMonitor(IntPtr hwnd)
     {
-        if (hwnd == IntPtr.Zero || !IsWindowVisible(hwnd) || IsIconic(hwnd)) return IntPtr.Zero;
-        var cls = ClassOf(hwnd);
-        if (cls is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd") return IntPtr.Zero;   // the desktop covers every monitor
+        if (hwnd == IntPtr.Zero || !IsWindowVisible(hwnd) || IsIconic(hwnd) || IsCloaked(hwnd)) return IntPtr.Zero;
+        // the desktop covers every monitor; Alt+Tab / Task View / Start take the foreground with a monitor-sized shell window
+        if (ClassOf(hwnd) is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd" or "MultitaskingViewFrame"
+            or "XamlExplorerHostIslandWindow" or "ForegroundStaging" or "Windows.UI.Core.CoreWindow") return IntPtr.Zero;
         if (IsZoomed(hwnd) && (GetWindowLong(hwnd, GWL_STYLE) & WS_CAPTION) == WS_CAPTION) return IntPtr.Zero;
         var mon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONULL);
         if (mon == IntPtr.Zero) return IntPtr.Zero;
@@ -70,16 +73,17 @@ sealed class EdgeGlow : IDisposable
         int line = Math.Max(1, (int)Math.Round(3 * dpi / 96.0)), soft = (int)Math.Round(8 * dpi / 96.0), t = line + soft;
         int w = m.Right - m.Left, h = m.Bottom - m.Top;
         var key = Rectangle.FromLTRB(m.Left, m.Top, m.Right, m.Bottom);
-        bool redraw = shown != (key, s, dpi);
+        var color = GlowWindow.ColorOf(s);
+        bool redraw = shown != (key, s, dpi, color);
         if (redraw)
         {
-            shown = (key, s, dpi);
+            shown = (key, s, dpi, color);
             // top / bottom full width, left / right in between: every pixel's alpha follows its distance to the nearest edge
             var parts = new[] { new Rectangle(0, 0, w, t), new Rectangle(0, h - t, w, t), new Rectangle(0, t, t, h - 2 * t), new Rectangle(w - t, t, t, h - 2 * t) };
             for (int i = 0; i < 4; i++)
             {
                 if (strips[i] == null) { strips[i] = new EdgeStrip(); strips[i].Show(); }   // shown empty first, as GlowWindow: WinForms' first show must not resize a painted layer
-                strips[i].Draw(m.Left, m.Top, w, h, parts[i], line, soft, GlowWindow.ColorOf(s));
+                strips[i].Draw(m.Left, m.Top, w, h, parts[i], line, soft, color);
             }
             Log.Note($"EDGE {s} monitor={m.Left},{m.Top},{m.Right},{m.Bottom} line={line}");
         }
@@ -98,7 +102,12 @@ sealed class EdgeGlow : IDisposable
         Log.Note("EDGE hidden");
     }
 
-    public void Dispose() { foreach (var x in strips) x?.Dispose(); }
+    public void Dispose()
+    {
+        disposed = true;
+        shown = null;
+        for (int i = 0; i < strips.Length; i++) { strips[i]?.Dispose(); strips[i] = null!; }
+    }
 
     /// One edge strip: click-through, topmost, never activated.
     sealed class EdgeStrip : Form
@@ -111,6 +120,14 @@ sealed class EdgeGlow : IDisposable
         }
 
         protected override bool ShowWithoutActivation => true;
+
+        /// Draw gives UpdateLayeredWindow the exact physical rect; WinForms applying a rescaled suggested rect
+        /// after a DPI change would shift or resize the layer until the next redraw.
+        protected override void WndProc(ref Message m)
+        {
+            if (m.Msg == 0x02E0 /*WM_DPICHANGED*/) { m.Result = IntPtr.Zero; return; }
+            base.WndProc(ref m);
+        }
 
         protected override CreateParams CreateParams
         {

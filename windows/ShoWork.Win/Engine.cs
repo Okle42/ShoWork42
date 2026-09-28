@@ -70,11 +70,13 @@ sealed class Engine
         GlowSettings.Shared.Changed += SettingsChanged;             // W2 settings
     }
 
-    /// W2: a look changed in the settings window — restyle every glow; an off state now lights nothing.
+    /// W2: something changed in the settings window. Render first (an off state now lights nothing, a new state
+    /// draws once with the new look), then Sync the rest: it redraws only a glow whose look really changed, so a
+    /// General-only change (自動排版) or a slider on another state redraws nothing.
     void SettingsChanged()
     {
-        foreach (var g in glows.Values) if (!g.IsDisposed) g.Restyle();
         Render();
+        foreach (var g in glows.Values) if (!g.IsDisposed) g.Sync();
     }
 
     public void Start(Action reload, Action quit)
@@ -249,7 +251,7 @@ sealed class Engine
             }
             else g.SetState(s);
         }
-        UpdateEdge();
+        edge.Update(glows.Values);                     // StatusFile below writes the edge state too
         HookWinEvents(glows.Count > 0);
         if (tabs.Count > 0) watchdog.Start(); else watchdog.Stop();
         clear.Enable(tabs.Values.Any(t => t.State == WorkState.Done && t.Window != IntPtr.Zero));
