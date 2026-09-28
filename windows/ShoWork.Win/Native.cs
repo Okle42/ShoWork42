@@ -84,6 +84,21 @@ static class Native
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hwnd, int cmd);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
 
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern uint GetLongPathNameW(string shortPath, System.Text.StringBuilder longPath, uint size);
+
+    /// Same file or folder? %TEMP% and friends are often 8.3 short paths (C:\Users\ABCDEF~1\…) while a
+    /// process reports its long path, so expand both before comparing (W4 e2e found this).
+    public static bool SamePath(string a, string b) =>
+        string.Equals(LongPath(a).TrimEnd('\\'), LongPath(b).TrimEnd('\\'), StringComparison.OrdinalIgnoreCase);
+
+    static string LongPath(string p)
+    {
+        var full = Path.GetFullPath(p);
+        var sb = new System.Text.StringBuilder(1024);
+        var n = GetLongPathNameW(full, sb, (uint)sb.Capacity);
+        return n > 0 && n < sb.Capacity ? sb.ToString() : full;              // a path that doesn't exist stays as is
+    }
+
     public static string ClassOf(IntPtr hwnd)
     {
         var s = new System.Text.StringBuilder(256);

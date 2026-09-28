@@ -4,8 +4,11 @@ using static ShoWork.Native;
 namespace ShoWork;
 
 ///   ShoWorkAgent.exe                         run the agent (tray icon, named pipe, glows)
-///   ShoWorkAgent.exe --install               copy this build to %LOCALAPPDATA%\ShoWork42\bin, hooks, autostart, start
-///   ShoWorkAgent.exe --uninstall             stop, remove hooks and autostart
+///   ShoWork42.exe                            (packaged, W4) offer to install itself; the installed copy runs the agent
+///   ShoWorkAgent.exe --agent                 run the agent whatever this exe is
+///   ShoWorkAgent.exe --install   [--quiet]   into %LOCALAPPDATA%\ShoWork42\bin: hooks, autostart, Settings → Apps, start
+///   ShoWorkAgent.exe --uninstall [--quiet]   all of that undone and bin deleted (the glow settings stay)
+///   ShoWorkAgent.exe --version
 ///   ShoWorkAgent.exe --install-hooks   [--settings PATH]   merge our hooks into Claude's settings.json
 ///   ShoWorkAgent.exe --uninstall-hooks [--settings PATH]
 ///   ShoWorkAgent.exe --install-autostart | --uninstall-autostart     HKCU Run
@@ -24,15 +27,19 @@ static class Program
         var settings = args.SkipWhile(a => a != "--settings").Skip(1).FirstOrDefault() ?? Installer.DefaultSettings;
         var showork = Path.Combine(AppContext.BaseDirectory, "showork.exe");
         var self = Environment.ProcessPath!;
+        var quiet = args.Contains("--quiet");
         switch (args.FirstOrDefault())
         {
-            case null or "--after": return RunAgent(args);
+            // the downloaded ShoWork42.exe asks to install itself; the installed copy (and a dev build) is the agent
+            case null when Package.IsPacked && !Package.RunningInstalled: return Package.FirstRun(settings);
+            case null or "--after" or "--agent": return RunAgent(args);
+            case "--version": return Report(() => Package.Version, quiet: true);
+            case "--install": return Report(() => Package.Install(settings), quiet);
+            case "--uninstall": return Report(() => Package.Uninstall(settings), quiet);
             case "--install-hooks": return Report(() => Installer.InstallHooks(settings, showork));
             case "--uninstall-hooks": return Report(() => Installer.UninstallHooks(settings));
             case "--install-autostart": return Report(() => { Installer.SetAutostart(true, self); return "on"; });
             case "--uninstall-autostart": return Report(() => { Installer.SetAutostart(false, self); return "off"; });
-            case "--install": return Report(() => Install(settings));
-            case "--uninstall": return Report(() => Uninstall(settings));
             case "--status":
                 return Report(() => $"hooks installed: {Installer.CountOurs(settings)}/{Installer.OurHooks("x").Sum(kv => kv.Value!.AsArray().Count)}   autostart: {Installer.Autostart() ?? "off"}   " +
                                     $"agent running: {Installer.InstalledAgents().Count > 0}");
@@ -49,45 +56,27 @@ static class Program
     }
 
     /// WinExe: attach to the calling console (if any) so install/status output is visible there.
-    static int Report(Func<string> action)
+    /// Started from Settings → Apps (no console to attach to), the answer goes into a dialog unless --quiet.
+    static int Report(Func<string> action, bool quiet = true)
     {
-        AttachConsole(unchecked((uint)-1));
+        bool console = AttachConsole(unchecked((uint)-1));
         try
         {
-            Console.WriteLine(action());
+            var r = action();
+            Console.WriteLine(r);
+            if (!console && !quiet) { ApplicationConfiguration.Initialize(); Package.Info("ShoWork42", r); }
             return 0;
         }
         catch (Exception e)
         {
             Console.Error.WriteLine($"error: {e.Message}");
+            if (!console && !quiet)
+            {
+                ApplicationConfiguration.Initialize();
+                TaskDialog.ShowDialog(new TaskDialogPage { Caption = "ShoWork42", Heading = "沒有完成", Text = e.Message, Icon = TaskDialogIcon.Error });
+            }
             return 1;
         }
-    }
-
-    static string Install(string settings)
-    {
-        var bin = Installer.InstallDir;
-        var here = Path.GetFullPath(AppContext.BaseDirectory).TrimEnd('\\');
-        if (!string.Equals(here, Path.GetFullPath(bin).TrimEnd('\\'), StringComparison.OrdinalIgnoreCase))
-        {
-            Installer.StopRunningAgents();
-            Installer.CopyBuild(here, bin);
-        }
-        var agent = Path.Combine(bin, "ShoWorkAgent.exe");
-        var hooks = Installer.InstallHooks(settings, Path.Combine(bin, "showork.exe"));
-        Installer.SetAutostart(true, agent);
-        if (Installer.InstalledAgents().Count == 0)
-            // ShellExecute: the agent must not inherit our stdout (a caller piping us would wait forever)
-            Process.Start(new ProcessStartInfo(agent) { UseShellExecute = true, WorkingDirectory = bin });
-        return $"installed to {bin}; hooks: {hooks}; autostart: on; agent: running";
-    }
-
-    static string Uninstall(string settings)
-    {
-        Installer.StopRunningAgents();
-        var hooks = Installer.UninstallHooks(settings);
-        Installer.SetAutostart(false, "");
-        return $"hooks: {hooks}; autostart: off; agent: stopped (files stay in {Installer.InstallDir})";
     }
 
     static int RunAgent(string[] args)
