@@ -200,7 +200,11 @@ static class Installer
 
     // MARK: autostart — HKCU Run, per user, no admin
 
-    const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run", RunName = "ShoWork42";
+    /// HKCU\Software\Microsoft\Windows\CurrentVersion; SHOWORK_REG_ROOT moves Run and Uninstall under another HKCU key (tests).
+    public static string RegRoot =>
+        Environment.GetEnvironmentVariable("SHOWORK_REG_ROOT") is { Length: > 0 } r ? r : @"Software\Microsoft\Windows\CurrentVersion";
+    static string RunKey => RegRoot + @"\Run";
+    const string RunName = "ShoWork42";
 
     public static void SetAutostart(bool on, string agentExe)
     {
@@ -224,7 +228,7 @@ static class Installer
         return Process.GetProcessesByName("ShoWorkAgent").Where(p =>
         {
             if (p.Id == Environment.ProcessId) return false;
-            try { return string.Equals(p.MainModule?.FileName, installed, StringComparison.OrdinalIgnoreCase); } catch { return false; }
+            try { return p.MainModule?.FileName is { } f && Native.SamePath(f, installed); } catch { return false; }
         }).ToList();
     }
 

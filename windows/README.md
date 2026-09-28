@@ -8,7 +8,7 @@
 | W1 | Claude Code hooks → 紫／綠／紅；Windows Terminal；按鍵／點擊清除；系統匣圖示；開機啟動 | ✅（見 W1-結果.md） |
 | W2 | 設定視窗（三種狀態同一頁）；六種光芒；動態島（系統匣）；全螢幕邊緣光 | ✅（見 W2W3-結果.md） |
 | W3 | 自動排版（每台螢幕各自排，Ctrl+Alt+L） | ✅（Windows 預設關） |
-| W4 | 打包單一 exe | |
+| W4 | 打包單一 exe（ShoWork42.exe 內含 runtime／ShoWork42-small.exe），雙擊安裝、「設定 > 應用程式」解除安裝 | ✅（見 W2W3-結果.md 的 W4 一節） |
 
 ## 做法（對照 macOS 版）
 
