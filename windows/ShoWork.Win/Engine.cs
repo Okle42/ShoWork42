@@ -70,7 +70,7 @@ sealed class Engine
 
     public void Start(Action reload, Action quit)
     {
-        tray = new Tray(reload, quit);
+        tray = new Tray(this, reload, quit);
         Restore();
         Render();
     }
