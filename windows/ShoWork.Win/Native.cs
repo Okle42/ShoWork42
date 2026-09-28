@@ -81,6 +81,8 @@ static class Native
     [DllImport("kernel32.dll")] public static extern bool GetProcessTimes(IntPtr h, out long creation, out long exit, out long kernel, out long user);
     [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr h);
     [DllImport("user32.dll")] public static extern bool DestroyIcon(IntPtr h);
+    [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hwnd, int cmd);
+    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
 
     public static string ClassOf(IntPtr hwnd)
     {

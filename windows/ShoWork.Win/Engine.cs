@@ -14,6 +14,7 @@ sealed class Engine
         public required long Created;             // pid + creation time = this process, even after pid reuse
         public required string Agent;
         public WorkState State;
+        public DateTime Since = DateTime.Now;     // when State last changed (the island shows "for 3 min")
         public long LastStamp;                    // when the AI started the newest hook applied so far
         public IntPtr Console;                   // ConsoleWindowClass or PseudoConsoleWindow; 0 = not resolved yet
         public bool Resolving;
@@ -37,6 +38,27 @@ sealed class Engine
 
     static string SupportDir => Wire.SupportDir;
     static string StatePath => Path.Combine(SupportDir, "state.json");
+
+    // MARK: seams for the tray / island / settings / arranger (W2–W3)
+
+    /// Fired on the UI thread after every render (state, window or glow changes).
+    public event Action? Changed;
+    /// Fired on the UI thread when a session enters a new state (before render): session, previous state.
+    public event Action<SessionView, WorkState>? StateChanged;
+
+    /// Every AI session the agent knows, most urgent first.
+    public IReadOnlyList<SessionView> Sessions =>
+        tabs.Values.Select(View).OrderByDescending(s => StateMachine.Priority(s.State)).ThenBy(s => s.Since).ToList();
+
+    static SessionView View(Tab t) { var w = t.Window; return new SessionView(t.Pid, t.Agent, t.State, w, w == IntPtr.Zero ? "" : TitleOf(w), t.Since); }
+
+    /// Bring a window to the front because the user asked for it (clicked it in the island/menu).
+    public static void JumpTo(IntPtr window)
+    {
+        if (!IsWindow(window)) return;
+        if (IsIconic(window)) ShowWindow(window, 9 /*SW_RESTORE*/);
+        SetForegroundWindow(window);
+    }
 
     public Engine(Control ui)
     {
@@ -84,6 +106,7 @@ sealed class Engine
         if (m.Stamp != 0) t.LastStamp = m.Stamp;
         var before = t.State;
         t.State = StateMachine.Next(t.State, m.Event);
+        if (t.State != before) { t.Since = DateTime.Now; StateChanged?.Invoke(View(t), before); }
         Log.Note($"EVT {PipeServer.Describe(m)} {before}→{t.State} console={t.Console} window={t.Window}");
         if (t.State == WorkState.Idle) Drop(t);
         else if (t.Console == IntPtr.Zero || !IsWindow(t.Console)) Resolve(t);
@@ -176,7 +199,9 @@ sealed class Engine
         foreach (var t in seen)
         {
             if (!tabs.ContainsKey(t.Pid) || t.State != WorkState.Done) continue;
+            var was = t.State;
             t.State = StateMachine.Acknowledge(t.State);
+            StateChanged?.Invoke(View(t), was);
             Log.Note($"ACK pid={t.Pid} ({why})");
             if (t.State == WorkState.Idle) Drop(t);
             changed = true;
@@ -221,6 +246,7 @@ sealed class Engine
                      tabs.Values.Count(t => t.State == WorkState.Input));
         Save();
         StatusFile();
+        Changed?.Invoke();
     }
 
     /// 4 Hz while any session exists: a WT tab dragged to another window changes the pseudo window's owner
@@ -327,3 +353,6 @@ sealed class Engine
         catch { }
     }
 }
+
+/// What the tray, island and menus show about one AI session.
+public readonly record struct SessionView(int Pid, string Agent, WorkState State, IntPtr Window, string Title, DateTime Since);
