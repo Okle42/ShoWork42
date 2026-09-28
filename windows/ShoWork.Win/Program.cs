@@ -35,7 +35,7 @@ static class Program
             case "--uninstall": return Report(() => Uninstall(settings));
             case "--status":
                 return Report(() => $"hooks installed: {Installer.CountOurs(settings)}/{Installer.OurHooks("x").Sum(kv => kv.Value!.AsArray().Count)}   autostart: {Installer.Autostart() ?? "off"}   " +
-                                    $"agent running: {Process.GetProcessesByName("ShoWorkAgent").Any(p => p.Id != Environment.ProcessId)}");
+                                    $"agent running: {Installer.InstalledAgents().Count > 0}");
         }
         if (args.Length == 3 && args[0] == "--console-hwnd")
         {
@@ -76,7 +76,7 @@ static class Program
         var agent = Path.Combine(bin, "ShoWorkAgent.exe");
         var hooks = Installer.InstallHooks(settings, Path.Combine(bin, "showork.exe"));
         Installer.SetAutostart(true, agent);
-        if (!Process.GetProcessesByName("ShoWorkAgent").Any(p => p.Id != Environment.ProcessId))
+        if (Installer.InstalledAgents().Count == 0)
             // ShellExecute: the agent must not inherit our stdout (a caller piping us would wait forever)
             Process.Start(new ProcessStartInfo(agent) { UseShellExecute = true, WorkingDirectory = bin });
         return $"installed to {bin}; hooks: {hooks}; autostart: on; agent: running";

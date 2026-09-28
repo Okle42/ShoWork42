@@ -24,4 +24,16 @@
     <ProjectReference Include="..\showork\showork.csproj" />
   </ItemGroup>
 
+  <!-- Release: replace the copied .NET showork.exe with the native one. Without VS Build Tools this only warns
+       and the .NET build stays (it works, it is just ~70 ms slower per hook). -->
+  <Target Name="NativeShowork" AfterTargets="Build" Condition="'$(Configuration)' == 'Release' And '$(SkipNativeShowork)' != 'true'">
+    <!-- the AOT linker finds MSVC through vswhere.exe, which is not on PATH until the next sign-in -->
+    <Exec Command="set &quot;PATH=$(MSBuildProgramFiles32)\Microsoft Visual Studio\Installer%3B%PATH%&quot; &amp;&amp; dotnet publish &quot;$(MSBuildThisFileDirectory)..\showork\showork.csproj&quot; -c Release -r win-x64 -o &quot;$(MSBuildThisFileDirectory)obj\showork-aot&quot; -nologo -v q"
+          ContinueOnError="true">
+      <Output TaskParameter="ExitCode" PropertyName="NativeShoworkExit" />
+    </Exec>
+    <Copy Condition="'$(NativeShoworkExit)' == '0'" SourceFiles="$(MSBuildThisFileDirectory)obj\showork-aot\showork.exe" DestinationFolder="$(OutDir)" />
+    <Warning Condition="'$(NativeShoworkExit)' != '0'" Text="native showork.exe not built (VS Build Tools C++ missing?); keeping the .NET one" />
+  </Target>
+
 </Project>

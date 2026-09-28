@@ -217,11 +217,21 @@ static class Installer
 
     // MARK: whole install — copy the build to %LOCALAPPDATA%\ShoWork42\bin, hooks, autostart, start
 
+    /// Running agents started from the install folder — a dev or test build running elsewhere is none of our business.
+    public static List<Process> InstalledAgents()
+    {
+        var installed = Path.GetFullPath(Path.Combine(InstallDir, "ShoWorkAgent.exe"));
+        return Process.GetProcessesByName("ShoWorkAgent").Where(p =>
+        {
+            if (p.Id == Environment.ProcessId) return false;
+            try { return string.Equals(p.MainModule?.FileName, installed, StringComparison.OrdinalIgnoreCase); } catch { return false; }
+        }).ToList();
+    }
+
     public static void StopRunningAgents()
     {
-        foreach (var p in Process.GetProcessesByName("ShoWorkAgent"))
+        foreach (var p in InstalledAgents())
         {
-            if (p.Id == Environment.ProcessId) continue;
             try { p.Kill(); p.WaitForExit(3000); } catch { }
         }
     }

@@ -12,6 +12,8 @@
     <UseSystemResourceKeys>true</UseSystemResourceKeys>
     <TieredPGO>false</TieredPGO>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <!-- native exe (NativeAOT, needs VS Build Tools C++): ~5 ms of startup instead of ~70 ms for the .NET runtime -->
+    <PublishAot>true</PublishAot>
   </PropertyGroup>
 
   <ItemGroup>
