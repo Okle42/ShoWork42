@@ -50,4 +50,5 @@ powershell -ExecutionPolicy Bypass -File ..\tests\w1_e2e.ps1
 ```
 
 偵錯：環境變數 `SHOWORK_DEBUG=1` ⇒ `%LOCALAPPDATA%\ShoWork42\agent.log`；`SHOWORK_STATUS_FILE` ⇒ agent 狀態 JSON；
-`SHOWORK_PIPE`／`SHOWORK_HOME` ⇒ 測試用的獨立 pipe 名稱與資料夾。
+`SHOWORK_PIPE`／`SHOWORK_HOME` ⇒ 測試用的獨立 pipe 名稱與資料夾。設了 `SHOWORK_PIPE` 的測試 agent 不會排版，
+除非同時給 `SHOWORK_ONLY_WIDS`（白名單；加 `SHOWORK_ARRANGE_ONLY_LISTED=1` 則只排名單裡的視窗）。
