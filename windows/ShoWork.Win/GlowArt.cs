@@ -12,6 +12,14 @@ namespace ShoWork;
 /// window anyway, and not keeping it saves most of the memory), a still one the whole overlay, the preview
 /// the card's rectangle.
 ///
+/// Inward (GlowDirection.Inward, the default since 09-29): the light starts at the window's visible edge and fades
+/// towards its middle, drawn in a window ABOVE the target. Then Pad = 0 (the overlay is the window itself); a moving
+/// style uses four strips just inside the edge, each `Depth` deep (Depth = the style's reach, see DepthFor), so a
+/// frame never touches the middle; a still one is one window whose middle is fully transparent. Profile: a crisp
+/// edge line 2 px wide at 96 DPI (×DPI) at alpha 0.55–0.85×brightness, then a soft Gaussian falloff whose peak is only 0.12–0.30×brightness, tapering to 0 at Depth — the first column
+/// of terminal text sits under at most ~0.3 alpha of the colour and stays readable. Nothing outside the rounded
+/// outline (8 px ×DPI corners; square when maximised) is drawn.
+///
 /// Cost model: for a moving style two maps are computed once per size — distance from the outline (1/4 px)
 /// and angle around the centre. A frame is then a table lookup or two per pixel: the per-distance table is
 /// rebuilt per frame (a few hundred entries) and the angle table is only rotated; sparks and blobs only
@@ -22,13 +30,17 @@ sealed unsafe class GlowArt : IDisposable
     public readonly StateLook Look;
     public readonly bool Still;                  // animation effects off: a still glow for every style
     public readonly float S;                     // physical px per DIP (target's DPI / 96)
-    public readonly int Pad;
+    public readonly int Pad;                     // outward: room around the window; inward: 0
+    public readonly bool Inward;                 // light goes into the window (drawn above it)
+    public readonly bool Square;                 // inward on a maximised window: no rounded corners
+    public readonly int Depth;                   // inward: how far into the window the light reaches (0 outward)
     public readonly Size Target;
     public readonly Rectangle[] Parts;
     public Size Overlay => new(Target.Width + 2 * Pad, Target.Height + 2 * Pad);
 
     const int Q = 4;                             // distance map: quarter pixels
     readonly float off;                          // pixels up to `off` px inside the outline still get their own distance
+    readonly float outside;                      // …and up to `outside` px outside it
     readonly int n;                              // entries in the per-distance tables
     readonly float corner;
     // native, freed by Dispose/Release: a slider drag rebuilds the art many times, and as managed arrays the
@@ -45,18 +57,26 @@ sealed unsafe class GlowArt : IDisposable
     readonly int[] fade;                         // 0…256: fades out towards the pad and hides deep inside the window
     readonly uint[]? frame;                      // ripple: per-distance table rebuilt every frame
 
-    public GlowArt(StateLook look, Size target, float s, Func<int, Rectangle[]>? parts = null, bool? still = null)
+    /// inward: null = the setting (GlowSettings.General.Direction). square: the window has no rounded corners (maximised).
+    public GlowArt(StateLook look, Size target, float s, Func<int, Rectangle[]>? parts = null, bool? still = null, bool? inward = null, bool square = false)
     {
         Look = look;
         Still = still ?? GlowSettings.ReduceMotion;
         S = s;
         Target = target;
-        Pad = PadFor(look, Style, s);
-        // drawn once: one window (the pixels are not kept); redrawn per frame: four strips around the window
-        Parts = parts?.Invoke(Pad) ?? (Fps == 0 ? new[] { new Rectangle(Point.Empty, Overlay) } : Strips(target, Pad, s));
-        off = 4 * s;
-        n = (int)((Pad + off) * Q) + 2;
-        corner = 8 * s;                                                      // Windows 11 window corners
+        Inward = inward ?? GlowSettings.Shared.Inward;
+        Square = square && Inward;                                           // outward keeps its exact W0–W4 look
+        Pad = Inward ? 0 : PadFor(look, Style, s);
+        Depth = Inward ? DepthFor(look, Style, s) : 0;
+        corner = Square ? 0 : 8 * s;                                         // Windows 11 window corners
+        // drawn once: one window (the pixels are not kept; inward its middle is fully transparent, and breathing is one
+        // constant-alpha update per frame as outward); redrawn per frame: four strips around (outward) or just inside
+        // (inward) the window's edge, so a frame never touches the middle
+        Parts = parts?.Invoke(Pad) ?? (Fps == 0 ? new[] { new Rectangle(Point.Empty, Overlay) }
+                                      : Inward ? InnerStrips(target, Depth, corner) : Strips(target, Pad, s));
+        off = Inward ? Depth : 4 * s;
+        outside = Inward ? 1.5f * s : Pad;                                   // inward: just the anti-aliased outline
+        n = (int)((outside + off) * Q) + 2;
         c = look.Color;
         light = Mix(c, Color.White, 0.35f);
         deep = Mix(c, Color.Black, 0.35f);
@@ -72,7 +92,22 @@ sealed unsafe class GlowArt : IDisposable
         float B = look.B, W = look.W;
         fade = new int[n];
         basePx = new uint[n];
-        for (int i = 0; i < n; i++)
+        for (int i = 0; i < n && Inward; i++)
+        {
+            // e = how far inside the outline. Anti-aliased at the outline, tapering to 0 over the last 6 px of Depth —
+            // smoothly over the inner 3/4 (drift) or half (sparkle) of it for the styles whose blobs/sparks move in,
+            // or a big blob would end in a visible straight line
+            float e = -D(i);
+            float taper = style == GlowStyle.Drift ? .75f * Depth : style == GlowStyle.Sparkle ? .5f * Depth : 6 * s;
+            float tt = Math.Clamp((Depth - e) / taper, 0, 1);
+            float f = tt * tt * (3 - 2 * tt) * Math.Clamp(.5f + e, 0, 1);
+            fade[i] = (int)(f * 256);
+            var (lineA, softA, sigma) = InwardProfile(style);
+            float lw = 2 * s;                                                // the crisp edge line: 2 px at 96 DPI
+            float a = Screen(A(lineA) * Math.Clamp(lw + .5f - e, 0, 1), softA == 0 ? 0 : A(softA) * G(Math.Max(0, e - lw), sigma * W * s));
+            basePx[i] = pal[(int)(a * f * 255)];
+        }
+        for (int i = 0; i < n && !Inward; i++)
         {
             float d = D(i);
             float f = Math.Clamp((Pad - d) / (6 * s), 0, 1) * Math.Clamp((d + 2.5f * s) / (2 * s), 0, 1);
@@ -91,10 +126,14 @@ sealed unsafe class GlowArt : IDisposable
         {
             var feather = new int[n];                                        // 0…256: soft ring mask
             float outer = (style == GlowStyle.Orbit ? 30 : 34) * W * s, inner = -2 * s;
+            // inward: a narrower ring inside the edge (reaching 18W / 22W) and a dimmer arc — it passes over text
+            float arc = .85f;
+            if (Inward) { outer = (style == GlowStyle.Orbit ? 18 : 22) * W * s; inner = -1 * s; arc = style == GlowStyle.Orbit ? .55f : .5f; }
             for (int i = 0; i < n; i++)
             {
-                float t = (D(i) - inner) / (outer - inner);
-                feather[i] = t < 0 || t > 1 ? 0 : (int)(256 * 0.85f * MathF.Pow(1 - t, 1.4f));
+                float dd = Inward ? -D(i) : D(i);
+                float t = (dd - inner) / (outer - inner);
+                feather[i] = t < 0 || t > 1 ? 0 : (int)(256 * arc * MathF.Pow(1 - t, 1.4f) * (Inward ? fade[i] / 256f : 1));
             }
             var conic = style == GlowStyle.Orbit                               // 1024 steps around the window
                 ? Conic(new[] { 0f, .62f, .8f, .9f, .93f, 1f },
@@ -157,6 +196,41 @@ sealed unsafe class GlowArt : IDisposable
         {
             new Rectangle(0, 0, w, band), new Rectangle(0, h - band, w, band),
             new Rectangle(0, band, band, h - 2 * band), new Rectangle(w - band, band, band, h - 2 * band),
+        };
+    }
+
+    /// Inward: how deep the light reaches into the window (px) — the soft part has faded to nothing by then. Default
+    /// (width 1×): 22–32 px at 96 DPI, a little less than the outward pad (34–56 px): this band lies over the text.
+    public static int DepthFor(StateLook look, GlowStyle style, float s) => (int)MathF.Ceiling(style switch
+    {
+        GlowStyle.Breathe => 4 + 20 * look.W,       // 2 px line + 3σ of a 6W falloff
+        GlowStyle.Orbit => 4 + 18 * look.W,         // the arc's ring mask reaches 18W
+        GlowStyle.Aurora => 4 + 22 * look.W,        // 22W
+        GlowStyle.Ripple => 8 + 24 * look.W,        // rings travel 24W inwards
+        _ => 6 + 26 * look.W,                       // sparks and blobs drift in; they fade out at Depth
+    } * s);
+
+    /// Inward edge line alpha, soft falloff peak alpha and its σ (in W·DIP), per style (× brightness).
+    static (float line, float soft, float sigma) InwardProfile(GlowStyle style) => style switch
+    {
+        GlowStyle.Breathe => (.85f, .30f, 6),
+        GlowStyle.Ripple => (.70f, .16f, 4),
+        GlowStyle.Orbit => (.60f, .14f, 4),
+        GlowStyle.Aurora => (.55f, .12f, 4),
+        GlowStyle.Sparkle => (.70f, .18f, 4),
+        _ => (.70f, 0, 4),                          // 光霧飄動: the blobs are the soft part
+    };
+
+    /// Four non-overlapping strips just inside the window's edge, `depth` deep (at least the corner radius, so the
+    /// rounded corners lie in the top and bottom strips): nothing covers the middle, no pixel is drawn twice.
+    public static Rectangle[] InnerStrips(Size t, int depth, float corner)
+    {
+        int band = Math.Max(depth, (int)MathF.Ceiling(corner)) + 1;
+        if (2 * band >= Math.Min(t.Width, t.Height)) return new[] { new Rectangle(Point.Empty, t) };   // small window: one piece
+        return new[]
+        {
+            new Rectangle(0, 0, t.Width, band), new Rectangle(0, t.Height - band, t.Width, band),
+            new Rectangle(0, band, band, t.Height - 2 * band), new Rectangle(t.Width - band, band, band, t.Height - 2 * band),
         };
     }
 
@@ -263,13 +337,13 @@ sealed unsafe class GlowArt : IDisposable
         {
             double u = t / per + k / 3.0;
             float e = 1 - MathF.Pow(1 - (float)(u - Math.Floor(u)), 2);           // ease out
-            r[k] = e * 40 * Look.W * S;
-            op[k] = A(.9f) * (1 - e);
+            r[k] = e * (Inward ? 24 : 40) * Look.W * S;                           // inward: rings travel from the edge in
+            op[k] = A(Inward ? .5f : .9f) * (1 - e);
         }
         var fr = frame!;
         for (int i = 0; i < n; i++)
         {
-            float d = D(i);
+            float d = Inward ? -D(i) : D(i);
             float a = basePx[i] >> 24;
             a /= 255f;
             for (int k = 0; k < 3; k++)
@@ -318,7 +392,7 @@ sealed unsafe class GlowArt : IDisposable
     void Drift(uint*[] bits, double t)
     {
         var (sprite, bw, bh) = blob!.Value;
-        int op = (int)(A(.75f) * 256);
+        int op = (int)(A(Inward ? .4f : .75f) * 256);                          // inward: over the text, fainter
         Clean(bits);
         for (int k = 0; k < 4; k++)
         {
@@ -395,7 +469,7 @@ sealed unsafe class GlowArt : IDisposable
         lastT = t;
         sparks.RemoveAll(sp => t - sp.Born > life);
         Clean(bits);
-        float sigma = 2 * S, fall = (float)(0.38 / k), top = A(1);
+        float sigma = 2 * S, fall = (float)(0.38 / k), top = A(Inward ? .8f : 1);
         foreach (var sp in sparks)
         {
             float age = (float)(t - sp.Born);
@@ -421,7 +495,16 @@ sealed unsafe class GlowArt : IDisposable
         else if (u < 2 * tw + th) { x = Pad + u - tw - th; y = Pad + th; }
         else { x = Pad; y = Pad + u - 2 * tw - th; }
         float v = (14 + ((float)rng.NextDouble() * 2 - 1) * 8) * Look.W * S, dir = (float)rng.NextDouble() * MathF.Tau;
-        return new Spark { X = x, Y = y, Vx = v * MathF.Cos(dir), Vy = v * MathF.Sin(dir), R = 4 * S * (.45f + ((float)rng.NextDouble() * 2 - 1) * .25f), Born = born };
+        float vx = v * MathF.Cos(dir), vy = v * MathF.Sin(dir);
+        if (Inward)
+        {
+            // head into the window: flip the part of the velocity that points out through the spark's edge
+            if (u < tw) vy = Math.Abs(vy);
+            else if (u < tw + th) vx = -Math.Abs(vx);
+            else if (u < 2 * tw + th) vy = -Math.Abs(vy);
+            else vx = Math.Abs(vx);
+        }
+        return new Spark { X = x, Y = y, Vx = vx, Vy = vy, R = 4 * S * (.45f + ((float)rng.NextDouble() * 2 - 1) * .25f), Born = born };
     }
 
     /// Composite `src(x, y, fade)` (pixel centre, overlay coords) over whatever the parts hold inside `box`.

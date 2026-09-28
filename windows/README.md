@@ -14,7 +14,10 @@
 
 - **找視窗**：`AttachConsole(AI 的 pid)` → `GetConsoleWindow()`，不用猜標題（在 `showork.exe console` 子行程裡做）。
   conhost 拿到的就是視窗本身；Windows Terminal 拿到 ConPTY 的 `PseudoConsoleWindow`，它的 **owner** 是目前裝著該分頁的 WT 視窗。
-- **光暈**：點擊穿透、不搶焦點的 layered window，`SetWindowPos(glow, target)` 放在目標正下方；位置用 DWM 的 `EXTENDED_FRAME_BOUNDS`（`GetWindowRect` 含隱形邊框會偏幾 px）。
+- **光暈**：點擊穿透、不搶焦點的 layered window；位置用 DWM 的 `EXTENDED_FRAME_BOUNDS`（`GetWindowRect` 含隱形邊框會偏幾 px）。
+  預設**朝內**（設定頁「光暈方向」，`settings.json` 的 `general.direction`）：光暈剛好蓋住視窗可見範圍、放在目標**正上方**
+  （插在原本目標上面那個視窗底下；目標是一般視窗最上層時用 `HWND_TOP`，永遠不設 topmost），從邊緣往內漸淡、中間完全透明；
+  點目標時目標會先跳到光暈上面，前景／疊放事件在幾十 ms 內把光暈放回去。**朝外**＝原本的做法，`SetWindowPos(glow, target)` 放在目標正下方。
 - **跟隨**：out-of-context WinEvent hooks（移動、前景切換、疊放、最小化、關閉），外加 250ms 看門狗；只在有光暈時才開。
 - **省資源**：光環點陣圖只在視窗大小或狀態改變時重畫；呼吸只改圖層透明度，不重畫。
 - **hook → agent**：`showork.exe emit` 經 named pipe `\.\pipe\ShoWork42-<SID>` 送一行 JSON；200 ms 內一定結束、永遠 exit 0。
@@ -42,8 +45,10 @@ bin\Release\net8.0-windows\ShoWorkAgent.exe --install    # 複製到 %LOCALAPPDA
 bin\Release\net8.0-windows\ShoWorkAgent.exe --status
 bin\Release\net8.0-windows\ShoWorkAgent.exe --uninstall  # 停 agent、移除 hooks（settings.json 回到原本位元組）、移除開機啟動
 
-# W0：光暈跟隨（會開兩個測試視窗並自動移動它們）
-powershell -File ..\tests\w0_e2e.ps1 -Agent bin\Release\net8.0-windows\ShoWorkAgent.exe -Out w0_result.txt
+# W0：光暈跟隨（會開兩個測試視窗並自動移動它們；-Direction inward（預設）或 outward）
+powershell -File ..\tests\w0_e2e.ps1 -Agent bin\Release\net8.0-windows\ShoWorkAgent.exe -Out w0_result.txt -Direction inward
+# W2：六種款式（對齊、疊放、點擊穿透、切換前景、CPU、截圖）
+powershell -File ..\tests\w2\w2_glow.ps1 -Agent bin\Release\net8.0-windows\ShoWorkAgent.exe -Work $env:TEMP\sw42-glow -Direction inward
 # W1：真實 Claude Code（需先 --install；會開一個 conhost 和一個 WT 視窗各跑一個 Haiku）
 dotnet build -c Release ..\tests\Sw42Probe
 powershell -ExecutionPolicy Bypass -File ..\tests\w1_e2e.ps1

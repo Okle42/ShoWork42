@@ -32,7 +32,7 @@ sealed class SettingsWindow : Form
     static string StateName(WorkState s) => s switch { WorkState.Working => "工作中", WorkState.Done => "已完成", _ => "等你回答" };
     static string Hint(WorkState s) => s switch
     {
-        WorkState.Working => "AI 正在處理時，視窗外圍的光。",
+        WorkState.Working => "AI 正在處理時，視窗的光。",
         WorkState.Done => "AI 做完了、等你來看時的光。在那個視窗裡按鍵或點擊就會消失。",
         _ => "AI 在等你回覆或允許權限時的光。要等 AI 繼續才會消失。",
     };
@@ -53,6 +53,7 @@ sealed class SettingsWindow : Form
     readonly ComboBox style;
     readonly (TrackBar bar, Label value)[] sliders = new (TrackBar, Label)[3];
     readonly CheckBox autoArrange, autostart;
+    readonly RadioButton inward, outward;
     readonly Font bold;
 
     SettingsWindow()
@@ -153,6 +154,15 @@ sealed class SettingsWindow : Form
         reset.Click += (_, _) => settings.Reset(editing);
         glowPage.Controls.Add(reset);
 
+        // 光暈方向 (all three states): here next to the previews, which switch at once
+        var direction = new Panel { Bounds = new Rectangle(20, 524, 390, 30), BackColor = th.Back, AccessibleName = "光暈方向", AccessibleRole = AccessibleRole.Grouping };
+        direction.Controls.Add(new Label { Text = "光暈方向：", Bounds = new Rectangle(0, 0, 90, 30), TextAlign = ContentAlignment.MiddleLeft });
+        inward = Direction("朝內", 90, GlowDirection.Inward);
+        outward = Direction("朝外", 170, GlowDirection.Outward);
+        direction.Controls.Add(inward);
+        direction.Controls.Add(outward);
+        glowPage.Controls.Add(direction);
+
         // 一般
         autoArrange = Check("視窗數量變動時自動排版", 24);
         autoArrange.CheckedChanged += (_, _) => { if (!syncing) settings.SetGeneral(settings.General with { AutoArrange = autoArrange.Checked }); };
@@ -198,7 +208,7 @@ sealed class SettingsWindow : Form
             {
                 var look = settings.Look(States[i]);
                 switches[i].Checked = look.Enabled;
-                previews[i].Show(look, States[i] == editing);
+                previews[i].Show(look, States[i] == editing, settings.Inward);
                 names[i].Font = States[i] == editing ? bold : Font;
             }
             var l = settings.Look(editing);
@@ -218,6 +228,8 @@ sealed class SettingsWindow : Form
             foreach (var c in new Control[] { colorButton, style, sliders[0].bar, sliders[1].bar, sliders[2].bar }) c.Enabled = l.Enabled;
             reset.Text = $"回復「{StateName(editing)}」的預設值";
             autoArrange.Checked = settings.General.AutoArrange;
+            inward.Checked = settings.Inward;
+            outward.Checked = !settings.Inward;
             autostart.Checked = autostartOn;                            // the registry is the truth
         }
         finally { syncing = false; }
@@ -261,6 +273,13 @@ sealed class SettingsWindow : Form
             foreach (var p in previews) p.Animate(glowPage.Visible);
         };
         Controls.Add(r);
+        return r;
+    }
+
+    RadioButton Direction(string text, int x, GlowDirection d)
+    {
+        var r = new RadioButton { Text = text, Bounds = new Rectangle(x, 0, 76, 30), ForeColor = th.Text, BackColor = th.Back, AccessibleName = $"光暈方向{text}" };
+        r.CheckedChanged += (_, _) => { if (!syncing && r.Checked) settings.SetGeneral(settings.General with { Direction = d }); };
         return r;
     }
 
@@ -395,7 +414,7 @@ sealed class SettingsWindow : Form
         StateLook? look;
         GlowArt? art;
         Bitmap? bmp;
-        bool selected, animate = true;
+        bool selected, animate = true, inward = true;
 
         public GlowPreview(WorkState state, Theme th)
         {
@@ -415,10 +434,10 @@ sealed class SettingsWindow : Form
         protected override void OnGotFocus(EventArgs e) { base.OnGotFocus(e); Invalidate(); }
         protected override void OnLostFocus(EventArgs e) { base.OnLostFocus(e); Invalidate(); }
 
-        public void Show(StateLook l, bool isSelected)
+        public void Show(StateLook l, bool isSelected, bool isInward)
         {
-            if (l == look && isSelected == selected) return;
-            if (l != look) { look = l; Forget(); }
+            if (l == look && isSelected == selected && isInward == inward) return;
+            if (l != look || isInward != inward) { look = l; inward = isInward; Forget(); }
             selected = isSelected;
             Render();
             Invalidate();
@@ -442,7 +461,7 @@ sealed class SettingsWindow : Form
             if (art == null || art.Target != m.Size || bmp == null || bmp.Size != Size)
             {
                 art?.Dispose();
-                art = new GlowArt(look, m.Size, DeviceDpi / 96f, pad => new[] { new Rectangle(pad - m.X, pad - m.Y, Width, Height) });
+                art = new GlowArt(look, m.Size, DeviceDpi / 96f, pad => new[] { new Rectangle(pad - m.X, pad - m.Y, Width, Height) }, inward: inward);
                 bmp?.Dispose();
                 bmp = new Bitmap(Width, Height, PixelFormat.Format32bppPArgb);
             }
@@ -463,22 +482,16 @@ sealed class SettingsWindow : Form
                 using var bg = new SolidBrush(Color.FromArgb(13, 15, 23));
                 g.FillPath(bg, clip);
                 g.SetClip(clip);
-                if (bmp != null)
-                {
-                    if (look?.Enabled == false)
-                    {
-                        using var ia = new ImageAttributes();
-                        ia.SetColorMatrix(new ColorMatrix { Matrix33 = .3f });
-                        g.DrawImage(bmp, new Rectangle(Point.Empty, bmp.Size), 0, 0, bmp.Width, bmp.Height, GraphicsUnit.Pixel, ia);
-                    }
-                    else g.DrawImageUnscaled(bmp, 0, 0);
-                }
+                // outward the glow is behind the window, inward on top of it (as the real glow windows are stacked)
+                bool over = art?.Inward == true;
+                if (!over) DrawGlow(g);
                 var m = Mock;
                 using (var win = Rounded(m, 8 * DeviceDpi / 96f))
                 using (var wb = new SolidBrush(Color.FromArgb(31, 36, 46)))
                     g.FillPath(wb, win);
                 using (var tb = new SolidBrush(Color.FromArgb(90, 255, 255, 255)))       // a hint of a prompt line
                     g.FillRectangle(tb, m.X + m.Width * .12f, m.Y + m.Height * .3f, m.Width * .45f, Math.Max(2, m.Height * .07f));
+                if (over) DrawGlow(g);
                 g.ResetClip();
                 if (Focused) ControlPaint.DrawFocusRectangle(g, new Rectangle(4, 4, Width - 8, Height - 8));
                 if (selected)
@@ -488,6 +501,18 @@ sealed class SettingsWindow : Form
                     g.DrawPath(pen, sel);
                 }
             }
+        }
+
+        void DrawGlow(Graphics g)
+        {
+            if (bmp == null) return;
+            if (look?.Enabled == false)
+            {
+                using var ia = new ImageAttributes();
+                ia.SetColorMatrix(new ColorMatrix { Matrix33 = .3f });
+                g.DrawImage(bmp, new Rectangle(Point.Empty, bmp.Size), 0, 0, bmp.Width, bmp.Height, GraphicsUnit.Pixel, ia);
+            }
+            else g.DrawImageUnscaled(bmp, 0, 0);
         }
 
         static GraphicsPath Rounded(RectangleF r, float rad)

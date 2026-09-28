@@ -4,11 +4,19 @@ using static ShoWork.Native;
 
 namespace ShoWork;
 
-/// The glow around one target window: click-through, never-activated layered windows kept directly BELOW
-/// the target in z-order, so the target covers the middle and only the light around it shows (same idea
-/// as the Mac version's `order(.below, relativeTo:)`).
+/// The glow of one target window: click-through, never-activated layered windows.
 ///
-/// A still glow (breathing, or any style with animation effects off) is one window the size of the target
+/// Inward (the default, GlowSettings.General.Direction): the target's visible rect (a still glow: one window with a
+/// transparent middle; a moving one: four strips just inside the edge, the middle not covered at all), kept
+/// directly ABOVE the target in z-order — above the target and below every window that is above it, never topmost.
+/// Clicks and keys pass straight through to the target (WS_EX_TRANSPARENT + layered: WindowFromPoint skips them).
+/// Activating the target lifts it above its glow for a moment; the foreground/reorder WinEvents (and the 250 ms
+/// watchdog, via StackedRight) put the glow back on top of it.
+///
+/// Outward: kept directly BELOW the target, so the target covers the middle and only the light around it shows
+/// (same idea as the Mac version's `order(.below, relativeTo:)`).
+///
+/// Outward, a still glow (breathing, or any style with animation effects off) is one window the size of the target
 /// plus the glow, drawn once per size/look change; breathing then only changes the layer's constant alpha
 /// and nothing is kept in memory. A moving style is four strips (top, bottom, left, right — this Form is the
 /// first): it keeps its pixels between frames, and for a large window the covered middle would be most of
@@ -82,11 +90,12 @@ sealed class GlowWindow : Form
         var size = new Size(r.Right - r.Left, r.Bottom - r.Top);
         if (size.Width <= 0 || size.Height <= 0) { Hide(true); return; }
         float s = GetDpiForWindow(Target) / 96f;
-        bool still = GlowSettings.ReduceMotion;
-        if (art == null || art.Target != size || art.S != s || art.Look != look || art.Still != still || strips.Length == 0)
+        bool still = GlowSettings.ReduceMotion, inward = GlowSettings.Shared.Inward, square = inward && IsZoomed(Target);
+        if (art == null || art.Target != size || art.S != s || art.Look != look || art.Still != still || art.Inward != inward
+            || art.Square != square || strips.Length == 0)
         {
             art?.Dispose();
-            art = new GlowArt(look, size, s, still: still);
+            art = new GlowArt(look, size, s, still: still, inward: inward, square: square);
             at = default;
             if (!Build()) { Hide(true); return; }
         }
@@ -146,12 +155,13 @@ sealed class GlowWindow : Form
     }
     long drawTicks, pushTicks, frames, perfStart;
 
-    /// Screen position of every strip, and z-order: directly below the target, one after another.
+    /// Screen position of every strip, and z-order, one after another: outward directly below the target,
+    /// inward directly above it (right under the window that was above the target).
     void Place(RECT r)
     {
         at = r;
         var hdwp = BeginDeferWindowPos(strips.Length);
-        var after = Target;
+        var after = art!.Inward ? Above() : Target;
         for (int i = 0; i < strips.Length; i++)
         {
             var p = art!.Parts[i];
@@ -163,7 +173,7 @@ sealed class GlowWindow : Form
         if (hdwp != IntPtr.Zero) EndDeferWindowPos(hdwp);
         shown = true;
         Visible = true;
-        Log.Note($"SHOW {Target} rect={r.Left},{r.Top},{r.Right},{r.Bottom} pad={art!.Pad} style={art.Style} parts={strips.Length} below={StackedRight}");
+        Log.Note($"SHOW {Target} rect={r.Left},{r.Top},{r.Right},{r.Bottom} {(art!.Inward ? $"inward depth={art.Depth}" : $"outward pad={art.Pad}")} style={art.Style} parts={strips.Length} stacked={StackedRight}");
     }
 
     void Hide(bool freeMemory)
@@ -188,21 +198,43 @@ sealed class GlowWindow : Form
         art = null;
     }
 
-    /// Are the strips still the first visible windows below the target? (a few GetWindow calls)
+    /// Are the strips still the first visible windows below (outward) / above (inward) the target? (a few GetWindow calls)
     public bool StackedRight
     {
         get
         {
-            if (!shown) return true;
+            if (!shown || art == null) return true;
             var h = Target;
-            foreach (var st in strips)
+            if (!art.Inward)
             {
-                h = NextVisibleBelow(h);
-                if (h != st.Hwnd) return false;
+                foreach (var st in strips)
+                {
+                    h = NextVisibleBelow(h);
+                    if (h != st.Hwnd) return false;
+                }
+                return true;
+            }
+            // a topmost ("always on top") target: a glow that is never topmost can't be above it — don't re-stack 4×/s
+            if (IsTopmost(Target)) return true;
+            for (int i = strips.Length - 1; i >= 0; i--)          // strips go [0] highest … [last] right above the target
+            {
+                h = NextVisibleAbove(h);
+                if (h != strips[i].Hwnd) return false;
             }
             return true;
         }
     }
+
+    /// Inward: what the first strip goes right under — the window directly above the target (not counting our own
+    /// strips), or HWND_TOP when that is a topmost window or nothing, i.e. the target leads the normal band.
+    IntPtr Above()
+    {
+        var h = GetWindow(Target, GW_HWNDPREV);
+        for (int i = 0; i < 64 && h != IntPtr.Zero && Array.Exists(strips, st => st.Hwnd == h); i++) h = GetWindow(h, GW_HWNDPREV);
+        return h == IntPtr.Zero || IsTopmost(h) ? HWND_TOP : h;
+    }
+
+    static bool IsTopmost(IntPtr h) => (GetWindowLong(h, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0;
 
     static double Now => Environment.TickCount64 / 1000.0;
 
@@ -238,6 +270,10 @@ sealed class GlowWindow : Form
     [DllImport("user32.dll")] static extern IntPtr BeginDeferWindowPos(int n);
     [DllImport("user32.dll")] static extern IntPtr DeferWindowPos(IntPtr hdwp, IntPtr hwnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
     [DllImport("user32.dll")] static extern bool EndDeferWindowPos(IntPtr hdwp);
+    [DllImport("user32.dll")] static extern bool IsZoomed(IntPtr hwnd);
+    [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr hwnd, int index);
+    const int GWL_EXSTYLE = -20, WS_EX_TOPMOST = 0x8;
+    static readonly IntPtr HWND_TOP = IntPtr.Zero;
 
     /// One layered, click-through, never-activated window and the DIB it is drawn from. The first strip is
     /// the Form's own window; the others are bare native windows (much lighter than Forms).
