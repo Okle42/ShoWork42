@@ -4,6 +4,7 @@
 # Usage (interactive desktop): powershell -File w2_glow.ps1 -Agent <ShoWorkAgent.exe> -Work <temp dir> [-Seconds 10]
 param([string]$Agent, [string]$Work, [int]$Seconds = 10, [string]$Styles = 'breathe,orbit,ripple,drift,sparkle,aurora', [double]$Width = 1)
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot '..\guard.ps1')
 Add-Type -Path "$PSScriptRoot\Win.cs" -ReferencedAssemblies System.Drawing
 Add-Type @'
 using System; using System.Runtime.InteropServices;

@@ -6,6 +6,7 @@
 param([string]$Agent = "$PSScriptRoot\..\ShoWork.Win\bin\Release\net8.0-windows\ShoWorkAgent.exe",
       [string]$Out = "$env:TEMP\sw42_w3_result.txt")
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'guard.ps1')
 $Agent = (Resolve-Path $Agent).Path
 Add-Type @'
 using System; using System.Text; using System.Collections.Generic; using System.Runtime.InteropServices;

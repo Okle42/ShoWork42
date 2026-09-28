@@ -8,6 +8,7 @@
 # 會用掉少量 Claude 用量（Haiku，約 10 個很短的提示）。
 param([string]$Out = (Join-Path $PSScriptRoot 'w1_result.txt'), [string]$Model = 'haiku')
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'guard.ps1')
 Add-Type @'
 using System; using System.Runtime.InteropServices;
 public static class W {
