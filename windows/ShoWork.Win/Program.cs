@@ -110,6 +110,7 @@ static class Program
                 Application.Exit();
             },
             quit: () => { engine.Stop(); Application.Exit(); });
+        Arranger.Start();                                      // W3: Ctrl+Alt+L, auto arrange (stops itself on exit)
         Application.Run();
         return 0;
     }
