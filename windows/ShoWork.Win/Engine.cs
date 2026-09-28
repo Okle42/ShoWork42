@@ -66,6 +66,14 @@ sealed class Engine
         clear = new ClearWatcher(Looked);
         winEventProc = OnWinEvent;
         watchdog.Tick += (_, _) => Tick();
+        GlowSettings.Shared.Changed += SettingsChanged;             // W2 settings
+    }
+
+    /// W2: a look changed in the settings window — restyle every glow; an off state now lights nothing.
+    void SettingsChanged()
+    {
+        foreach (var g in glows.Values) if (!g.IsDisposed) g.Restyle();
+        Render();
     }
 
     public void Start(Action reload, Action quit)
@@ -217,7 +225,7 @@ sealed class Engine
         foreach (var t in tabs.Values)
         {
             var w = t.Window;
-            if (w == IntPtr.Zero) continue;
+            if (w == IntPtr.Zero || !GlowSettings.Shared.Look(t.State).Enabled) continue;   // off ⇒ the next lit state shows
             want[w] = StateMachine.WindowState(new[] { want.GetValueOrDefault(w), t.State });
         }
         return want;
