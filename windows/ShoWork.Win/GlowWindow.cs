@@ -87,8 +87,8 @@ sealed class GlowWindow : Form
         {
             art?.Dispose();
             art = new GlowArt(look, size, s, still: still);
-            Build();
             at = default;
+            if (!Build()) { Hide(true); return; }
         }
         if (!at.Equals(r) || !shown || !StackedRight) Place(r);
         if (art.Fps > 0 || art.Breathes)
@@ -99,8 +99,8 @@ sealed class GlowWindow : Form
         else anim.Stop();
     }
 
-    /// (Re)create the strip windows for the art's parts and draw the first frame.
-    void Build()
+    /// (Re)create the strip windows for the art's parts and draw the first frame. False = no pixel memory.
+    bool Build()
     {
         var parts = art!.Parts;
         if (strips.Length != parts.Length)
@@ -110,11 +110,19 @@ sealed class GlowWindow : Form
             strips[0] = new Strip(Handle);
             for (int i = 1; i < parts.Length; i++) strips[i] = new Strip(IntPtr.Zero);
         }
-        for (int i = 0; i < parts.Length; i++) strips[i].Alloc(parts[i].Size);
+        for (int i = 0; i < parts.Length; i++)
+            if (!strips[i].Alloc(parts[i].Size))
+            {
+                // out of memory (a huge still overlay): drawing through a null buffer would crash the agent
+                Log.Note($"GLOW {Target} no memory for {parts[i].Width}x{parts[i].Height}: not shown");
+                Drop();
+                return false;
+            }
         alpha = art.AlphaAt(Now);
         DrawFrame();
         // a still glow keeps only its description, not its maps or pixels: the layered windows hold the image
         if (art.Fps == 0) { foreach (var st in strips) st.Free(); art.Release(); }
+        return true;
     }
 
     unsafe void DrawFrame()
@@ -161,7 +169,8 @@ sealed class GlowWindow : Form
     void Hide(bool freeMemory)
     {
         anim.Stop();
-        if (shown)
+        // Visible too: a new glow is shown empty before its first Place, and its target may already be minimised
+        if (shown || Visible)
         {
             foreach (var st in strips) SetWindowPos(st.Hwnd, IntPtr.Zero, 0, 0, 0, 0, SWP_HIDEWINDOW | SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
             shown = false;
@@ -250,9 +259,9 @@ sealed class GlowWindow : Form
         }
 
         /// A top-down 32-bit DIB section the size of the strip (zeroed = transparent).
-        public void Alloc(Size s)
+        public bool Alloc(Size s)
         {
-            if (Bits != null && s == size) return;
+            if (Bits != null && s == size) return true;
             Free();
             size = s;
             var bi = new BITMAPINFOHEADER { biSize = sizeof(BITMAPINFOHEADER), biWidth = s.Width, biHeight = -s.Height, biPlanes = 1, biBitCount = 32 };
@@ -260,8 +269,16 @@ sealed class GlowWindow : Form
             dc = CreateCompatibleDC(screen);
             ReleaseDC(IntPtr.Zero, screen);
             bmp = CreateDIBSection(dc, ref bi, 0, out var bits, IntPtr.Zero, 0);
+            if (bmp == IntPtr.Zero || bits == IntPtr.Zero)
+            {
+                if (bmp != IntPtr.Zero) DeleteObject(bmp);
+                DeleteDC(dc);
+                dc = bmp = IntPtr.Zero;
+                return false;
+            }
             Bits = (uint*)bits;
             old = SelectObject(dc, bmp);
+            return true;
         }
 
         public void Free()

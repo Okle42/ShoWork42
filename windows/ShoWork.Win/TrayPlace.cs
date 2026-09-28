@@ -129,8 +129,7 @@ static class TrayPlace
     /// touched, so the resident agent returns to its idle working set.
     public static void Trim()
     {
-        GC.Collect();
-        GC.WaitForPendingFinalizers();
+        GC.Collect();                                        // no WaitForPendingFinalizers: the forms are disposed, not finalized
         SetProcessWorkingSetSize(-1 /*this process*/, -1, -1);
     }
 
