@@ -33,6 +33,7 @@ sealed class Engine
     readonly ClearWatcher clear;
     readonly List<IntPtr> winHooks = new();
     readonly WinEventProc winEventProc;          // keep the delegate alive while the hooks exist
+    readonly EdgeGlow edge = new();              // full-screen edge line (W2)
     Tray? tray;
     bool checkingSelection;
 
@@ -82,6 +83,7 @@ sealed class Engine
         HookWinEvents(false);
         foreach (var g in glows.Values) g.Close();
         glows.Clear();
+        edge.Dispose();
         tray?.Dispose();
     }
 
@@ -239,6 +241,7 @@ sealed class Engine
             }
             else g.SetState(s);
         }
+        UpdateEdge();
         HookWinEvents(glows.Count > 0);
         if (tabs.Count > 0) watchdog.Start(); else watchdog.Stop();
         clear.Enable(tabs.Values.Any(t => t.State == WorkState.Done && t.Window != IntPtr.Zero));
@@ -262,7 +265,11 @@ sealed class Engine
             return;
         }
         foreach (var g in glows.Values) if (!g.StackedRight) g.Sync();
+        UpdateEdge();
     }
+
+    /// The edge also changes outside Render (foreground / location events): keep the test status file current.
+    void UpdateEdge() { if (edge.Update(glows.Values)) StatusFile(); }
 
     void HookWinEvents(bool on)
     {
@@ -291,6 +298,8 @@ sealed class Engine
         foreach (var g in glows.Values)
             if (!g.IsDisposed && (any || hwnd == g.Target)) g.Sync();
         if (ev == EVENT_OBJECT_DESTROY && glows.ContainsKey(hwnd)) Render();
+        // full screen starts/ends with a foreground change or the front window resizing (F11)
+        else if (ev != EVENT_OBJECT_REORDER && (ev != EVENT_OBJECT_LOCATIONCHANGE || hwnd == GetForegroundWindow() || glows.ContainsKey(hwnd))) UpdateEdge();
     }
 
     // MARK: persistence — an agent restart (reload, update, crash) must not forget who is working
@@ -341,6 +350,7 @@ sealed class Engine
                 tabs = tabs.Values.Select(t => new { pid = t.Pid, agent = t.Agent, state = t.State.ToString().ToLowerInvariant(), console = t.Console.ToInt64(), window = t.Window.ToInt64() }),
                 glows = glows.Where(g => !g.Value.IsDisposed).Select(g => new { target = g.Key.ToInt64(), glow = g.Value.Handle.ToInt64(), state = g.Value.State.ToString().ToLowerInvariant() }),
                 clearWatcher = clear.Active,
+                edge = edge.State.ToString().ToLowerInvariant(),
             };
             File.WriteAllText(path + ".tmp", JsonSerializer.Serialize(o));
             // a test reading the file at that instant makes the replace fail: retry briefly
