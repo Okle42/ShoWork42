@@ -110,6 +110,14 @@ static class Program
                 Application.Exit();
             },
             quit: () => { engine.Stop(); Application.Exit(); });
+        // W2/W3 wiring: the settings file owns 自動排版; the tray menu and the settings page both change it there
+        var settings = GlowSettings.Shared;
+        Arranger.AutoEnabled = settings.General.AutoArrange;
+        settings.Changed += () => Arranger.AutoEnabled = settings.General.AutoArrange;
+        TrayHooks.OpenSettings = SettingsWindow.ShowSingleton;
+        TrayHooks.ArrangeNow = Arranger.ArrangeNow;
+        TrayHooks.GetAutoArrange = () => settings.General.AutoArrange;
+        TrayHooks.SetAutoArrange = on => settings.SetGeneral(settings.General with { AutoArrange = on });
         Arranger.Start();                                      // W3: Ctrl+Alt+L, auto arrange (stops itself on exit)
         if (Environment.GetEnvironmentVariable("SHOWORK_OPEN_SETTINGS") == "1") ui.BeginInvoke(SettingsWindow.ShowSingleton);   // W2 tests
         Application.Run();
