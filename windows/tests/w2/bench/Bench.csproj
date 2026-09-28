@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- GlowArt frame cost without any window: dotnet run -c Release -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <RootNamespace>ShoWork</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\..\..\ShoWork.Win\GlowArt.cs" Link="GlowArt.cs" />
+    <Compile Include="..\..\..\ShoWork.Win\GlowSettings.cs" Link="GlowSettings.cs" />
+    <Compile Include="..\..\..\ShoWork.Win\WorkState.cs" Link="WorkState.cs" />
+    <Compile Include="..\..\..\ShoWork.Win\Log.cs" Link="Log.cs" />
+    <Compile Include="..\..\..\Shared\Wire.cs" Link="Wire.cs" />
+  </ItemGroup>
+</Project>
