@@ -74,6 +74,8 @@ $env:SHOWORK_PIPE = 'sw42-w2-set-' + [guid]::NewGuid().ToString('N').Substring(0
 $env:SHOWORK_HOME = $Work
 $env:SHOWORK_STATUS_FILE = "$Work\status.json"
 $env:SHOWORK_DEBUG = '1'
+# the test turns 自動排版 on: with ONLY_LISTED and no ONLY_WIDS the arranger has no candidates (never the user's terminals)
+$env:SHOWORK_ARRANGE_ONLY_LISTED = '1'
 $before = [W2]::AllRects(@())
 
 # a console with two AI stand-ins (the shell and a child sharing its console)
