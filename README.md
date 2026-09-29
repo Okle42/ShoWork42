@@ -7,6 +7,9 @@
 
 > 終端機裡的 AI 在工作、做完了、在等你回答——不用切過去看，視窗外圍的光就告訴你。
 
+> **Windows 版**（開發中）：傳統主控台與 Windows Terminal ＋ Claude Code，系統匣「動態島」、設定視窗、自動排版、單一 exe 安裝。
+> 說明與建置見 [windows/README.md](windows/README.md)，驗收紀錄見 [windows/W1-結果.md](windows/W1-結果.md)、[windows/W2W3-結果.md](windows/W2W3-結果.md)。
+
 macOS 常駐小工具。每個跑著 AI（Claude Code、Codex、Gemini⋯⋯）的終端機視窗，依 AI 當下狀態在外圍發光：
 
 | 狀態 | 顏色（預設） | 什麼時候 | 什麼時候消失 |
