@@ -20,7 +20,17 @@ sealed class Engine
         public bool Resolving;
         public RegisteredWaitHandle? Wait;
         public WaitHandle? Process;
-        public IntPtr Window => Resolver.WindowOf(Console);
+        public IntPtr TitleWindow;               // fallback when the console has no owner (see MatchByTitle)
+        public IntPtr Window
+        {
+            get
+            {
+                var w = Resolver.WindowOf(Console);
+                if (w != IntPtr.Zero) return w;
+                if (TitleWindow != IntPtr.Zero && !IsWindow(TitleWindow)) TitleWindow = IntPtr.Zero;
+                return TitleWindow;
+            }
+        }
     }
 
     readonly Control ui;
@@ -267,7 +277,8 @@ sealed class Engine
     void Tick()
     {
         foreach (var t in tabs.Values)
-            if (t.Console != IntPtr.Zero && !IsWindow(t.Console)) { t.Console = IntPtr.Zero; Resolve(t); }
+            if (t.Console != IntPtr.Zero && !IsWindow(t.Console)) { t.Console = IntPtr.Zero; t.TitleWindow = IntPtr.Zero; Resolve(t); }
+        if (++ticks % 8 == 0) MatchByTitle();                               // every 2 s, only while something is unmapped
         var want = WindowStates();
         if (want.Count != glows.Count || want.Any(kv => !glows.TryGetValue(kv.Key, out var g) || g.IsDisposed || g.State != kv.Value))
         {
@@ -276,6 +287,39 @@ sealed class Engine
         }
         foreach (var g in glows.Values) if (!g.StackedRight) g.Sync();
         UpdateEdge();
+    }
+
+    int ticks;
+    bool matchingTitles;
+
+    /// Fallback for a console nobody owns. Seen 09-29: a resumed Claude Code runs as a launcher claude.exe (no
+    /// console, its parent gone) hosting the real claude.exe in a pseudo console whose owner is 0, while WT still
+    /// shows it. WT's window title is its active tab's title, so: read the console's title (read-only, helper),
+    /// drop the leading spinner/status glyphs, and take the WT window only if exactly ONE has that title. None or
+    /// several ⇒ stay dark. Once matched it sticks until that window closes (the title only matches while the tab
+    /// is in front).
+    void MatchByTitle()
+    {
+        if (matchingTitles) return;
+        var lost = tabs.Values.Where(t => t.Console != IntPtr.Zero && t.Window == IntPtr.Zero).ToList();
+        if (lost.Count == 0) return;
+        matchingTitles = true;
+        Task.Run(() => Resolver.Consoles(lost.Select(t => t.Pid))).ContinueWith(r =>
+        {
+            matchingTitles = false;
+            var terminals = Resolver.Terminals().Select(w => (w, title: Resolver.BareTitle(TitleOf(w)))).ToList();
+            bool changed = false;
+            foreach (var info in r.Result)
+            {
+                var t = lost.FirstOrDefault(x => x.Pid == info.Pid);
+                var bare = Resolver.BareTitle(info.Title);
+                if (t == null || bare.Length == 0) continue;
+                var hits = terminals.Where(x => x.title == bare).Select(x => x.w).ToList();
+                Log.Note($"TITLEMATCH pid={t.Pid} '{bare}' → {hits.Count} window(s)");
+                if (hits.Count == 1 && tabs.ContainsKey(t.Pid)) { t.TitleWindow = hits[0]; changed = true; }
+            }
+            if (changed) Render();
+        }, TaskScheduler.FromCurrentSynchronizationContext());
     }
 
     /// The edge also changes outside Render (foreground / location events): keep the test status file current.
