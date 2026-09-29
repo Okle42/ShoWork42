@@ -64,6 +64,18 @@ static class Resolver
 
     public static bool IsTerminal(IntPtr window) => ClassOf(window) == TerminalClass;
 
+    /// Every visible Windows Terminal window.
+    public static List<IntPtr> Terminals()
+    {
+        var list = new List<IntPtr>();
+        EnumWindows((h, _) => { if (IsWindowVisible(h) && ClassOf(h) == TerminalClass) list.Add(h); return true; }, IntPtr.Zero);
+        return list;
+    }
+
+    /// A title without the glyphs AI tools put in front and keep changing (Claude's ◐◑◒◓ spinner, ✳ idle, · ).
+    public static string BareTitle(string title) =>
+        System.Text.RegularExpressions.Regex.Replace(title ?? "", @"^[^\p{L}\p{N}]+", "").Trim();
+
     /// Every pane of every tab in a WT window has its own PseudoConsoleWindow owned by that window.
     public static List<IntPtr> PanesOf(IntPtr terminal)
     {
