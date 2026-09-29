@@ -103,7 +103,7 @@ sealed unsafe class GlowArt : IDisposable
             float f = tt * tt * (3 - 2 * tt) * Math.Clamp(.5f + e, 0, 1);
             fade[i] = (int)(f * 256);
             var (lineA, softA, sigma) = InwardProfile(style);
-            float lw = 2 * s;                                                // the crisp edge line: 2 px at 96 DPI
+            float lw = 3 * s;                                                // the crisp edge line: 3 px at 96 DPI
             float a = Screen(A(lineA) * Math.Clamp(lw + .5f - e, 0, 1), softA == 0 ? 0 : A(softA) * G(Math.Max(0, e - lw), sigma * W * s));
             basePx[i] = pal[(int)(a * f * 255)];
         }
@@ -203,7 +203,7 @@ sealed unsafe class GlowArt : IDisposable
     /// (width 1×): 22–32 px at 96 DPI, a little less than the outward pad (34–56 px): this band lies over the text.
     public static int DepthFor(StateLook look, GlowStyle style, float s) => (int)MathF.Ceiling(style switch
     {
-        GlowStyle.Breathe => 4 + 20 * look.W,       // 2 px line + 3σ of a 6W falloff
+        GlowStyle.Breathe => 5 + 26 * look.W,       // 3 px line + 3σ of an 8W falloff
         GlowStyle.Orbit => 4 + 18 * look.W,         // the arc's ring mask reaches 18W
         GlowStyle.Aurora => 4 + 22 * look.W,        // 22W
         GlowStyle.Ripple => 8 + 24 * look.W,        // rings travel 24W inwards
@@ -213,12 +213,14 @@ sealed unsafe class GlowArt : IDisposable
     /// Inward edge line alpha, soft falloff peak alpha and its σ (in W·DIP), per style (× brightness).
     static (float line, float soft, float sigma) InwardProfile(GlowStyle style) => style switch
     {
-        GlowStyle.Breathe => (.85f, .30f, 6),
-        GlowStyle.Ripple => (.70f, .16f, 4),
-        GlowStyle.Orbit => (.60f, .14f, 4),
-        GlowStyle.Aurora => (.55f, .12f, 4),
-        GlowStyle.Sparkle => (.70f, .18f, 4),
-        _ => (.70f, 0, 4),                          // 光霧飄動: the blobs are the soft part
+        // 09-29 (Kang): the first values (breathe .85/.30/6) were nearly invisible on a dark terminal at the
+        // breath's low point — about twice as much light now; 亮度 in settings still scales all of it
+        GlowStyle.Breathe => (1f, .55f, 8),
+        GlowStyle.Ripple => (.90f, .30f, 5),
+        GlowStyle.Orbit => (.85f, .28f, 5),
+        GlowStyle.Aurora => (.80f, .26f, 5),
+        GlowStyle.Sparkle => (.90f, .30f, 5),
+        _ => (.90f, 0, 5),                          // 光霧飄動: the blobs are the soft part
     };
 
     /// Four non-overlapping strips just inside the window's edge, `depth` deep (at least the corner radius, so the
@@ -256,7 +258,7 @@ sealed unsafe class GlowArt : IDisposable
 
     /// 0…255 constant alpha for the breathing style at time t (seconds): 3.2 s per breath at speed 1.
     public byte AlphaAt(double t) =>
-        Breathes ? (byte)(255 * (0.55 + 0.45 * (0.5 - 0.5 * Math.Cos(2 * Math.PI * t / (3.2 * Look.Period))))) : (byte)255;
+        Breathes ? (byte)(255 * ((Inward ? 0.7 : 0.55) + (Inward ? 0.3 : 0.45) * (0.5 - 0.5 * Math.Cos(2 * Math.PI * t / (3.2 * Look.Period))))) : (byte)255;   // inward never fades to near nothing
 
     /// Draw the frame for time t into one buffer per part (Width×Height, top-down, no padding).
     /// bakeAlpha: multiply the breathing alpha into the pixels (the preview has no layered window to do it).
