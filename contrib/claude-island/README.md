@@ -1,6 +1,6 @@
 # Claude Island（動態島＋螢光條）
 
-在另一台 Mac 上（macOS 13.7、Terminal.app）做的 Claude Code 狀態提示，**概念改編自 ShoWork42**，寫成單一 Swift 檔案，放在這裡給 Keng 參考。
+在另一台 Mac 上（macOS 13.7、Terminal.app）做的 Claude Code 狀態提示，**概念改編自 ShoWork42**，寫成單一 Swift 檔案，放在這裡給 Kang 參考。
 這個資料夾是獨立的，**沒有改動 ShoWork42 本身的任何程式碼**，也沒有接進 `Package.swift`。
 
 ## 長什麼樣子
