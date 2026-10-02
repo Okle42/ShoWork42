@@ -90,4 +90,4 @@ Tests/e2e/layout_e2e.sh          # 排版（白名單保護，見下）
 
 [MIT](LICENSE) © 2026 Okle42
 
-`contrib/` 底下是其他作者貢獻的程式，授權以各目錄的 README 為準。
+`contrib/claude-island` © 2026 [@gamebear61211-lgtm](https://github.com/gamebear61211-lgtm)，同樣以 MIT 授權。

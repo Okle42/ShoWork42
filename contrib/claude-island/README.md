@@ -71,3 +71,7 @@ cd contrib/claude-island
 ```
 
 清除的原因會寫在 `~/.claude/island/island.log`。
+
+## 授權
+
+MIT © 2026 gamebear61211-lgtm（2026-10-02 作者同意以 MIT 釋出）

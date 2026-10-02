@@ -95,4 +95,4 @@ The docs are currently in Traditional Chinese.
 
 [MIT](LICENSE) © 2026 Okle42
 
-Code under `contrib/` was contributed by its authors; see each directory's README for its terms.
+`contrib/claude-island` © 2026 [@gamebear61211-lgtm](https://github.com/gamebear61211-lgtm), also MIT.
