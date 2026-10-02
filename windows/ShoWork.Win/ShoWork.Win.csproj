@@ -1,0 +1,48 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- window rects in physical pixels on every monitor, like the Mac version's points-everywhere -->
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <AssemblyName>ShoWorkAgent</AssemblyName>
+    <RootNamespace>ShoWork</RootNamespace>
+    <!-- shown in Settings → Apps and the file's properties; pack.ps1 can override Version -->
+    <Version>0.4.0</Version>
+    <Product>ShoWork42</Product>
+    <AssemblyTitle>ShoWork42</AssemblyTitle>
+    <Description>ShoWork42：終端機裡的 AI 在工作、做完了、在等你回答時，視窗外圍發光</Description>
+    <ApplicationIcon>ShoWork42.ico</ApplicationIcon>
+    <!-- a resident tray agent: small footprint over peak throughput (idle target < 60 MB) -->
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+    <TieredPGO>false</TieredPGO>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <UseSystemResourceKeys>true</UseSystemResourceKeys>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Shared\Wire.cs" Link="Wire.cs" />
+    <!-- showork.exe (the hook CLI and console helper) must sit next to ShoWorkAgent.exe -->
+    <ProjectReference Include="..\showork\showork.csproj" Condition="'$(PackShowork)' == ''" />
+    <!-- W4 packaging (pack.ps1): the native showork.exe rides inside the single ShoWork42.exe and is written
+         next to the installed agent at install time -->
+    <EmbeddedResource Include="$(PackShowork)" LogicalName="showork.exe" Condition="'$(PackShowork)' != ''" />
+  </ItemGroup>
+
+  <!-- Release: replace the copied .NET showork.exe with the native one. Without VS Build Tools this only warns
+       and the .NET build stays (it works, it is just ~70 ms slower per hook). -->
+  <Target Name="NativeShowork" AfterTargets="Build" Condition="'$(Configuration)' == 'Release' And '$(SkipNativeShowork)' != 'true' And '$(PackShowork)' == ''">
+    <!-- the AOT linker finds MSVC through vswhere.exe, which is not on PATH until the next sign-in -->
+    <Exec Command="set &quot;PATH=$(MSBuildProgramFiles32)\Microsoft Visual Studio\Installer%3B%PATH%&quot; &amp;&amp; dotnet publish &quot;$(MSBuildThisFileDirectory)..\showork\showork.csproj&quot; -c Release -r win-x64 -o &quot;$(MSBuildThisFileDirectory)obj\showork-aot&quot; -nologo -v q"
+          ContinueOnError="true">
+      <Output TaskParameter="ExitCode" PropertyName="NativeShoworkExit" />
+    </Exec>
+    <Copy Condition="'$(NativeShoworkExit)' == '0'" SourceFiles="$(MSBuildThisFileDirectory)obj\showork-aot\showork.exe" DestinationFolder="$(OutDir)" />
+    <Warning Condition="'$(NativeShoworkExit)' != '0'" Text="native showork.exe not built (VS Build Tools C++ missing?); keeping the .NET one" />
+  </Target>
+
+</Project>
