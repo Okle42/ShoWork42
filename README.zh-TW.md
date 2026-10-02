@@ -86,6 +86,8 @@ Tests/e2e/layout_e2e.sh          # 排版（白名單保護，見下）
 | M3 | Terminal.app、iTerm2 日用驗收 | |
 | M4 | 打包、簽章＋公證、README GIF、公開 | |
 
----
+## 授權
 
-© Okle42
+[MIT](LICENSE) © 2026 Okle42
+
+`contrib/` 底下是其他作者貢獻的程式，授權以各目錄的 README 為準。

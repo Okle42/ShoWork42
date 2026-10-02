@@ -91,6 +91,8 @@ The docs are currently in Traditional Chinese.
 | M3 | Terminal.app and iTerm2 daily-use acceptance | |
 | M4 | Packaging, signing + notarization, README GIF, release | |
 
----
+## License
 
-© Okle42
+[MIT](LICENSE) © 2026 Okle42
+
+Code under `contrib/` was contributed by its authors; see each directory's README for its terms.
