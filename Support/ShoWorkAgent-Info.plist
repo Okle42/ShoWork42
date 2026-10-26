@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- ShoWorkAgent.app 的 Info.plist（showork_install.py 裝到 Application Support/ShoWork42/ShoWorkAgent.app）。
+     10-25：裸執行檔沒有 App 身分，系統聽寫（按兩下 Control）不會送字進戰情中心；包成 .app 才有（兩個測試視窗證實）。
+     CFBundleIdentifier 固定 ai.okle42.showork.agent，不要再換：輔助使用等授權綁這個身分，換一次就要重新允許一次。 -->
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>ai.okle42.showork.agent</string>
+    <key>CFBundleName</key>
+    <string>ShoWorkAgent</string>
+    <key>CFBundleDisplayName</key>
+    <string>ShoWork42 戰情中心</string>
+    <key>CFBundleExecutable</key>
+    <string>ShoWorkAgent</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.0</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>在戰情中心的輸入框用聽寫（按兩下 Control）講話。</string>
+</dict>
+</plist>

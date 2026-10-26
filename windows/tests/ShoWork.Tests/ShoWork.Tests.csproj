@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- the geometry is pure: link the source instead of referencing the WinForms agent -->
+    <Compile Include="..\..\ShoWork.Win\LayoutPlan.cs" Link="LayoutPlan.cs" />
+    <!-- 戰情中心的規則與讀檔也都不碰 WinForms：直接連原始檔 -->
+    <Compile Include="..\..\ShoWork.Win\Board\*.cs" LinkBase="Board" />
+    <Compile Include="..\..\ShoWork.Win\WorkState.cs" Link="WorkState.cs" />
+    <Compile Include="..\..\Shared\Wire.cs" Link="Wire.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+</Project>

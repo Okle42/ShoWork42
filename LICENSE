@@ -1,0 +1,28 @@
+ShoWork42 Source-Available License
+
+Copyright (c) 2026 Okle42. All rights reserved.
+
+The source code in this repository is made publicly visible for reading,
+reference and personal evaluation only. You may:
+
+  - view and read the source code;
+  - build and run it on your own computer for personal, non-commercial
+    evaluation.
+
+You may NOT, without prior written permission from Okle42:
+
+  - use it, or any part of it, for any commercial purpose;
+  - copy, modify, merge, publish, distribute, sublicense or sell it, or any
+    part of it, or any software derived from it;
+  - redistribute it in source or binary form.
+
+Viewing the source code grants no license to any patent, trademark or other
+right of Okle42. "ShoWork42" and "Okle42" are names of Okle42.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY CLAIM, DAMAGES OR
+OTHER LIABILITY ARISING FROM THE SOFTWARE OR ITS USE.
+
+Third-party components keep their own licenses:
+- contrib/claude-island: MIT License, (c) 2026 gamebear61211-lgtm
+  (see contrib/claude-island/LICENSE)

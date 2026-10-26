@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__ 知識星雲</title>
+<style>
+  :root { --bg: #02030a; --fg: #e6ecff; --dim: #8b93b8; --panel: rgba(12,16,34,.82); --line: rgba(120,160,255,.25); }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: 14px -apple-system, "PingFang TC", sans-serif; overflow: hidden; }
+  #g { position: fixed; inset: 0; }
+  #hud { position: fixed; left: 16px; top: 16px; max-width: 360px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; backdrop-filter: blur(8px); }
+  #hud h1 { font-size: 16px; margin: 0 0 4px; letter-spacing: .5px; }
+  #hud .sub { color: var(--dim); font-size: 12px; }
+  #q { margin-top: 10px; width: 100%; box-sizing: border-box; background: rgba(255,255,255,.06); color: var(--fg); border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; font-size: 13px; outline: none; }
+  #info { position: fixed; right: 16px; top: 16px; width: 320px; max-height: calc(100% - 32px); overflow: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: none; backdrop-filter: blur(8px); }
+  #info h2 { font-size: 15px; margin: 0 0 6px; word-break: break-all; }
+  #info .k { color: var(--dim); font-size: 12px; margin-top: 8px; }
+  #info ul { margin: 4px 0 0; padding-left: 16px; }
+  #info li { cursor: pointer; margin: 2px 0; word-break: break-all; }
+  #info li:hover { color: #9fd0ff; }
+  #legend { margin-top: 10px; display: none; flex-wrap: wrap; gap: 6px; }
+  #legend span { cursor: pointer; font-size: 12px; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--line); background: rgba(255,255,255,.04); }
+  #legend span.on { background: rgba(160,200,255,.22); }
+  #legend i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
+  #tip { position: fixed; left: 16px; bottom: 14px; color: var(--dim); font-size: 12px; }
+  #err { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; text-align: center; color: var(--dim); padding: 24px; }
+</style>
+</head>
+<body>
+<div id="g"></div>
+<div id="hud">
+  <h1>__TITLE__ 知識星雲</h1>
+  <div class="sub" id="stat"></div>
+  <input id="q" placeholder="搜尋類別、函式、檔名…" autocomplete="off">
+  <div id="legend"></div>
+</div>
+<div id="info"></div>
+<div id="tip">拖曳旋轉・滾輪縮放・右鍵平移・點星星看連線・空白處點一下取消</div>
+<div id="err">3D 繪圖函式庫載入失敗（nebula-vendor.js 不見了）。<br>重開戰情中心會重新放好。</div>
+<script src="../../../nebula/nebula-vendor.js"></script>
+<script id="data" type="application/json">__DATA__</script>
+<script type="module">
+const D = JSON.parse(document.getElementById('data').textContent);
+let THREE, ForceGraph3D, UnrealBloomPass, OutputPass;
+try {
+  // 繪圖函式庫（three.js 0.180、3d-force-graph 1.80.1）打包在本機 nebula-vendor.js，不連網路。
+  // file:// 頁面不能 import 別的檔案 ⇒ 模組原始碼以字串放在 window.__NEB，這裡逐一轉成 blob URL 再 import（同一模組只建一次，three 只有一份）
+  const { mods, entries } = window.__NEB || {};
+  if (!mods) throw new Error('找不到 nebula-vendor.js');
+  const SPEC = /((?:\bfrom|\bimport)\s*\(?\s*)(["'])(\/[^"']+)\2/g, urls = {}, busy = new Set();
+  const url = p => {
+    if (urls[p]) return urls[p];
+    if (mods[p] == null) throw new Error('缺模組 ' + p);
+    if (busy.has(p)) throw new Error('循環相依 ' + p);
+    busy.add(p);
+    const code = mods[p].replace(SPEC, (m, a, q, sp) => a + q + url(sp) + q);
+    busy.delete(p);
+    return urls[p] = URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
+  };
+  THREE = await import(url(entries.THREE));
+  ForceGraph3D = (await import(url(entries.FG))).default;
+  UnrealBloomPass = (await import(url(entries.Bloom))).UnrealBloomPass;
+  OutputPass = (await import(url(entries.Output))).OutputPass;
+} catch (e) {
+  document.getElementById('err').style.display = 'flex';
+  document.getElementById('err').dataset.e = String(e);
+  throw e;
+}
+
+// 星雲配色：每個社群一種色相，亮度依連線數
+const hues = [195, 280, 330, 25, 160, 45, 220, 300, 120, 0, 260, 175];
+const col = c => `hsl(${hues[((c % hues.length) + hues.length) % hues.length]}, 95%, 66%)`;
+const maxDeg = Math.max(1, ...D.nodes.map(n => n.deg));
+const byId = new Map(D.nodes.map(n => [n.id, n]));
+const nbr = new Map(D.nodes.map(n => [n.id, new Set()]));
+D.links.forEach(l => { nbr.get(l.source)?.add(l.target); nbr.get(l.target)?.add(l.source); });
+// 整棟大樓版（D.projects）：顏色＝專案，圖例點一下只亮那個專案、飛過去；再點一次全亮
+const P = D.projects || null;
+let only = null;
+document.getElementById('stat').textContent = P
+  ? `${P.length} 個專案・${D.nodes.length} 顆星・${D.links.length} 條連線（Graphify）`
+  : `${D.nodes.length} 顆星・${D.links.length} 條連線・${new Set(D.nodes.map(n => n.c)).size} 個星團（Graphify）`;
+
+// 發光貼圖（徑向漸層）：每顆星都是一個加色混合的 sprite
+const cv = document.createElement('canvas'); cv.width = cv.height = 64;
+const cx = cv.getContext('2d'); const gr = cx.createRadialGradient(32, 32, 0, 32, 32, 32);
+gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(.25, 'rgba(255,255,255,.75)'); gr.addColorStop(.6, 'rgba(255,255,255,.15)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+cx.fillStyle = gr; cx.fillRect(0, 0, 64, 64);
+const glow = new THREE.CanvasTexture(cv);
+
+let hi = null; // 目前選取的節點 id
+const lit = id => (!only || byId.get(id)?.p === only) && (!hi || id === hi || nbr.get(hi)?.has(id));
+
+const G = ForceGraph3D({ controlType: 'orbit' })(document.getElementById('g'))
+  .backgroundColor('#02030a')
+  .showNavInfo(false)
+  .graphData(D)
+  .nodeLabel(n => `<div style="font:13px -apple-system,'PingFang TC';padding:2px 6px;background:rgba(10,14,30,.85);border-radius:6px">${esc(n.label)}<br><span style="opacity:.6">${esc(n.file || '')}</span></div>`)
+  .nodeThreeObject(n => {
+    const m = new THREE.SpriteMaterial({ map: glow, color: col(n.c), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
+    const s = new THREE.Sprite(m); const k = 8 + 40 * Math.sqrt(n.deg / maxDeg); s.scale.set(k, k, 1); n.__s = s; return s;
+  })
+  .linkColor(l => lit(l.source.id ?? l.source) && lit(l.target.id ?? l.target) ? (hi ? 'rgba(160,220,255,0.9)' : 'rgba(120,170,255,0.07)') : 'rgba(80,100,160,0.03)')
+  .linkWidth(l => hi && (l.source.id === hi || l.target.id === hi) ? 0.6 : 0)
+  .linkDirectionalParticles(l => hi && (l.source.id === hi || l.target.id === hi) ? 3 : (Math.random() < 0.04 ? 1 : 0))
+  .linkDirectionalParticleWidth(1.2)
+  .linkDirectionalParticleColor(() => '#bfe6ff')
+  .d3VelocityDecay(0.3)
+  .warmupTicks(80).cooldownTicks(200)
+  .onNodeClick(n => select(n.id))
+  .onBackgroundClick(() => select(null));
+
+// 泛光：讓星星與連線像星雲一樣暈開
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 1.25, 0.55, 0.12);
+G.scene().background = new THREE.Color(0x02030a);
+G.postProcessingComposer().addPass(bloom);
+G.postProcessingComposer().addPass(new OutputPass());   // 色彩空間轉回 sRGB（沒有這道背景會被洗成灰藍）
+
+// 背景星空：遠處細小的星點
+const N = 1400, pos = new Float32Array(N * 3);
+for (let i = 0; i < N; i++) { const r = 2500 + Math.random() * 2500, u = Math.random() * 2 * Math.PI, v = Math.acos(2 * Math.random() - 1);
+  pos[i * 3] = r * Math.sin(v) * Math.cos(u); pos[i * 3 + 1] = r * Math.cos(v); pos[i * 3 + 2] = r * Math.sin(v) * Math.sin(u); }
+const sg = new THREE.BufferGeometry(); sg.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+G.scene().add(new THREE.Points(sg, new THREE.PointsMaterial({ color: 0x8899cc, size: 2, sizeAttenuation: false, transparent: true, opacity: .4 })));
+
+// 慢慢自轉；使用者一操作就停
+// 慢慢自轉；使用者一操作就停。距離＝佈局停下來後「整團剛好塞滿畫面」的距離
+let spin = true, ang = 0, dist = 0, fitted = false;
+G.controls().addEventListener('start', () => { spin = false; });
+// 用 85% 的星算距離（零星的小星團不算，不然整團縮成畫面中間一小塊）
+G.onEngineStop(() => {
+  if (fitted) return; fitted = true;
+  const ns = D.nodes.filter(n => n.x !== undefined), cx = ns.reduce((a, n) => a + n.x, 0) / ns.length, cy = ns.reduce((a, n) => a + n.y, 0) / ns.length, cz = ns.reduce((a, n) => a + n.z, 0) / ns.length;
+  const r = ns.map(n => Math.hypot(n.x - cx, n.y - cy, n.z - cz)).sort((a, b) => a - b)[Math.floor(ns.length * 0.85)] || 300;
+  dist = r * 2.6; ang = 0;
+  G.cameraPosition({ x: cx, y: cy + r * 0.4, z: cz + dist }, { x: cx, y: cy, z: cz }, 0);
+  G.controls().target.set(cx, cy, cz);
+});
+(function rot() {
+  if (spin && dist) { ang += 0.0012; const t = G.controls().target;
+    G.cameraPosition({ x: t.x + dist * Math.sin(ang), y: G.camera().position.y, z: t.z + dist * Math.cos(ang) }, t); }
+  requestAnimationFrame(rot);
+})();
+
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]); }
+function select(id) {
+  hi = id; spin = false;
+  const box = document.getElementById('info');
+  if (!id) { box.style.display = 'none'; D.nodes.forEach(n => n.__s && (n.__s.material.opacity = lit(n.id) ? 1 : 0.1)); G.linkColor(G.linkColor()).linkWidth(G.linkWidth()).linkDirectionalParticles(G.linkDirectionalParticles()); return; }
+  const n = byId.get(id);
+  D.nodes.forEach(m => { if (m.__s) m.__s.material.opacity = lit(m.id) ? 1 : 0.1; });
+  G.linkColor(G.linkColor()).linkWidth(G.linkWidth()).linkDirectionalParticles(G.linkDirectionalParticles());
+  const ns = [...nbr.get(id)].map(x => byId.get(x)).filter(Boolean).sort((a, b) => b.deg - a.deg);
+  box.innerHTML = `<h2>${esc(n.label)}</h2><div class="sub">${esc(n.file || '')}${n.loc ? ' ' + esc(n.loc) : ''}</div>
+    <div class="k">${n.p ? '專案 ' + esc(n.p) : '星團 ' + n.c + (n.cn ? '・' + esc(n.cn) : '')}・${n.deg} 條連線</div>
+    <div class="k">相連的 ${ns.length} 個</div><ul>${ns.slice(0, 80).map(m => `<li data-id="${esc(m.id)}">${esc(m.label)}</li>`).join('')}</ul>`;
+  box.style.display = 'block';
+  box.querySelectorAll('li').forEach(li => li.onclick = () => select(li.dataset.id));
+  const d = 140, p = n; const r = Math.hypot(p.x, p.y, p.z) || 1;
+  G.cameraPosition({ x: p.x * (1 + d / r), y: p.y * (1 + d / r), z: p.z * (1 + d / r) }, p, 1200);
+}
+document.getElementById('q').addEventListener('keydown', e => {
+  if (e.key !== 'Enter') return;
+  const q = e.target.value.trim().toLowerCase(); if (!q) return select(null);
+  const hit = D.nodes.filter(n => n.label.toLowerCase().includes(q) || (n.file || '').toLowerCase().includes(q)).sort((a, b) => b.deg - a.deg)[0];
+  if (hit) select(hit.id);
+});
+if (P) {
+  const lg = document.getElementById('legend'); lg.style.display = 'flex';
+  P.forEach((name, i) => {
+    const sp = document.createElement('span'); sp.innerHTML = `<i style="background:${col(i)}"></i>${esc(name)}`;
+    sp.onclick = () => {
+      only = only === name ? null : name;
+      lg.querySelectorAll('span').forEach(x => x.classList.toggle('on', x === sp && !!only));
+      select(null);
+      if (!only) return;
+      const ns = D.nodes.filter(n => n.p === name && n.x !== undefined); if (!ns.length) return;
+      const c = ['x', 'y', 'z'].map(k => ns.reduce((a, n) => a + n[k], 0) / ns.length);
+      const r = ns.map(n => Math.hypot(n.x - c[0], n.y - c[1], n.z - c[2])).sort((a, b) => a - b)[Math.floor(ns.length * 0.85)] || 200;
+      spin = false;
+      G.cameraPosition({ x: c[0], y: c[1] + r * 0.4, z: c[2] + r * 2.6 }, { x: c[0], y: c[1], z: c[2] }, 1200);
+    };
+    lg.appendChild(sp);
+  });
+}
+addEventListener('resize', () => bloom.setSize(innerWidth, innerHeight));
+window.__ready = true;
+</script>
+</body>
+</html>

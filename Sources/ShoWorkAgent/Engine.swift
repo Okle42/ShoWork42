@@ -1,0 +1,263 @@
+import AppKit
+import ShoWorkCore
+
+/// Everything the agent knows, driven on the main thread.
+@MainActor
+final class Engine {
+    struct Tab { var state: WorkState; var agentPID: pid_t; var agent: String; var placements: [Placement]; var since = Date(); var turnStart: Date? = nil }
+
+    private let resolver = Resolver()
+    private(set) var tabs: [String: Tab] = [:]              // key: AI tty (pane tty for tmux)
+    private var glows: [CGWindowID: Glow] = [:]
+    private let edge = EdgeGlow()
+    private var watchdog: Timer?
+    private var reaper: Timer?
+
+    // MARK: persistence — an agent restart (update, crash) must not forget who is working
+    private var stateURL: URL { Paths.supportDir.appendingPathComponent("state.json") }
+    private struct Saved: Codable { let tty: String; let state: WorkState; let pid: Int32; let agent: String }
+
+    private func save() {
+        let s = tabs.map { Saved(tty: $0.key, state: $0.value.state, pid: $0.value.agentPID, agent: $0.value.agent) }
+        if let d = try? JSONEncoder().encode(s) { try? d.write(to: stateURL, options: .atomic) }
+    }
+
+    private func restore() {
+        guard let d = try? Data(contentsOf: stateURL), let s = try? JSONDecoder().decode([Saved].self, from: d) else { return }
+        for x in s where ProcTree.alive(x.pid) && x.state != .idle {
+            let p = resolver.placements(for: x.tty)
+            tabs[x.tty] = Tab(state: x.state, agentPID: x.pid, agent: x.agent, placements: p, since: .distantPast)
+            Log.note("RESTORE \(x.tty) \(x.state.rawValue) → \(p.map { "\($0.app)#\($0.wid)" })")
+        }
+        render()
+    }
+
+    /// 戰情中心要找 AI 的視窗時用（只有正式 agent 有 Engine）
+    static weak var current: Engine?
+
+    func start() {
+        Engine.current = self
+        // start() runs before app.run(): no autorelease pool yet, so glow windows made (and replaced) there
+        // were never freed (10-07: 7 dead overlay windows per agent launch). Restore once the run loop is up.
+        DispatchQueue.main.async { [weak self] in MainActor.assumeIsolated { self?.restore() } }
+        // ONE watchdog for all glows (M0: one per glow cost 0.13% each)
+        // 10-24 Kang 選 D：0.5 → 1 秒；沒有亮著的光暈就不抓視窗順序（checkStacking 開頭直接回）
+        watchdog = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.checkStacking() }
+        }
+        reaper = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.reapDeadAgents(); self?.settleInterrupted() }
+        }
+        let nc = NSWorkspace.shared.notificationCenter
+        nc.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] _ in
+            // the activated app re-stacks all its windows a beat later (M0 ③)
+            for t in [0.05, 0.25, 0.6] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + t) { MainActor.assumeIsolated { self?.syncAll(); self?.acknowledgeLooked() } }
+            }
+        }
+        nc.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            for t in [0.0, 0.3, 0.8] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + t) { MainActor.assumeIsolated { self?.syncAll(); self?.updateEdge() } }
+            }
+        }
+        ClearWatcher.shared.onUserActivity = { [weak self] typing in self?.acknowledgeLooked(typing: typing) }
+        NotificationCenter.default.addObserver(forName: GlowSettings.changed, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.glows.values.forEach { $0.restyle() }; self?.renderSig = ""; self?.render() }   // 改了顏色：一定要重畫（選單列圓點也換色）
+        }
+        ClearWatcher.shared.start()
+    }
+
+    // MARK: events
+
+    /// ttys that ever sent a real hook event — the title fallback leaves them alone
+    private(set) var hookTTYs = Set<String>()
+
+    func handle(_ m: WireMessage) {
+        if m.agent != "claude-title" { hookTTYs.insert(m.tty) }
+        var tab = tabs[m.tty] ?? Tab(state: .idle, agentPID: m.pid, agent: m.agent, placements: [])
+        tab.agentPID = m.pid; tab.agent = m.agent; tab.since = Date()
+        if m.event != .clear {
+            let p = resolver.placements(for: m.tty, refresh: tab.placements.isEmpty)
+            if !p.isEmpty { tab.placements = p }
+        }
+        let looking = tab.placements.contains { Selection.isLooking(at: $0) }
+        if m.event == .working && tab.state != .working && tab.state != .input { tab.turnStart = Date() }   // 新的一輪
+        tab.state = StateMachine.next(tab.state, on: m.event, userIsLooking: looking)
+        if m.event == .done { tab.state = StateMachine.settle(tab.state, report: Self.card(pid: m.pid), turnStart: tab.turnStart) }
+        tabs[m.tty] = tab.state == .idle ? nil : tab
+        if tab.state == .idle { resolver.forget(m.tty) }
+        Log.event(m, looking: looking, result: tab.state, placements: tab.placements)
+        render()
+    }
+
+    /// 這個 AI 行程的最新自報卡片（`showork card` 存在 board/cards/<sessionId>.json）
+    private static func card(pid: pid_t) -> SelfReport? {
+        guard let r = FileManager.default.contents(atPath: "\(BoardPaths.claude)/sessions/\(pid).json").flatMap(SessionRecord.decode),
+              let d = FileManager.default.contents(atPath: BoardStore.dir("cards").appendingPathComponent(r.sessionId + ".json").path) else { return nil }
+        return try? BoardJSON.decoder.decode(SelfReport.self, from: d)
+    }
+
+    /// The user looked (focus change, key, click). Typing in a tab clears its green.
+    func acknowledgeLooked(typing: Bool = false) {
+        var changed = false
+        for (tty, t) in tabs where t.state.needsAcknowledgement {
+            guard let seen = t.placements.first(where: { Selection.isLooking(at: $0) }) else { continue }
+            let n = StateMachine.acknowledge(t.state, typing: typing)
+            if n != t.state {
+                let front = NSWorkspace.shared.frontmostApplication
+                Log.note("ACK \(tty) \(t.state.rawValue)→\(n.rawValue) because looking at \(seen.app)#\(seen.wid); front=\(front?.localizedName ?? "?") focused=\(front.flatMap { Selection.focusedWID(pid: $0.processIdentifier) }.map(String.init) ?? "nil")")
+            }
+            if n != t.state { changed = true; tabs[tty] = n == .idle ? nil : Tab(state: n, agentPID: t.agentPID, agent: t.agent, placements: t.placements) }
+        }
+        if changed { render() }
+    }
+
+    private func reapDeadAgents() {
+        let dead = tabs.filter { !ProcTree.alive($0.value.agentPID) }.map(\.key)
+        guard !dead.isEmpty else { return }
+        for d in dead { Log.note("REAP \(d) \(tabs[d]?.state.rawValue ?? "?") agent pid \(tabs[d]?.agentPID ?? 0) is gone") }
+        dead.forEach { tabs[$0] = nil; resolver.forget($0) }
+        render()
+    }
+
+    /// 10-13: Esc / rejecting a tool ends the turn WITHOUT a Stop hook, so no `done` ever comes and the
+    /// window stayed purple for good. Claude Code's own `~/.claude/sessions/<pid>.json` says busy/idle:
+    /// a purple Claude tab whose session went non-busy after our last event, and stayed so 5 s, is cleared.
+    private func settleInterrupted() {
+        var changed = false
+        for (tty, t) in tabs where t.state == .working && t.agent.hasPrefix("claude") {
+            let f = "\(BoardPaths.claude)/sessions/\(t.agentPID).json"
+            guard let r = FileManager.default.contents(atPath: f).flatMap(SessionRecord.decode),
+                  let st = r.status, st != "busy", let ms = r.statusUpdatedAt else { continue }
+            let at = Date(timeIntervalSince1970: ms / 1000)
+            guard at > t.since.addingTimeInterval(-1), Date().timeIntervalSince(at) > 5 else { continue }
+            Log.note("SETTLE \(tty) working→idle: session \(t.agentPID) is \(st) since \(at), no Stop hook (interrupted)")
+            tabs[tty] = nil; resolver.forget(tty); changed = true
+        }
+        if changed { render() }
+    }
+
+    // MARK: rendering
+
+    /// window state = the most urgent of its tabs (red > orange > green > purple)
+    func windowStates() -> [CGWindowID: (WorkState, pid_t)] {
+        var out: [CGWindowID: (WorkState, pid_t)] = [:]
+        // a state switched off in settings doesn't light anything; the window shows its next lit state
+        for t in tabs.values where GlowSettings.shared.look(t.state).enabled { for p in t.placements {
+            let cur = out[p.wid]?.0 ?? .idle
+            out[p.wid] = (StateMachine.windowState([cur, t.state]), p.pid)
+        } }
+        return out
+    }
+
+    /// 上次 render 的指紋：每個視窗的狀態色＋每個分頁的狀態＋放在哪個視窗。沒變就不重畫光暈、不寫 state.json、不刷選單列
+    /// （10-24 Kang 選 A：每個 hook 事件——每次工具呼叫前後都有——原本都整套重做）。光暈外觀只由這些決定
+    private var renderSig = ""
+    private func render() {
+        let want = windowStates()
+        let sig = want.sorted { $0.key < $1.key }.map { "\($0.key):\($0.value.0.rawValue):\($0.value.1)" }.joined(separator: ",") + "|"
+            + tabs.sorted { $0.key < $1.key }.map { "\($0.key):\($0.value.state.rawValue):\($0.value.agentPID):" + $0.value.placements.map { "\($0.wid)" }.joined(separator: "+") }.joined(separator: ",")
+        if sig == renderSig { return }
+        renderSig = sig
+        for (wid, g) in glows where want[wid] == nil { g.tearDown(); glows[wid] = nil }
+        for (wid, (s, pid)) in want {
+            let g = glows[wid] ?? Glow(wid: wid, pid: pid)
+            glows[wid] = g
+            g.state = s
+        }
+        updateEdge()
+        save()
+        Menu.shared.summary = tabs.values.flatMap { t in t.placements.map { (t.state, $0) } }
+        Menu.shared.refresh()
+        StatusFile.write(tabs: tabs, glows: glows)
+    }
+
+    private func syncAll() { glows.values.forEach { $0.sync() } }
+
+    private func checkStacking() {
+        guard glows.values.contains(where: { $0.state != .idle }) else { return }
+        let order = ((CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]) ?? [])
+            .map { $0[kCGWindowNumber as String] as? Int ?? -1 }
+        for g in glows.values where g.state != .idle {
+            if let ti = order.firstIndex(of: Int(g.wid)) {
+                if order.firstIndex(of: g.overlayNumber) != ti + 1 || order.firstIndex(of: g.barNumber) != ti - 1 { g.sync() }
+            } else if g.overlayVisible { g.sync() }
+        }
+        updateEdge()
+    }
+
+    /// Full-screen Space in front ⇒ the other windows' glows are invisible. Show the most urgent
+    /// green/red among windows that are NOT on screen as a thin screen-edge line.
+    private func updateEdge() {
+        guard let front = NSWorkspace.shared.frontmostApplication?.processIdentifier,
+              let fw = Selection.focusedWID(pid: front),
+              let el = AXQuery.element(pid: front, wid: fw) else { edge.hide(); return }
+        var v: CFTypeRef?; AXUIElementCopyAttributeValue(el, "AXFullScreen" as CFString, &v)
+        guard (v as? Bool) == true else { edge.hide(); return }
+        let hidden = glows.values.filter { $0.wid != fw && $0.state.needsAcknowledgement && !$0.targetOnScreen }
+        let s = StateMachine.windowState(hidden.map(\.state))
+        // the full-screen window's own screen — NSScreen.main follows OUR key window, not the user's (multi-display)
+        if s.needsAcknowledgement, let screen = Engine.screen(of: el) ?? NSScreen.main { edge.show(s, on: screen) } else { edge.hide() }
+    }
+
+    /// Screen holding the AX window's centre (AX coordinates: top-left of the primary screen).
+    static func screen(of el: AXUIElement) -> NSScreen? {
+        var pv: CFTypeRef?, sv: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(el, kAXPositionAttribute as CFString, &pv) == .success,
+              AXUIElementCopyAttributeValue(el, kAXSizeAttribute as CFString, &sv) == .success,
+              let H = NSScreen.screens.first?.frame.height else { return nil }
+        var p = CGPoint.zero, z = CGSize.zero
+        AXValueGetValue(pv as! AXValue, .cgPoint, &p); AXValueGetValue(sv as! AXValue, .cgSize, &z)
+        let c = CGPoint(x: p.x + z.width / 2, y: H - (p.y + z.height / 2))       // → Cocoa bottom-left
+        return NSScreen.screens.first { $0.frame.contains(c) }
+    }
+}
+
+// MARK: - clear triggers: focus changes, and key/click inside the frontmost window
+
+@MainActor
+final class ClearWatcher {
+    static let shared = ClearWatcher()
+    var onUserActivity: (_ typing: Bool) -> Void = { _ in }
+    private var monitor: Any?
+    private var last = Date.distantPast
+
+    func start() {
+        // listen-only; keyDown needs Accessibility trust, which the agent already requires
+        monitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown, .leftMouseDown]) { [weak self] e in
+            let typing = e.type == .keyDown
+            MainActor.assumeIsolated {
+                guard let self, Date().timeIntervalSince(self.last) > 0.25 else { return }   // debounce typing
+                self.last = Date()
+                self.onUserActivity(typing)
+            }
+        }
+    }
+}
+
+// MARK: - status file (for tests and the M2 status tool); never read by anything critical
+
+enum StatusFile {
+    @MainActor static func write(tabs: [String: Engine.Tab], glows: [CGWindowID: Glow]) {
+        guard let path = ProcessInfo.processInfo.environment["SHOWORK_STATUS_FILE"] else { return }
+        let t = tabs.map { ["tty": $0.key, "state": $0.value.state.rawValue, "agent": $0.value.agent,
+                            "wids": $0.value.placements.map { Int($0.wid) }] as [String: Any] }
+        let g = glows.values.map { ["target": Int($0.wid), "overlay": $0.overlayNumber, "state": $0.state.rawValue, "pad": Int(Look.pad)] as [String: Any] }
+        if let d = try? JSONSerialization.data(withJSONObject: ["tabs": t, "glows": g], options: [.sortedKeys]) {
+            try? d.write(to: URL(fileURLWithPath: path), options: .atomic)
+        }
+    }
+}
+
+enum Log {
+    static func note(_ s: String) {
+        guard ProcessInfo.processInfo.environment["SHOWORK_DEBUG"] != nil else { return }
+        let f = DateFormatter(); f.dateFormat = "HH:mm:ss"
+        FileHandle.standardError.write(Data("[\(f.string(from: Date()))] \(s)\n".utf8))
+    }
+    static func event(_ m: WireMessage, looking: Bool, result: WorkState, placements: [Placement]) {
+        guard ProcessInfo.processInfo.environment["SHOWORK_DEBUG"] != nil else { return }
+        let ws = placements.map { "\($0.app)#\($0.wid)" }.joined(separator: ",")
+        note("EVT \(m.agent) \(m.tty) pid=\(m.pid) \(m.event.rawValue) looking=\(looking) → \(result.rawValue) [\(ws)]")
+    }
+}
