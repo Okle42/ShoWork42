@@ -121,7 +121,7 @@ struct OfficeTests {
     let log = """
     2026-09-22 22:48:01  BASELINE  建立名冊，收錄 13 台裝置
     2026-09-22 22:49:03  NEW  192.0.2.101  02:00:00:00:10:04  示範廠商D
-    2026-09-22 22:58:33  NEW  (僅 IPv6)  9e:39:04:94:c6:82  （隨機 MAC・隱私位址）
+    2026-09-22 22:58:33  NEW  (僅 IPv6)  02:00:00:00:10:99  （隨機 MAC・隱私位址）
     # 註記（人工補上）：上面那筆是測試用假警報，名冊已還原
     """
 
@@ -135,7 +135,7 @@ struct OfficeTests {
         #expect(s.flagged.map(\.mac) == ["02:00:00:00:10:04", "02:00:00:00:10:03", "aa:bb:cc:dd:ee:01"])   // 在線的在前
         #expect(s.flagged.map(\.kind) == [.new, .unconfirmed, .unnamed])
         #expect(s.flagged.map(\.online) == [true, true, false])
-        #expect(!s.flagged.contains { $0.mac == "9e:39:04:94:c6:82" })
+        #expect(!s.flagged.contains { $0.mac == "02:00:00:00:10:99" })
         #expect(s.level == .alert)                                      // 沒命名的 Epson 在線上
         #expect(s.summary.contains("上次在線 3 台／名冊 5 台"))
     }
@@ -163,9 +163,9 @@ struct OfficeTests {
     func guardPrivacyMAC() {
         let v6 = """
         {"02:00:00:00:10:01": {"label": "路由器", "last_ip": "192.0.2.1", "last_seen": "2026-10-20T16:38:09"},
-         "f6:f3:9f:84:12:fb": {"label": "", "vendor": "（隨機 MAC・隱私位址）", "last_ip": null, "last_seen": "2026-10-20T16:38:09"}}
+         "02:00:00:00:10:05": {"label": "", "vendor": "（隨機 MAC・隱私位址）", "last_ip": null, "last_seen": "2026-10-20T16:38:09"}}
         """
-        let log6 = "2026-10-20 16:12:27  NEW  (僅 IPv6)  f6:f3:9f:84:12:fb  （隨機 MAC・隱私位址）"
+        let log6 = "2026-10-20 16:12:27  NEW  (僅 IPv6)  02:00:00:00:10:05  （隨機 MAC・隱私位址）"
         let s = WifiWatch.parse(devices: Data(v6.utf8), log: Data(log6.utf8), now: local("2026-10-20T17:00:00"), timeZone: tz)
         #expect(s.flagged.count == 1 && s.flagged[0].kind == .new && s.flagged[0].online && s.flagged[0].privacyOnly)
         #expect(s.level == .notice)
@@ -174,9 +174,9 @@ struct OfficeTests {
         let v4 = v6.replacingOccurrences(of: "\"last_ip\": null", with: "\"last_ip\": \"192.0.2.77\"")
         #expect(WifiWatch.parse(devices: Data(v4.utf8), log: Data(log6.utf8), now: local("2026-10-20T17:00:00"), timeZone: tz).level == .alert)
         // 不是隨機 MAC（廠商 MAC）就算只有 IPv6 也警示
-        let vendorMAC = v6.replacingOccurrences(of: "f6:f3:9f:84:12:fb", with: "f4:f3:9f:84:12:fb")
+        let vendorMAC = v6.replacingOccurrences(of: "02:00:00:00:10:05", with: "00:00:5e:00:53:05")
         #expect(WifiWatch.parse(devices: Data(vendorMAC.utf8), log: nil, now: local("2026-10-20T17:00:00"), timeZone: tz).level == .alert)
-        #expect(WifiWatch.isLocallyAdministered("9e:45:8b:0f:65:c1") && !WifiWatch.isLocallyAdministered("f0:04:e1:8b:3f:8a"))
+        #expect(WifiWatch.isLocallyAdministered("02:00:00:00:10:06") && !WifiWatch.isLocallyAdministered("00:00:5e:00:53:01"))
     }
 
     @Test("立即掃描：背景跑、同時只跑一個、跑完可以再跑；測試用注入的 runner，不碰網路")
