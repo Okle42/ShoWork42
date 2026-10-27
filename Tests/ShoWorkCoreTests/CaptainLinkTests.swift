@@ -46,7 +46,7 @@ struct CaptainLinkTests {
         #expect(Nicknames.hookOutput(nil, done: false, event: "PostToolUse") == "")
     }
 
-    func names(_ c: String) -> [String] { CaptainLink.match(c, rules: CaptainLink.defaultRules).map { ($0.block ? "擋:" : "告:") + $0.name } }
+    func names(_ c: String) -> [String] { CaptainLink.match(c, rules: CaptainLink.rules(LocalFixture.config)).map { ($0.block ? "擋:" : "告:") + $0.name } }
 
     @Test("② 兩級規則：擋 rm／mv 非暫存區、firebase、上傳、LINE；告 defaults、~/.claude、winbox")
     func rules() {
@@ -154,6 +154,7 @@ struct CaptainLinkTests {
 
     @Test("④ 收件匣：擋下 → 放行（寫稽核紀錄）→ 同一個指令用一次")
     func inbox() throws {
+        LocalFixture.use()
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("capinbox-\(UUID().uuidString)")
         setenv("SHOWORK_CAPTAIN_INBOX", dir.appendingPathComponent("inbox").path, 1)
         setenv("SHOWORK_RELEASE_LOG", dir.appendingPathComponent("releases.jsonl").path, 1)
@@ -180,7 +181,7 @@ struct CaptainLinkTests {
         #expect(CaptainInbox.ack("bcccc", now: t0 + 70) == 1 && !CaptainInbox.pending(now: t0 + 70).contains { $0.id == "BCCCC" })
         CaptainInbox.save(item("BDDDD", .block, sid: "a", at: t0 + 60, fp: "y"))
         #expect(CaptainInbox.ack("all", now: t0 + 80) >= 1 && CaptainInbox.pending(now: t0 + 80).isEmpty)
-        #expect(CaptainLink.denyReason(r).contains("隊長轉述 Kang 的決定") && CaptainLink.blockText(r).contains("showork release BAAAA"))
+        #expect(CaptainLink.denyReason(r).contains("隊長轉述小明的決定") && CaptainLink.blockText(r).contains("showork release BAAAA"))
     }
 
     @Test("⑤ 鬧鐘：名冊一行摘要；沒變化同指紋")

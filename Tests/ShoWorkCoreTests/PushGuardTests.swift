@@ -83,6 +83,7 @@ struct PushGuardTests {
 
     @Test("擋：金鑰、ProjectC 的 data/、財務檔")
     func content() {
+        LocalFixture.use()
         let r = Repo(name: "ProjectA")
         r.commit("cfg.swift", "let key = \"" + "sk-" + "ant-api03-" + String(repeating: "A", count: 40) + "\"\n")
         let e = r.check([])
@@ -119,6 +120,7 @@ struct PushGuardTests {
 
     @Test("放行一次：同資料夾同 HEAD 才算、用掉就沒了、過期不算")
     func allowOnce() {
+        LocalFixture.use()
         let u = FileManager.default.temporaryDirectory.appendingPathComponent("pg-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: u) }
         let t0 = Date(timeIntervalSince1970: 1_792_600_000)
@@ -129,8 +131,8 @@ struct PushGuardTests {
         var late = e
         #expect(PushGuard.apply(&late, allows: PushGuard.allows(u), now: t0 + PushGuard.allowFor + 1).isEmpty && late.verdict == .block)
         let rest = PushGuard.apply(&e, allows: PushGuard.allows(u), now: t0 + 60)
-        #expect(e.verdict == .ok && rest.isEmpty && e.reasons[0].hasPrefix("Kang 在保全面板放行一次"))
+        #expect(e.verdict == .ok && rest.isEmpty && e.reasons[0].hasPrefix("小明在保全面板放行一次"))
         let out = PushGuard.hookOutput([PushEvent(at: t0, repo: "a/b", dir: "/x", refs: [], commits: 0, verdict: .block, reasons: ["r"])]) ?? ""
-        #expect(out.contains("不要重試") && out.contains("找 Kang 核可") && out.contains("放行一次"))
+        #expect(out.contains("不要重試") && out.contains("找小明核可") && out.contains("放行一次"))
     }
 }

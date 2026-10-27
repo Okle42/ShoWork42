@@ -2,59 +2,37 @@ import Foundation
 
 // B1 小量精緻交流（10-22 Kang：「地下 1 樓的 AI 不是要讓他們完全沒事，但也不能一直用大量流量 ⇒ 小量的精緻交流」）。
 // 10-24 Kang 改成留言板：「交流內容都攸關工作過程的升級 ⇒ 不一定要面對面，也可以是留言板；這些內容都要進入隊長的優化指揮」。
-// 規則（純函式，看板每次刷新問一次）：
-//   • 有人在 B1 休息（站定、沒在路上）、session 開著、今天還沒被叫來留言過（一個人就可以，不用等另一個人）
-//   • 一天最多 3 次、兩次之間至少隔 60 分鐘；5 小時額度用超過 60% 不辦（停電、過熱看板本來就不叫人）
-//   • 一次叫醒一人：先讀板上最近的留言，再用 showork b1 post 留一則 ≤150 字的心得（可以回應板上某則），留完就停
+// 10-27 Kang（T1027193007）改成「收尾時順便留、不叫醒人」：
+//   • 不再叫醒在 B1 閒置的 session（原本一天 3 次）⇒ 閒置 session 零花費
+//   • 只在收尾那一輪（Stop hook hook_ctx_wrapup.py 的收尾提示，用 `showork b1 hint` 取這段）順便留，不多開一輪
+//   • 頂多一則、可以零則：這段工作沒有失敗、被糾正、重工就不留
+//   • 只留「需要修正」的事：哪裡出錯或繞遠路、根因、建議改成什麼規則或做法，附證據（檔名、log、SHA）；通用技巧不留
+//   • 提示裡直接附板上最近幾則（不多一次工具呼叫），同一個坑已經有人寫過就 --re 回覆或不留
 //   • 每則留言同時轉給現任隊長（【交流板】），隊長用 showork b1 read 整理成流程優化
 
 public enum B1Talk {
-    public static let perDay = 3
-    public static let gap: TimeInterval = 3600
-    public static let maxFiveUsed = 60.0
     public static let maxChars = 150
     /// 硬上限（超過就截斷；建議字數是 maxChars）
     public static let hardChars = 300
+    /// 收尾提示裡直接附上板上最近幾則（不用另外跑 b1 read，也不會漏讀；10-27 實測叫它先讀，它會跳過）
+    public static let recentN = 5
+    /// 附上的每則截到幾個字
+    public static let recentChars = 60
 
-    public struct Record: Codable, Sendable, Equatable {
-        public var at: Date
-        public var a: String                // sessionId
-        public var b: String                // 舊版兩人交流的另一人；留言板版本＝空字串
-        public init(at: Date, a: String, b: String = "") { self.at = at; self.a = a; self.b = b }
+    /// 收尾提示裡加的那段（hook_ctx_wrapup.py 跑 `showork b1 hint` 取得，接在發收尾卡之前，收尾卡順延成 ⑤）
+    public static func wrapupNote(showork: String, recent: [B1Post]) -> String {
+        var t = "④交流板檢討（頂多一則、可以零則）：這段工作有失敗、被使用者／隊長糾正、或重工繞遠路才留，一切順利就不留；"
+            + "要留就 `\"\(showork)\" b1 post --text \"<\(maxChars) 字以內>\"`（**硬上限 \(maxChars) 字，寫好先數字數再送**）：哪裡錯或繞遠路、根因、建議改成什麼規則或做法，附證據（檔名、log、SHA）；"
+            + "通用好用技巧不留；不寫帳號、金鑰、客戶名、真實人名"
+        let last = recent.suffix(recentN)
+        guard !last.isEmpty else { return t + "。" }
+        t += "。板上最近 \(last.count) 則（同一個坑已經有人寫過：沒有新證據就不留；有新證據——不同 SHA、不同根因——才加 `--re <編號>` 回覆，只寫新的部分）："
+        t += last.map { p in
+            let x = p.text.count > recentChars ? String(p.text.prefix(recentChars)) + "…" : p.text
+            return "#\(p.id) \(p.name)" + (p.re.map { "↪#\($0)" } ?? "") + "：\(x)"
+        }.joined(separator: "｜")
+        return t
     }
-
-    public struct Person: Sendable, Equatable {
-        public var sid: String
-        public var name: String             // 英文名
-        public var project: String
-        public var address: String          // SendMessage 的收件地址（uds:/tmp/cc-socks/<pid>.sock）
-        public init(sid: String, name: String, project: String, address: String) {
-            self.sid = sid; self.name = name; self.project = project; self.address = address
-        }
-    }
-
-    /// 現在要不要叫一個人來留言、叫誰。people＝現在在 B1 站定休息、收得到訊息的人（呼叫端依 sid 排好）
-    public static func pick(people: [Person], history: [Record], fiveUsed: Double?, now: Date, calendar: Calendar = .current) -> Person? {
-        guard !people.isEmpty, (fiveUsed ?? 0) <= maxFiveUsed else { return nil }
-        let today = history.filter { calendar.isDate($0.at, inSameDayAs: now) }
-        guard today.count < perDay else { return nil }
-        if let last = history.map(\.at).max(), now.timeIntervalSince(last) < gap { return nil }
-        let usedToday = Set(today.flatMap { [$0.a, $0.b] })
-        return people.first { !usedToday.contains($0.sid) }
-    }
-
-    /// 送給 me 的那則（叫他讀板、留一則）
-    public static func prompt(me: Person, showork: String) -> String {
-        """
-        【Agent交流互動板】你現在在 B1 機房休息，請只做這一件事：
-        1. 先跑 "\(showork)" b1 read 看板上最近的留言。
-        2. 再跑 "\(showork)" b1 post --text "<\(maxChars) 字以內>" 留一則：你最近工作裡學到、別人用得上的一件事（方法、踩過的坑、好用的工具、流程哪裡可以改）；想回應板上某則就加 --re <編號>。不寫帳號、金鑰、客戶名、真實人名。
-        留完就停，不要做別的事、不要回覆這則。留言會轉給隊長當流程優化的參考。
-        """
-    }
-
-    /// 只留最近 30 天
-    public static func prune(_ h: [Record], now: Date) -> [Record] { h.filter { now.timeIntervalSince($0.at) < 30 * 86400 } }
 }
 
 /// Agent交流互動板：board/b1-board.jsonl，一行一則（只增不改）

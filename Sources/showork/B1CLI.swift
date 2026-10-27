@@ -4,6 +4,7 @@ import ShoWorkCore
 // Agent交流互動板（10-24 Kang：B1 交流不一定要面對面，改成留言板；內容都進隊長的優化指揮）
 //   showork b1 read [--n 20] [--all]      看最近的留言（隊長整理流程優化、AI 留言前先看）
 //   showork b1 post --text "…" [--re 編號]  留一則；同時轉給現任隊長
+//   showork b1 hint                       印收尾提示要加的那段（hook_ctx_wrapup.py 用；10-27 改成收尾時順便留）
 enum B1CLI {
     static func run(_ args: [String]) -> Int32 {
         var a = Array(args.dropFirst())
@@ -34,8 +35,11 @@ enum B1CLI {
                 }
             }
             return 0
+        case "hint":
+            print(B1Talk.wrapupNote(showork: Paths.supportDir.appendingPathComponent("bin/showork").path, recent: B1Board.all()))
+            return 0
         default:
-            CaptainCLI.err("用法：showork b1 read [--n 20｜--all]｜showork b1 post --text \"…\" [--re <編號>]"); return 1
+            CaptainCLI.err("用法：showork b1 read [--n 20｜--all]｜showork b1 post --text \"…\" [--re <編號>]｜showork b1 hint"); return 1
         }
     }
 }

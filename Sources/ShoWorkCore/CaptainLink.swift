@@ -59,7 +59,8 @@ public enum CaptainLink {
 
     /// 預設清單（第一次用會寫成 preview.tsv，之後以檔案為準）。
     /// 比對的對象是「一段指令」（見 segments：以 ; && || | 換行切開、去掉 sudo／env 這類前綴、引號內容換成 Q），所以 ^ 就是指令的第一個詞
-    public static let defaultRules: [Rule] = [
+    public static var defaultRules: [Rule] { rules(LocalConfig.current) }
+    public static func rules(_ local: LocalConfig) -> [Rule] { [
         Rule(name: "rm 刪除（暫存區以外）", block: true,
              // 重導向（2>/dev/null、>log）不是要刪的目標（10-24 BJ6M2：rm -rf "/tmp/WT" 2>/dev/null 被擋）
              pattern: #"^rm\s+(?:-[a-zA-Z]+\s+)*(?:[^\s;&|]+\s+)*?(?!"# + temp + #")(?!-)(?![0-9&]*[<>])[^\s;&|]+"#),
@@ -76,9 +77,11 @@ public enum CaptainLink {
         Rule(name: "改系統設定（defaults write）", block: false, pattern: #"^defaults\s+(?:-currentHost\s+)?write\b"#),
         Rule(name: "寫入 ~/.claude/scripts 或 data", block: false,
              pattern: #"^(?:cp|mv|tee|install|ln|rsync)\b.*\s"# + claudeDir + #"\S*\s*$|>>?\s*"# + claudeDir + #"|^sed\s+-i\S*\s.*"# + claudeDir),
-        Rule(name: "遠端 Windows 寫入（ssh winbox）", block: false,
-             pattern: #"^ssh\s+winbox\b.*\b(?:Set-|Remove-|New-Item|Rename-|Move-Item|Copy-Item|Stop-|Restart-|Install-|Uninstall-|reg(?:\.exe)?\s+(?:add|delete|import))"#),
-    ]
+    ] + (local.winHosts ?? []).map { h in
+        // 遠端 Windows 主機別名在本機設定 local.json 的 winHosts（LocalConfig）
+        Rule(name: "遠端 Windows 寫入（ssh \(h)）", block: false,
+             pattern: #"^ssh\s+"# + NSRegularExpression.escapedPattern(for: h) + #"\b.*\b(?:Set-|Remove-|New-Item|Rename-|Move-Item|Copy-Item|Stop-|Restart-|Install-|Uninstall-|reg(?:\.exe)?\s+(?:add|delete|import))"#)
+    } }
     /// preview.tsv 格式版本（舊格式的檔案會被換成新的預設）
     static let rulesVersion = "格式 v5"
 
@@ -91,9 +94,10 @@ public enum CaptainLink {
     public static func loadRules() -> [Rule] {
         let f = rulesFile
         guard let d = FileManager.default.contents(atPath: f.path), String(decoding: d, as: UTF8.self).contains(rulesVersion) else {
+            let owner = LocalConfig.current.ownerName
             let head = "# 動作預告（T1024033803 ②，\(rulesVersion)）：一行「類別<TAB>擋|告<TAB>正規表示式」，不分大小寫。\n"
                 + "# 比對的是「一段指令」：以 ; && || | 換行切開、去掉 sudo／env／VAR=值 前綴，引號內容換成 Q（ssh 那段保留引號內容），heredoc 內文拿掉 ⇒ ^ 就是指令的第一個詞。\n"
-                + "# 擋＝先擋下、等隊長轉述 Kang 的決定（showork release）或 Kang 在那個 session 打「放行」；告＝只通知隊長不擋。# 開頭是註解，刪掉這個檔會重寫預設\n"
+                + "# 擋＝先擋下、等隊長轉述\(owner)的決定（showork release）或\(owner)在那個 session 打「放行」；告＝只通知隊長不擋。# 開頭是註解，刪掉這個檔會重寫預設\n"
             let body = defaultRules.map { "\($0.name)\t\($0.block ? "擋" : "告")\t\($0.pattern)" }.joined(separator: "\n") + "\n"
             try? FileManager.default.createDirectory(at: f.deletingLastPathComponent(), withIntermediateDirectories: true)
             try? (head + body).write(to: f, atomically: true, encoding: .utf8)
@@ -247,15 +251,17 @@ public enum CaptainLink {
 
     /// 擋下時給 AI 的理由
     public static func denyReason(_ item: CaptainInboxItem) -> String {
-        "⛔️ 這個指令需要放行才能跑（\(item.kinds.joined(separator: "、"))，單號 \(item.id)）。已通知隊長，不要重試、不要換寫法繞過，也不要自己跑 showork release。\n"
-            + "要放行請隊長轉述 Kang 的決定（隊長跑 showork release \(item.id)），或 Kang 在這個 session 直接打「放行」。放行後再跑一次同一個指令（30 分鐘內有效、只能用一次）。\n"
+        let owner = LocalConfig.current.ownerName
+        return "⛔️ 這個指令需要放行才能跑（\(item.kinds.joined(separator: "、"))，單號 \(item.id)）。已通知隊長，不要重試、不要換寫法繞過，也不要自己跑 showork release。\n"
+            + "要放行請隊長轉述\(owner)的決定（隊長跑 showork release \(item.id)），或\(owner)在這個 session 直接打「放行」。放行後再跑一次同一個指令（30 分鐘內有效、只能用一次）。\n"
             + "等的時候用 showork card --status blocked 回報卡在哪；能改用暫存區（scratchpad、/tmp）的就改用。"
     }
 
     /// 擋下：立即送隊長
     public static func blockText(_ item: CaptainInboxItem) -> String {
-        "【動作預告・擋下 \(item.id)】\(label(item.name, item.project))：\(item.kinds.joined(separator: "、"))・\(item.text)\n"
-            + "（已擋下等放行。Kang 明說同意這個動作才 showork release \(item.id)；隊長不能自己決定放行對外動作）"
+        let owner = LocalConfig.current.ownerName
+        return "【動作預告・擋下 \(item.id)】\(label(item.name, item.project))：\(item.kinds.joined(separator: "、"))・\(item.text)\n"
+            + "（已擋下等放行。\(owner)明說同意這個動作才 showork release \(item.id)；隊長不能自己決定放行對外動作）"
     }
 
     /// 不擋的預告：同一 session 的合成一則

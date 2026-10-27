@@ -259,8 +259,8 @@ public enum PushGuard {
             if commits > 0 {
                 let paths = git(c.dir, ["log", "--format=", "--name-only", "--diff-filter=AM", "--max-count=500"] + srcs + not).out
                     .split(separator: "\n").map(String.init)
-                if short == "ProjectC", let p = paths.first(where: { $0.hasPrefix("data/") }) {
-                    block.append("ProjectC 的 data/ 是私人內容（財務、家人、LINE 原文），不進 git：\(p)")
+                if LocalConfig.current.isPrivateDataRepo(short), let p = paths.first(where: { $0.hasPrefix("data/") }) {
+                    block.append("\(short) 的 data/ 是私人內容（本機設定 privateDataRepos），不進 git：\(p)")
                 }
                 if let p = paths.first(where: { (($0 as NSString).lastPathComponent).lowercased().hasPrefix("finance") && $0.hasSuffix(".json") }) {
                     block.append("財務資料檔不進 git：\(p)")
@@ -295,7 +295,7 @@ public enum PushGuard {
                 + "repo：\(blocked.map(\.repo).joined(separator: "、"))\n原因：\n"
                 + blocked.flatMap(\.reasons).map { "・" + $0 }.joined(separator: "\n")
                 + "\n該怎麼做：能處理的先處理（改寫那幾個 commit、移掉檔案或金鑰）再推；不要換個寫法繞過保全。"
-                + "如果你認為是誤擋，請找 Kang 核可：他在戰情中心 1 樓保全面板按「放行一次」（認這次的 HEAD，30 分鐘內有效）後你再推一次，"
+                + "如果你認為是誤擋，請找\(LocalConfig.current.ownerName)核可：他在戰情中心 1 樓保全面板按「放行一次」（認這次的 HEAD，30 分鐘內有效）後你再推一次，"
                 + "或他自己在終端機打 `! git push …`。用 showork card --status blocked 回報被擋的原因。"
         } else if !warned.isEmpty {
             o["additionalContext"] = "🛡️ 1 樓保全提醒（\(warned.map(\.repo).joined(separator: "、"))）：" + warned.flatMap(\.reasons).joined(separator: "；")
@@ -335,7 +335,7 @@ public enum PushGuard {
         let live = xs.filter { $0.until > now }
         guard e.verdict == .block, let h = e.head, let i = live.firstIndex(where: { $0.dir == e.dir && $0.head == h }) else { return live }
         e.verdict = .ok
-        e.reasons = ["Kang 在保全面板放行一次：" + e.reasons.joined(separator: "；")]
+        e.reasons = [LocalConfig.current.ownerName + "在保全面板放行一次：" + e.reasons.joined(separator: "；")]
         var rest = live; rest.remove(at: i)
         return rest
     }

@@ -174,8 +174,8 @@ public struct WorkSignature: Sendable, Equatable {
     public var commands: [String: Int] = [:]       // 指令統計（提示詞用）
     public init() {}
 
-    static let stop: Set<String> = ["the", "and", "for", "users", "you", "github", "repos", "sources", "src", "md", "json",
-                                    "txt", "py", "sh", "swift", "tmp", "private", "claude", "a", "to", "of", "in", "is", "it", "on"]
+    static let stop: Set<String> = ["the", "and", "for", "users", "github", "repos", "sources", "src", "md", "json",
+                                    "txt", "py", "sh", "swift", "tmp", "private", "claude", "a", "to", "of", "in", "is", "it", "on", NSUserName().lowercased()]
 
     /// 一段文字對每個主題的命中分數（純英數字照詞、其他照子字串；半分詞 ×0.5；大寫 LINE 區分大小寫照詞）
     static func hits(_ raw: String) -> [TowerTheme: Double] {

@@ -143,7 +143,7 @@ public enum CardRules {
         "\(showork)" card --doing "<正在做的任務，10 個字內>" --status <working|review|done|blocked> --progress <0-100> --confidence <0-100> --summary "<一句話：做了什麼、結果>" [--ask "<需要使用者決定或回答的事>" --options "<選項1>|<選項2>"] [--how "<這一輪用的方法與工具，一句話>"] [--report "<報告檔絕對路徑>"]
         \(who)--doing 每次都要帶、寫「現在」手上這件事（換任務就換），使用者靠它做戰情管控。
         status：review＝需要使用者看過或決定；done＝完成、不需要看；blocked＝卡住做不下去，等外部的事（等回信、等背景工作）也用 blocked，終端機會亮橘；working＝還沒做完、會繼續。confidence 是你對「做對了」的把握，要誠實，沒驗證過就不要給高分。有 --ask 時附 2–4 個 --options（| 分隔、每個是完整的一句回答，例如 "好，push|先不要"），使用者會在戰情中心按一下就把那句話送給你。--how 寫這一輪用了什麼方法和工具（例如「讀 3 個檔＋改 Inbox.swift＋swift test」），戰情中心會把卡片轉給隊長審。只是聊天、沒動手做事的回合可省略。
-        跟使用者提到其他 AI session 時，一律用英文名（不要說 you-xx 或 session id）；對照表："\(showork)" names。
+        跟使用者提到其他 AI session 時，一律用英文名（不要說 \(NSUserName())-xx 或 session id）；對照表："\(showork)" names。
         """
     }
 

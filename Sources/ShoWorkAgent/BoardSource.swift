@@ -657,38 +657,9 @@ final class BoardModel: ObservableObject {
                                    now: now, visible: wanderVisible, mode: TowerStore.wanderMode,
                                    rain: OfficeWeather.shared.current?.kind.isWet ?? false, cars: wander.cars)
         if w != wander { wander = w }
-        b1Talk(w, now: now)
     }
 
-    // MARK: B1 小量精緻交流（10-22 Kang 選「叫醒本人互傳一則」；10-24 改留言板：一個人也能留、留言轉隊長。規則在 ShoWorkCore/B1Talk.swift）
-
-    private static var b1TalkURL: URL { Paths.supportDir.appendingPathComponent("b1-talks.json") }
-    private lazy var b1History: [B1Talk.Record] = {
-        let d = JSONDecoder(); d.dateDecodingStrategy = .iso8601
-        return FileManager.default.contents(atPath: Self.b1TalkURL.path).flatMap { try? d.decode([B1Talk.Record].self, from: $0) } ?? []
-    }()
-    private func b1Talk(_ w: WanderPlan, now: Date) {
-        guard Engine.current != nil, !BoardWindow.testMode, OfficeDemo.mode == nil else { return }   // 只有正式 agent 叫人
-        let inB1 = w.states.filter { $0.value.trip == nil && $0.value.spot.isB1 }.map(\.key).sorted()
-        guard !inB1.isEmpty else { return }
-        let five = BoardStore.rateLimits()?.current(now: now).fiveHour?.used
-        let nick = NicknameStore.all(), live = Peer.sessions()
-        let people = inB1.compactMap { sid -> B1Talk.Person? in
-            guard let r = live.first(where: { $0.sessionId == sid }), let sock = r.messagingSocketPath else { return nil }
-            return B1Talk.Person(sid: sid, name: nick[sid]?.name ?? r.name ?? String(sid.prefix(8)),
-                                 project: cards.first { $0.sessionId == sid }?.project ?? "", address: "uds:" + sock)
-        }
-        guard let me = B1Talk.pick(people: people, history: b1History, fiveUsed: five, now: now) else { return }
-        b1History = B1Talk.prune(b1History + [B1Talk.Record(at: now, a: me.sid)], now: now)
-        let e = JSONEncoder(); e.dateEncodingStrategy = .iso8601; e.outputFormatting = [.prettyPrinted]
-        try? e.encode(b1History).write(to: Self.b1TalkURL, options: .atomic)
-        let showork = Paths.supportDir.appendingPathComponent("bin/showork").path
-        queue.async {
-            guard let r = Peer.find(me.sid) else { return }
-            let res = Peer.send(to: r, text: B1Talk.prompt(me: me, showork: showork), fromName: "AI工作戰情中心（Agent交流互動板）")
-            Log.note("B1TALK 叫 \(me.name) 來留言板 \(res)")
-        }
-    }
+    // MARK: B1 交流板：10-27 起不再叫醒 B1 閒置的人（T1027193007），改在收尾提示裡順便留（ShoWorkCore/B1Talk.swift）
 
     // MARK: 前台・保全（10-20）
 

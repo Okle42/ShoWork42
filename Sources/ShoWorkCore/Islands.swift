@@ -46,8 +46,8 @@ public struct Island: Sendable, Equatable, Identifiable {
 }
 
 public enum Islands {
-    /// 回訊息類（戴耳機）：預設是秘書、電話窗口
-    public static let defaultHeadsetProjects = ["ProjectC", "ProjectE"]
+    /// 回訊息類（戴耳機）：秘書、電話窗口這類專案，名單在本機設定 local.json 的 headsetProjects（LocalConfig）
+    public static var defaultHeadsetProjects: [String] { LocalConfig.current.headsetProjects ?? [] }
     /// 研究／審核類（戴眼鏡）：看標題
     static let glassesWords = ["研究", "審核", "審查", "盤點", "review", "research", "audit"]
 

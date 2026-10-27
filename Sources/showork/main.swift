@@ -100,7 +100,7 @@ if args.first == "title" {
         prompt = o["prompt"] as? String
         cwdPath = o["cwd"] as? String
     }
-    // 開工卡（T1024033803 ①）：使用者直接下的指令 ⇒ 提醒動手前先發；隊長自己不用（隊長只審不做）；指定的無頭秘書 session 不發
+    // 開工卡（T1024033803 ①）：使用者直接下的指令 ⇒ 提醒動手前先發；隊長自己不用（隊長只審不做）；local.json 的 noKickoffRepos（例如秘書）不發
     //   距上一道使用者指令超過 10 分鐘＝完整提醒；10 分鐘內＝只在換了任務時才發
     //   使用者打「放行」／「放行 <單號>」＝放行這個 session 被擋下的指令（寫 board/permits/releases.jsonl）
     // 收尾後只有使用者本人又下指令才不自動 /clear；其他 session／看板的訊息回一段「交接中」提醒（T1026230337）
@@ -119,7 +119,7 @@ if args.first == "title" {
             }
             return nil
         }
-        guard CaptainStore.captain()?.sessionId != sid, !(cwdPath ?? "").contains("/ProjectC") else { return nil }
+        guard CaptainStore.captain()?.sessionId != sid, !LocalConfig.current.skipsKickoff(cwd: cwdPath ?? "") else { return nil }
         let last = CaptainLink.lastPrompt(sid)
         CaptainLink.touchPrompt(sid)
         let showork = URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL.path

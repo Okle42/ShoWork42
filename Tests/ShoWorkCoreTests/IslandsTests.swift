@@ -25,6 +25,7 @@ struct IslandsTests {
 
     @Test("配件：隊長皇冠優先、秘書專案耳機、研究審核標題眼鏡")
     func accessories() {
+        LocalFixture.use()
         let h = Islands.defaultHeadsetProjects
         #expect(Islands.accessory(card("a", "ProjectC", .active, captain: true), headsetProjects: h) == .crown)
         #expect(Islands.accessory(card("a", "projectc", .active), headsetProjects: h) == .headset)
