@@ -4,7 +4,7 @@ import Darwin
 // ctx 自動交接閉環（T1024155358，Kang 10-24：「超過 70% 以後就自動收尾…自己準備交接文件，處理好之後自己再接手」）
 //   ① Stop hook（~/.claude/scripts/hook_ctx_wrapup.py）請它收尾
 //   ② 收尾完 AI 發 `showork card --kind wrapup --handoff <檔>` ⇒ 這裡記一筆 board/handover/<sid>.json（pending）
-//      看板看到它閒下來（最後一張卡就是 wrapup、不在工作、沒開對話框、鍵盤 60 秒沒動）⇒ 對它的終端機送 /clear
+//      看板看到它閒下來（最後一張卡就是 wrapup、不在工作、沒開對話框）⇒ 對它的終端機送 /clear
 //   ③ /clear 後的 SessionStart（showork brief）認領這筆：名字沿用、派工單轉到新 sid、注入接手提示；看板再打一句「開始接手」叫它動起來
 // 收尾後、/clear 前使用者又下新指令 ⇒ interrupted（不自動 /clear，看板轉隊長提醒）；之後 ctx 再多 15% Stop hook 會再收一次。
 
@@ -50,7 +50,8 @@ public enum Handover {
     /// 認領期限：收尾後這麼久內的新 session 才算接手（Penny 規格 60 分鐘）
     public static let window: TimeInterval = 3600
     /// 鍵盤要靜這麼久才送 /clear（免得打進 Kang 正在那個分頁打的草稿；隊長 Penny 10-24 要求 60 秒）
-    public static let keyIdle: TimeInterval = 60
+    /// 10-26 Kang：收尾完就直接 /clear，不等鍵盤（原 60 秒：他一直在別的視窗打字就永遠送不出去）
+    public static let keyIdle: TimeInterval = 0
     /// 送 /clear 後這麼久沒換 sid ⇒ 失敗
     public static let clearTimeout: TimeInterval = 20
 
@@ -113,10 +114,11 @@ public enum Handover {
     }
     static func clock(_ d: Date) -> String { let f = DateFormatter(); f.dateFormat = "HH:mm"; return f.string(from: d) }
 
-    /// 看板能不能送 /clear 了：最後一張卡就是 wrapup（之後又發卡＝還在做事或在問問題）、不在工作、沒開對話框、停了 5 秒、鍵盤 60 秒沒動
+    /// 看板能不能送 /clear 了：還在 pending（使用者沒打斷）、不在工作、沒開對話框、最後一張不是開工卡、停了 5 秒、鍵盤 60 秒沒動
     public static func readyToClear(state: HandoverRecord.State, lastKind: String?, working: Bool, dialog: Bool,
                                     lastActivity: Date?, keyIdle: TimeInterval, now: Date) -> Bool {
-        guard state == .pending, lastKind == "wrapup", !working, !dialog, keyIdle >= Self.keyIdle else { return false }
+        // T1026230337：收尾後被訊息叫醒、回完又發一般卡片，不再讓收尾作廢；使用者本人打斷由 noteNewPrompt 改成 interrupted 處理
+        guard state == .pending, lastKind != "start", !working, !dialog, keyIdle >= Self.keyIdle else { return false }
         return lastActivity.map { now.timeIntervalSince($0) >= 5 } ?? true
     }
 
@@ -148,13 +150,77 @@ extension Handover {
         }
         r.state = .taken; r.newSid = sid; r.tasks = moved
         save(r)
-        return resumeContext(r, tasks: moved)
+        return resumeWithHeld(r, tasks: moved)
     }
 
-    /// UserPromptSubmit 用：收尾後、/clear 前使用者又下指令 ⇒ interrupted（看板轉隊長提醒）
-    public static func noteNewPrompt(sid: String) {
-        guard var r = load(sid), r.state == .pending else { return }
-        r.state = .interrupted
-        save(r)
+    /// 接手提示＋收尾期間暫存的訊息（取出後清掉）
+    public static func resumeWithHeld(_ r: HandoverRecord, tasks: [String]) -> String {
+        let held = takeHeld(r.sid)
+        guard !held.isEmpty else { return resumeContext(r, tasks: tasks) }
+        return resumeContext(r, tasks: tasks) + "\n【收尾期間暫存、現在補交給你的 \(held.count) 則訊息】（讀完交接後照常處理；隊長另跑 showork captain 看未 ack 收件匣）\n"
+            + held.map { "— 來自 \($0.from)：\($0.text)" }.joined(separator: "\n")
+    }
+
+    /// UserPromptSubmit 用：收尾後、/clear 前「使用者本人」又下指令 ⇒ interrupted（看板轉隊長提醒）。
+    /// T1026230337：其他 session 的訊息、巡檢、工作回報／派工回報轉送都不算打斷（10-26 Penny、Tina 被巡檢一叫醒收尾就作廢）；
+    /// 沒打斷但還在等 /clear ⇒ 回一段提醒，請它簡短回完就停、有新進度補進交接，不用再發收尾卡
+    @discardableResult
+    public static func noteNewPrompt(sid: String, prompt: String?, now: Date = Date()) -> String? {
+        guard var r = load(sid), r.state == .pending else { return nil }
+        if isUserPrompt(prompt) {
+            r.state = .interrupted; r.note = "使用者又下指令"
+            save(r)
+            log("interrupted \(r.name) \(r.sid.prefix(8))：使用者又下指令", now: now)
+            return nil
+        }
+        log("keep \(r.name) \(r.sid.prefix(8))：\(sender(prompt)) 的訊息不算打斷，收尾照舊", now: now)
+        return "【交接中】你已收尾、在等戰情中心自動 /clear。這則是其他 session／看板的訊息，不算打斷：簡短處理或回覆後就停下；"
+            + "有新進度就補進交接文件 \(r.handoff)，不用再發收尾卡（發一般卡片也不影響自動 /clear）。"
+    }
+
+    /// 使用者本人：在那個視窗直接打的字，或戰情中心轉來的「使用者回答／使用者交辦」
+    public static func isUserPrompt(_ prompt: String?) -> Bool {
+        guard let p = prompt?.trimmingCharacters(in: .whitespacesAndNewlines), !p.isEmpty else { return false }
+        if p.hasPrefix("<cross-session-message") {
+            let head = p.prefix { $0 != ">" }
+            return head.contains("from-name=\"AI工作戰情中心（使用者")
+        }
+        return CaptainLink.needsStart(prompt: p)
+    }
+    static func sender(_ prompt: String?) -> String {
+        guard let p = prompt, let r = p.range(of: "from-name=\"") else { return "非使用者" }
+        return String(p[r.upperBound...].prefix { $0 != "\"" })
+    }
+
+    // MARK: 收尾期間暫存（T1026230337 ②）：看板／隊長流程要送給「已收尾等 /clear」的 session 的訊息先存著，新 context 接手時一起交給它
+
+    /// 收尾中（pending／clearing）而且不是使用者本人的訊息 ⇒ 暫存不送
+    public static func shouldHold(sid: String, fromName: String) -> Bool {
+        guard let r = load(sid), r.state == .pending || r.state == .clearing else { return false }
+        return !fromName.contains("（使用者") && !fromName.contains("（交接）")
+    }
+    static func heldURL(_ sid: String) -> URL { dir.appendingPathComponent("held/\(sid).jsonl") }
+    public static func hold(sid: String, text: String, fromName: String, now: Date = Date()) {
+        try? FileManager.default.createDirectory(at: heldURL(sid).deletingLastPathComponent(), withIntermediateDirectories: true)
+        guard let d = try? JSONSerialization.data(withJSONObject: ["at": ISO8601DateFormatter().string(from: now), "from": fromName, "text": text]) else { return }
+        if let h = try? FileHandle(forWritingTo: heldURL(sid)) { h.seekToEndOfFile(); h.write(d + Data("\n".utf8)); try? h.close() }
+        else { try? (d + Data("\n".utf8)).write(to: heldURL(sid)) }
+        log("hold → \(load(sid)?.name ?? sid.prefix(8).description)（\(fromName)）：\(text.prefix(40))", now: now)
+    }
+    /// 取出並清掉暫存（接手時用）
+    public static func takeHeld(_ sid: String) -> [(from: String, text: String)] {
+        guard let d = FileManager.default.contents(atPath: heldURL(sid).path) else { return [] }
+        try? FileManager.default.removeItem(at: heldURL(sid))
+        return d.split(separator: 0x0A).compactMap { l in
+            (try? JSONSerialization.jsonObject(with: Data(l)) as? [String: String]).flatMap { o in o["text"].map { (o["from"] ?? "", $0) } }
+        }
+    }
+
+    /// 寫 board/handover.log（看板 HandoverClear 也寫同一份）
+    public static func log(_ msg: String, now: Date = Date()) {
+        let url = dir.deletingLastPathComponent().appendingPathComponent("handover.log")
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        let line = Data("\(f.string(from: now)) \(msg)\n".utf8)
+        if let h = try? FileHandle(forWritingTo: url) { h.seekToEndOfFile(); h.write(line); try? h.close() } else { try? line.write(to: url) }
     }
 }

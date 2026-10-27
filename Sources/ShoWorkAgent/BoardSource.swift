@@ -42,6 +42,7 @@ final class BoardReader: @unchecked Sendable {
         var reviews: [String: Review] = [:]
         var decisions: [String: Decision] = [:]
         var rateLimits: RateLimits?
+        var runs: [RunProgress] = []          // 背景長工作的即時進度（run/progress/*.json；10-26）
         var contexts: [String: ContextUse] = [:]
         var captain: CaptainRecord?
         var tasks: [CaptainTask] = []
@@ -156,6 +157,7 @@ final class BoardReader: @unchecked Sendable {
         s.permits = Permit.pending()
         s.handovers = Dictionary(Handover.all().map { ($0.sid, $0) }, uniquingKeysWith: { $1 })
         s.rateLimits = BoardStore.rateLimits()
+        s.runs = RunProgress.load(dir: ProcessInfo.processInfo.environment["SHOWORK_RUN_PROGRESS"] ?? BoardPaths.claude + "/run/progress")
         s.captain = CaptainStore.captain()
         s.tasks = CaptainStore.tasks()
         s.captainThread = captainThread(s.captain, sessions: s.sessions)
@@ -314,6 +316,7 @@ final class BoardWatcher: @unchecked Sendable {
         if p.hasPrefix(claude + "/") {
             let r = p.dropFirst(claude.count + 1)
             if r.hasPrefix("sessions/") || r.hasPrefix("teams/") || r.hasPrefix("cache/ctx/") || r == "cache/rate_limits.json" { return true }
+            if r.hasPrefix("run/progress/") && r.hasSuffix(".json") { return true }   // 背景工作進度（10-26）
             return r.hasPrefix("projects/") && r.hasSuffix(".jsonl") && !r.contains("/subagents/")
         }
         if p.hasPrefix(support + "/") {
@@ -345,6 +348,7 @@ final class BoardModel: ObservableObject {
     /// 10-20：不再 @Published（沒有畫面在看；每 1.5 秒觸發整個看板 SwiftUI 重新排版，3D 辦公室停止渲染後這是閒置 CPU 的大宗，約 3%）
     private(set) var updated = Date()
     @Published private(set) var rateLimits: RateLimits?
+    @Published private(set) var runs: [RunProgress] = []          // 背景長工作的即時進度（名字下方的進度條；10-26）
     @Published private(set) var reviewing = Set<String>()
     /// 3D 辦公室的部門（常駐照名稱＋臨時接在後面；10-20）。內容變了才發布
     @Published private(set) var departments: [OfficeDepartment] = []
@@ -509,6 +513,7 @@ final class BoardModel: ObservableObject {
         let rv = Set(cards.map(\.sessionId).filter { Reviewer.shared.isRunning($0) })
         if rv != reviewing { reviewing = rv }
         if s.rateLimits != rateLimits { rateLimits = s.rateLimits }
+        if s.runs != runs { runs = s.runs }
         let deps = OfficeDepartments.build(residents: s.residents.map(\.name), cards: cards)
         if deps != departments { departments = deps }
         if s.guardStatus != guardStatus { guardStatus = s.guardStatus }

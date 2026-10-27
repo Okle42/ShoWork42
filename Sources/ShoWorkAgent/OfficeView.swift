@@ -33,6 +33,7 @@ struct OfficeView: View {
     var captainThread: [CaptainLine] = []
     var captainTasks: [CaptainTask] = []
     var sessionThread: [CaptainLine] = []     // 右側對話窗格看的那個 AI 的對話（BoardModel.watch）
+    var runs: [RunProgress] = []              // 背景長工作的即時進度（名字下方的進度條）
     var city = CityState()
     let loaded: Bool
     let reviewing: Set<String>
@@ -173,7 +174,7 @@ struct OfficeView: View {
                        answered[c.sessionId] = Date()
                        onToast(BoardActions.answer(c, text: text))
                    },
-                   onBack: { talk(nil) })
+                   onBack: { talk(nil) }, runs: runs)
     }
 
     /// 右側對話窗格換人（nil＝回到隊長）：資料層改讀那個人的對話紀錄

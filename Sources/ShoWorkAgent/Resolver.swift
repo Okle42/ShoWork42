@@ -281,9 +281,13 @@ enum WindowList {
 // MARK: - AppleScript
 
 enum Script {
+    /// 最近一次失敗的原因（例如 -1743＝沒有自動化權限），失敗訊息裡帶出來才查得到
+    @MainActor static var lastError: String?
     @MainActor static func run(_ src: String) -> NSAppleEventDescriptor? {
         var err: NSDictionary?
-        return NSAppleScript(source: src)?.executeAndReturnError(&err)
+        let d = NSAppleScript(source: src)?.executeAndReturnError(&err)
+        lastError = err.map { "\($0[NSAppleScript.errorNumber] ?? "?") \($0[NSAppleScript.errorMessage] ?? "")" }
+        return d
     }
     @MainActor static func int(_ src: String) -> Int? {
         guard let d = run(src) else { return nil }

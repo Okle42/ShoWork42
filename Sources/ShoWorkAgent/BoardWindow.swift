@@ -147,6 +147,7 @@ struct BoardView: View {
     @State private var reviewOn = Reviewer.shared.enabled
     @State private var autoWrap = CtxGuard.shared.autoWrapUp
     @State private var ctxThreshold = ContextGuard.threshold
+    @State private var ctxTokens = ContextGuard.tokenLimit
     @State private var sendBackCard: BoardCard?
     @State private var parkCard: BoardCard?
     @State private var dispatchCard: BoardCard?
@@ -172,7 +173,7 @@ struct BoardView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             // 測試視窗可用 SHOWORK_TEST_VIEW=islands|office 指定檢視（只讀不寫，不會改到你存的選擇；10-20 審查）
             if (BoardWindow.testMode ? ProcessInfo.processInfo.environment["SHOWORK_TEST_VIEW"] : nil) ?? view == "office" {
-                OfficeView(cards: model.cards, departments: model.departments, tower: model.tower, decor: model.decor, wander: model.wander, guardStatus: model.guardStatus, guardScanning: model.guardScanning, captainThread: model.captainThread, captainTasks: model.captainTasks, sessionThread: model.sessionThread, city: model.city, loaded: model.loaded,
+                OfficeView(cards: model.cards, departments: model.departments, tower: model.tower, decor: model.decor, wander: model.wander, guardStatus: model.guardStatus, guardScanning: model.guardScanning, captainThread: model.captainThread, captainTasks: model.captainTasks, sessionThread: model.sessionThread, runs: model.runs, city: model.city, loaded: model.loaded,
                            reviewing: model.reviewing, onSendBack: { sendBackCard = $0 }, onPark: { parkCard = $0 },
                            onDispatch: { dispatchCard = $0 }, onToast: show)
             } else {
@@ -221,19 +222,24 @@ struct BoardView: View {
             .onChange(of: reviewOn) { _, v in Reviewer.shared.enabled = v }
             .help("AI 審核：卡片進「待審」時，請 \(Reviewer.model) 獨立審一次（走你的訂閱額度）")
         HStack(spacing: 2) {
-            SwiftUI.Menu {                          // 門檻可調（10-15 Kang）
-                Picker("門檻", selection: $ctxThreshold) {
-                    ForEach(ContextGuard.choices, id: \.self) { v in Text("\(Int(v))%" + (v == 70 ? "（建議）" : "")).tag(v) }
+            SwiftUI.Menu {                          // 門檻可調（10-15 Kang）；10-26 Kang 加 token 線，主要看這條
+                Picker("用量到多少就交接", selection: $ctxTokens) {
+                    ForEach(ContextGuard.tokenChoices, id: \.self) { v in Text("\(v / 1000)k" + (v == 250_000 ? "（建議）" : "")).tag(v) }
                 }
                 .pickerStyle(.inline)
-            } label: { Text(short ? "\(Int(ctxThreshold))%" : "ctx \(Int(ctxThreshold))%") }
+                Picker("或超過視窗的 %（保險）", selection: $ctxThreshold) {
+                    ForEach(ContextGuard.choices, id: \.self) { v in Text("\(Int(v))%").tag(v) }
+                }
+                .pickerStyle(.inline)
+            } label: { Text(short ? "\(ctxTokens / 1000)k" : "ctx \(ctxTokens / 1000)k") }
             .menuStyle(.borderlessButton).fixedSize()
             .onChange(of: ctxThreshold) { _, v in ContextGuard.threshold = v }
-            .help("點一下改門檻：context 超過這個 % 就通知你（開著自動收尾時，也請那個 AI 收尾）")
+            .onChange(of: ctxTokens) { _, v in ContextGuard.tokenLimit = v }
+            .help("點一下改門檻：context 到 \(ctxTokens / 1000)k token（或超過視窗 \(Int(ctxThreshold))%）就通知你；開著自動收尾時，也請那個 AI 收尾")
             Toggle(short ? "收尾" : "自動收尾", isOn: $autoWrap)
                 .toggleStyle(.switch).controlSize(.small).fixedSize()
                 .onChange(of: autoWrap) { _, v in CtxGuard.shared.autoWrapUp = v }
-                .help("ctx \(Int(ctxThreshold))% 自動收尾：context 超過 \(Int(ctxThreshold))% 會通知你；開著時，等那個 AI 停下來就請它 commit、規則允許才 push、更新交接")
+                .help("自動收尾：context 到 \(ctxTokens / 1000)k（或 \(Int(ctxThreshold))%）會通知你；開著時，等那個 AI 停下來就請它 commit、規則允許才 push、更新交接")
         }
     }
 

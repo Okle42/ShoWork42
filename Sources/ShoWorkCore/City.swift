@@ -251,12 +251,12 @@ public enum CityRules {
         g.sevenLeftMin = g.sevenReset.map { max(0, Int($0.timeIntervalSince(now) / 60)) }
         return g
     }
-    /// 剩餘量的格（5% 一格；電表、名牌用這個，不跟著每 1% 重畫）
-    public static func gridStep(_ left: Double?) -> Int? { left.map { Int(($0 / 5).rounded(.down)) * 5 } }
-    /// 要不要換：階段變了、剩餘量換格、重置時間（分鐘）變了才算
+    /// 名牌上的「已用 %」：跟視窗右上角（UsageView）同一個算法——四捨五入到整數（10-26 Kang：兩邊數字要一樣）
+    public static func pct(_ used: Double?) -> Int? { used.map { Int($0.rounded()) } }
+    /// 要不要換：階段變了、已用 % 變了（1% 一格，跟右上角同步）、重置時間（分鐘）變了才算
     public static func gridChanged(_ a: CityGrid, _ b: CityGrid) -> Bool {
         func m(_ d: Date?) -> Int? { d.map { Int($0.timeIntervalSince1970 / 60) } }
-        return a.stage != b.stage || gridStep(a.fiveLeft) != gridStep(b.fiveLeft) || gridStep(a.sevenLeft) != gridStep(b.sevenLeft)
+        return a.stage != b.stage || pct(a.fiveUsed) != pct(b.fiveUsed) || pct(a.sevenUsed) != pct(b.sevenUsed)
             || m(a.fiveReset) != m(b.fiveReset) || m(a.sevenReset) != m(b.sevenReset)
             || CityText.countdown(a.sevenLeftMin) != CityText.countdown(b.sevenLeftMin)     // 倒數字變了（超過 1 天每小時、1 天內每 10 分鐘）
     }
@@ -316,16 +316,16 @@ public enum CityText {
         f.dateFormat = c.isDate(d, inSameDayAs: now) ? "HH:mm" : "M/d HH:mm"
         return f.string(from: d)
     }
-    /// 電廠名牌：5 小時剩多少＋幾點重置；停電＝幾點復電
+    /// 電廠名牌：5 小時已用多少（跟右上角同一個數字）＋幾點重置；停電＝幾點復電
     public static func grid(_ g: CityGrid, now: Date, tz: TimeZone = .current) -> String {
-        guard let left = g.fiveLeft else { return "電廠・額度讀不到" }
+        guard let used = CityRules.pct(g.fiveUsed) else { return "電廠・額度讀不到" }
         let at = g.fiveReset.map { clock($0, now: now, tz: tz) }
         if g.stage == .blackout {
             let fiveOut = (g.fiveUsed ?? 0) >= 100
             let back = fiveOut ? at : g.sevenReset.map { clock($0, now: now, tz: tz) }
             return "停電・額度用完" + (back.map { "，\($0) 復電" } ?? "") + " ⚠"
         }
-        let s = "電廠・5 小時剩 \(CityRules.gridStep(left) ?? 0)%" + (at.map { "（\($0) 重置）" } ?? "")
+        let s = "電廠・5 小時已用 \(used)%" + (at.map { "（\($0) 重置）" } ?? "")
         return g.alert ? s + " ⚠" : s
     }
     /// 倒數字：超過 1 天「N 天 H 小時」、1 天內「H 小時 M 分」（10 分鐘一格）、1 小時內「M 分」
@@ -335,10 +335,10 @@ public enum CityText {
         if m >= 60 { return "\(m / 60) 小時 \(m % 60 / 10 * 10) 分" }
         return "\(max(m, 0)) 分"
     }
-    /// 油槽名牌：7 天剩多少＋還有多久重置（10-22 Kang：旁邊要寫倒數）
+    /// 油槽名牌：7 天已用多少（跟右上角同一個數字）＋還有多久重置（10-22 Kang：旁邊要寫倒數）
     public static func fuel(_ g: CityGrid) -> String {
-        guard let l = g.sevenLeft else { return "油槽・7 天額度讀不到" }
-        return "油槽・7 天剩 \(CityRules.gridStep(l) ?? 0)%" + (countdown(g.sevenLeftMin).map { "（\($0)後重置）" } ?? "") + (l <= 5 ? " ⚠" : "")
+        guard let l = g.sevenLeft, let used = CityRules.pct(g.sevenUsed) else { return "油槽・7 天額度讀不到" }
+        return "油槽・7 天已用 \(used)%" + (countdown(g.sevenLeftMin).map { "（\($0)後重置）" } ?? "") + (l <= 5 ? " ⚠" : "")
     }
     /// 頂部「需要你」列的一句
     public static func gridAlert(_ g: CityGrid) -> String {

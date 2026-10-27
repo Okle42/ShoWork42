@@ -26,7 +26,7 @@ struct HandoverTests {
         #expect(Handover.match([a], sid: "新B", pid: 100, cwd: nil, source: "compact", live: [], now: t0) == nil)
     }
 
-    @Test("② 送 /clear 的條件：最後一張卡是 wrapup、閒著、鍵盤 60 秒沒動")
+    @Test("② 送 /clear 的條件：還在 pending、閒著（不等鍵盤）")
     func ready() {
         func ok(_ s: HandoverRecord.State = .pending, kind: String? = "wrapup", working: Bool = false, dialog: Bool = false,
                 last: TimeInterval = 30, key: TimeInterval = 60) -> Bool {
@@ -35,12 +35,12 @@ struct HandoverTests {
         #expect(ok())
         #expect(!ok(.interrupted))
         #expect(!ok(.clearing))
-        #expect(!ok(kind: nil))           // 收尾後又發了一般卡（在問問題／還在做）
+        #expect(ok(kind: nil))            // 收尾後被訊息叫醒、回完發了一般卡：照樣送（T1026230337）
+        #expect(!ok(kind: "start"))       // 又發了開工卡＝接了新工作
         #expect(!ok(working: true))
         #expect(!ok(dialog: true))
         #expect(!ok(last: 2))
-        #expect(!ok(key: 3))              // Kang 正在打字
-        #expect(!ok(key: 59))
+        #expect(ok(key: 0))               // Kang 在別的視窗打字也照送
     }
 
     @Test("閉環驗證：終端機標題開頭要是英文名")
@@ -82,5 +82,43 @@ struct HandoverTests {
         let a = CaptainLink.alarm(Roster(at: t0, captain: nil, entries: [e]), pending: 0, now: t0)
         #expect(a.text.contains("已收尾、還沒 /clear：小明（已收尾待 /clear）"))
         #expect(a.sig != plain.sig)
+    }
+
+    @Test("T1026230337 收尾後：巡檢／組員訊息不算打斷、看板訊息暫存到接手；使用者打字才取消", .serialized)
+    func notInterruptedByPeers() throws {
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("handover-\(UUID().uuidString)/handover")
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        setenv("SHOWORK_HANDOVER_DIR", tmp.path, 1); defer { unsetenv("SHOWORK_HANDOVER_DIR") }
+        let sid = "假A"
+        #expect(Handover.save(rec(sid)))
+        // 3 則巡檢＋1 則組員訊息叫醒它：都不算打斷，還會拿到「交接中」提醒
+        for i in 1...3 {
+            let note = Handover.noteNewPrompt(sid: sid, prompt: "<cross-session-message from=\"uds:/x\" from-name=\"AI工作戰情中心（巡檢）\">巡檢 \(i)</cross-session-message>", now: t0)
+            #expect(note?.contains("不算打斷") == true)
+        }
+        #expect(Handover.noteNewPrompt(sid: sid, prompt: "<cross-session-message from=\"uds:/y\" from-name=\"小華\">幫我看一下</cross-session-message>", now: t0) != nil)
+        #expect(Handover.load(sid)?.state == .pending)
+        // 回完發了一般卡、停下來 ⇒ 看板照送 /clear
+        #expect(Handover.readyToClear(state: .pending, lastKind: nil, working: false, dialog: false, lastActivity: t0 - 30, keyIdle: 0, now: t0))
+        // 看板／隊長流程要送它的訊息：暫存；使用者回答不暫存
+        #expect(Handover.shouldHold(sid: sid, fromName: "AI工作戰情中心（巡檢）"))
+        #expect(Handover.shouldHold(sid: sid, fromName: "AI工作戰情中心"))
+        #expect(!Handover.shouldHold(sid: sid, fromName: "AI工作戰情中心（使用者）"))
+        Handover.hold(sid: sid, text: "【工作回報】小華做完了", fromName: "AI工作戰情中心", now: t0)
+        // 新 context 接手：補交暫存的訊息，之後清空
+        let ctx = Handover.resumeWithHeld(rec(sid), tasks: [])     // claim 會寫真的名冊，測組字這段就好
+        #expect(ctx.contains("小華做完了") && ctx.contains("1 則訊息"))
+        #expect(Handover.takeHeld(sid).isEmpty)
+
+        // 再測：使用者在那個視窗打字 ⇒ 取消收尾
+        #expect(Handover.save(rec("假C")))
+        #expect(Handover.noteNewPrompt(sid: "假C", prompt: "再幫我改一個地方", now: t0) == nil)
+        #expect(Handover.load("假C")?.state == .interrupted)
+        // 戰情中心轉來的使用者回答也算
+        #expect(Handover.isUserPrompt("<cross-session-message from=\"uds:\" from-name=\"AI工作戰情中心（使用者）\">【使用者從戰情中心回答你的問題】好</cross-session-message>"))
+
+        let log = try String(contentsOf: tmp.deletingLastPathComponent().appendingPathComponent("handover.log"), encoding: .utf8)
+        #expect(log.contains("keep 小明") && log.contains("不算打斷"))
+        #expect(log.contains("interrupted 小明") && log.contains("使用者又下指令"))
     }
 }

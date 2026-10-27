@@ -233,6 +233,21 @@ if argv.count == 2, argv[1] == "--board-window" {
                 }
             }
         }
+        // SHOWORK_TEST_DROP=<路徑>（10-26）：10 秒後（等卡片讀完）對對話輸入框跑拖檔那段（插路徑＋拉焦點），再用鍵盤事件打「接著打」，印出框裡的字
+        if let path = ProcessInfo.processInfo.environment["SHOWORK_TEST_DROP"] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
+                func all(_ v: NSView) -> [DropTextView] { [v as? DropTextView].compactMap { $0 } + v.subviews.flatMap(all) }
+                guard let w = NSApp.windows.first(where: { $0.title == "AI工作戰情中心" }), let root = w.contentView,
+                      let tv = all(root).max(by: { $0.convert($0.bounds, to: nil).minY > $1.convert($1.bounds, to: nil).minY })   // 最下面那個＝對話窗格
+                else { print("drop: 找不到輸入框"); fflush(stdout); return }
+                tv.string = "看這個"
+                tv.insertPaths([path], at: NSRange(location: (tv.string as NSString).length, length: 0))
+                tv.focus()
+                (w.firstResponder as? NSTextView)?.insertText("接著打", replacementRange: NSRange(location: NSNotFound, length: 0))
+                print("drop: 焦點在輸入框=\(w.firstResponder === tv) 內容=[\(tv.string)] 游標=\(tv.selectedRange().location)/\((tv.string as NSString).length)")
+                fflush(stdout)
+            }
+        }
         // SHOWORK_TEST_SHOT=<png>：等 SHOWORK_TEST_SHOT_DELAY 秒（預設 4）存一張截圖（視窗在螢幕外，外部截圖工具拍不到）
         if let out = ProcessInfo.processInfo.environment["SHOWORK_TEST_SHOT"] {
             let delay = Double(ProcessInfo.processInfo.environment["SHOWORK_TEST_SHOT_DELAY"] ?? "") ?? 4

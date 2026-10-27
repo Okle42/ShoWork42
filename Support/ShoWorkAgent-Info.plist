@@ -25,6 +25,9 @@
     <string>14.0</string>
     <key>LSUIElement</key>
     <true/>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>收尾完的 AI 要由戰情中心在它的 Ghostty 分頁打 /clear 並請新 context 接手。</string>
+    <!-- 10-27：少了這個 key，macOS 不跳視窗直接拒絕（-1743），自動 /clear 從 10-25 起全部失敗 -->
     <key>NSMicrophoneUsageDescription</key>
     <string>在戰情中心的輸入框用聽寫（按兩下 Control）講話。</string>
 </dict>

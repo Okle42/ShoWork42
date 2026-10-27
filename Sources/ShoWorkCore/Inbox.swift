@@ -91,9 +91,10 @@ public enum Inbox {
     }
 }
 
-/// 隊長（10-21 Kang：隊長的大腦用當下最高的模型）：戰情中心「交給隊長」找不到隊長時，自己開一個背景隊長
+/// 隊長：戰情中心「交給隊長」找不到隊長時，自己開一個背景隊長。
+/// 10-26 Kang：值班用 Opus（Fable 隊長一週佔 24% 用量），要做重大判斷時再手動 /model 升 Fable；defaults 的 captain.model 仍可覆寫
 public enum CaptainLaunch {
-    public static let defaultModel = "claude-fable-5-1"
+    public static let defaultModel = "claude-opus-5-5"
     public static let modelKey = "captain.model"
 
     /// 背景隊長的第一句話：登記、守則，以及它看不到終端機 ⇒ 所有要跟使用者講的都走 showork card

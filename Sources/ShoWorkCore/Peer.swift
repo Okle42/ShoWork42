@@ -51,6 +51,10 @@ public enum Peer {
 
     /// 送出；成功回傳訊息 id
     public static func send(to r: SessionRecord, text: String, fromName: String, replyTo: String? = nil) -> Result<String, CardError> {
+        if Handover.shouldHold(sid: r.sessionId, fromName: fromName) {   // 收尾中：先暫存，新 context 接手時一起給（T1026230337）
+            Handover.hold(sid: r.sessionId, text: text, fromName: fromName)
+            return .success("held")
+        }
         guard let path = r.messagingSocketPath else { return .failure(CardError("\(r.name ?? r.sessionId) 沒有收件匣（版本太舊或是背景 session）")) }
         let dir = claudeDir + "/sessions"
         guard let kf = ((try? FileManager.default.contentsOfDirectory(atPath: dir)) ?? []).first(where: { $0.hasPrefix("\(r.pid).") && $0.hasSuffix(".key") }),

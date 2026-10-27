@@ -2026,7 +2026,7 @@ final class OfficeBuilder {
                 let ctx = c.ctx.map { Int($0.percent) }
                 let tok = c.tokens.map { "  🔤\(tokenShort($0.total))" } ?? ""
                 let g = "📈\(prog.map { "\($0)%" } ?? "—")  🎯\(conf.map { "\($0)%" } ?? "—")  🧠\(ctx.map { "\($0)%" } ?? "—")" + tok
-                let ctxHot = (c.ctx?.percent ?? 0) >= ContextGuard.threshold
+                let ctxHot = c.ctx.map { ContextGuard.over($0) } ?? false
                 draw(g, at: NSPoint(x: W * 0.44, y: y + 7), size: 17, weight: .semibold,
                      color: ctxHot ? NSColor.systemRed : NSColor(white: 0.92, alpha: 1), width: W * 0.56 - fr - 6)
                 if let prog {

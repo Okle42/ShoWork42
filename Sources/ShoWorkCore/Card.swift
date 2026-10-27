@@ -214,6 +214,31 @@ public enum CardRules {
                       issues: Array(((o["issues"] as? [String]) ?? []).prefix(3)), turn: turn, at: now, model: model, costUSD: cost)
     }
 
+    /// 最後一輪（最後一句使用者的話之後）有沒有真的動手：只回話、只發卡片／查名冊／讀通知的「待命」輪不用開審核員。
+    /// 尾端找不到使用者那句話（輪太長被截掉）時當作有動手。
+    public static func lastTurnDidWork(_ tail: Data) -> Bool {
+        var worked = true
+        for raw in tail.split(separator: 0x0A) {
+            guard let o = try? JSONSerialization.jsonObject(with: Data(raw)) as? [String: Any],
+                  let m = o["message"] as? [String: Any] else { continue }
+            switch o["type"] as? String {
+            case "user":
+                if m["content"] is String { worked = false }
+                else if let ps = m["content"] as? [[String: Any]], !ps.contains(where: { $0["type"] as? String == "tool_result" }) { worked = false }
+            case "assistant":
+                for p in (m["content"] as? [[String: Any]]) ?? [] where p["type"] as? String == "tool_use" {
+                    let n = p["name"] as? String ?? ""
+                    let cmd = ((p["input"] as? [String: Any])?["command"] as? String) ?? ""
+                    if ["ListAgents", "ReadNotifications", "ToolSearch"].contains(n) { continue }
+                    if n == "Bash", cmd.contains("/showork\""), cmd.contains(" card ") || cmd.contains(" names") { continue }
+                    worked = true
+                }
+            default: break
+            }
+        }
+        return worked
+    }
+
     /// 對話紀錄尾端 → 給審核員看的摘錄（你說的話、AI 說的話、用了哪些工具），最多 `limit` 字
     public static func excerpt(_ tail: Data, limit: Int = 12_000) -> String {
         var out: [String] = []
@@ -308,6 +333,20 @@ public enum ContextGuard {
         set { UserDefaults(suiteName: "ai.okle42.showork")?.set(newValue, forKey: key) }
     }
 
+    /// 10-26 Kang：context 到 250k token 就交接。用 token 數不用百分比——視窗 1M 和 200k 的 session 都同一條線；百分比門檻留著當保險
+    public static let defaultTokenLimit = 250_000
+    public static let tokenChoices = [150_000, 200_000, 250_000, 300_000, 400_000]
+    public static var tokenLimit: Int {
+        get {
+            let v = UserDefaults(suiteName: "ai.okle42.showork")?.integer(forKey: "board.ctxTokens") ?? 0
+            return v > 0 ? v : defaultTokenLimit
+        }
+        set { UserDefaults(suiteName: "ai.okle42.showork")?.set(newValue, forKey: "board.ctxTokens") }
+    }
+    public static func over(_ c: ContextUse, threshold: Double = threshold, tokenLimit: Int = tokenLimit) -> Bool {
+        c.percent >= threshold || (c.tokens ?? 0) >= tokenLimit
+    }
+
     /// 打進那個 session 的收尾指令。push 與否交給那個 session 的 AI 依該 repo 的規則判斷
     /// （ghosts、客戶案等有「不准 push／要先審」的規則，看板不知道，AI 看得到）。
     public static func wrapUpPrompt(percent: Double) -> String {
@@ -316,7 +355,7 @@ public enum ContextGuard {
 
     /// 現在要不要對這張卡送收尾：超過門檻、還沒送過、它停下來了（不在工作中、也不是在問你問題）
     public static func shouldWrapUp(card: BoardCard, ctx: ContextUse?, alreadySent: Bool, threshold: Double = threshold) -> Bool {
-        guard let c = ctx, c.percent >= threshold, !alreadySent, !card.id.contains("#") else { return false }
+        guard let c = ctx, over(c, threshold: threshold), !alreadySent, !card.id.contains("#") else { return false }
         return card.column != .active && card.reason != "等你回答"
     }
 }

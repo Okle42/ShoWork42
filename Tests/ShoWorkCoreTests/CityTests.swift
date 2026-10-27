@@ -257,14 +257,14 @@ struct CityTests {
         #expect(!g(94).alert && g(96).alert && g(100).lightScale == 0 && g(85).lightScale == 0.6)
     }
 
-    @Test("跨門檻才換：5% 一格、階段、重置分鐘")
+    @Test("跨門檻才換：已用 % 每 1%（跟右上角同步）、階段、重置分鐘")
     func gridChanged() {
         let t = now
         func g(_ five: Double, reset: TimeInterval = 3600) -> CityGrid {
             CityRules.grid(RateLimits(fiveHour: .init(used: five, resetsAt: t + reset), sevenDay: .init(used: 40, resetsAt: t + 86400)), now: t)
         }
-        #expect(!CityRules.gridChanged(g(61), g(64)))          // 剩 39 → 36，同在 35 那格
-        #expect(CityRules.gridChanged(g(64), g(66)))           // 36 → 34，換格
+        #expect(!CityRules.gridChanged(g(61.2), g(61.4)))      // 右上角都顯示 61%
+        #expect(CityRules.gridChanged(g(61), g(62)))           // 右上角 61 → 62，名牌也跟著換
         #expect(CityRules.gridChanged(g(79.5), g(80)))         // 進節電
         #expect(!CityRules.gridChanged(g(50, reset: 3600), g(50, reset: 3620)))
         #expect(CityRules.gridChanged(g(50, reset: 3600), g(50, reset: 3700)))
@@ -277,8 +277,8 @@ struct CityTests {
         let r = RateLimits(fiveHour: .init(used: 67, resetsAt: Date(timeIntervalSince1970: 1_792_632_000)),
                            sevenDay: .init(used: 67, resetsAt: Date(timeIntervalSince1970: 1_792_656_000)))
         let a = CityRules.grid(r, now: t)
-        #expect(CityText.grid(a, now: t, tz: tz) == "電廠・5 小時剩 30%（09:20 重置）")
-        #expect(CityText.fuel(a) == "油槽・7 天剩 30%（7 小時 10 分後重置）")
+        #expect(CityText.grid(a, now: t, tz: tz) == "電廠・5 小時已用 67%（09:20 重置）")
+        #expect(CityText.fuel(a) == "油槽・7 天已用 67%（7 小時 10 分後重置）")
         #expect(CityText.countdown(2 * 1440 + 5 * 60 + 33) == "2 天 5 小時" && CityText.countdown(42) == "42 分" && CityText.countdown(nil) == nil)
         var b = r; b.fiveHour?.used = 100
         let out = CityRules.grid(b, now: t)

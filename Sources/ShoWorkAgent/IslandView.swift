@@ -236,7 +236,7 @@ struct Gauges: View {
             item("📈", prog, "完成度")
             item("🎯", conf, "信心度")
             if let x = card.ctx {
-                Text("🧠 \(Int(x.percent))%").foregroundStyle(x.percent >= ContextGuard.threshold ? .red : x.percent >= 70 ? .orange : .primary)
+                Text("🧠 \(Int(x.percent))%").foregroundStyle(ContextGuard.over(x) ? .red : x.percent >= 70 ? .orange : .primary)
                     .fontWeight(x.percent >= 70 ? .semibold : .regular)
                     .help("ctx（context 用量）\(Int(x.percent))%")
             } else {
@@ -341,7 +341,7 @@ struct BubbleDetail: View {
             if let d = c.detail, d != c.report?.summary {
                 Text(d).font(.callout).foregroundStyle(.secondary).lineLimit(8).fixedSize(horizontal: false, vertical: true)
             }
-            if let x = c.ctx, x.percent >= ContextGuard.threshold {
+            if let x = c.ctx, ContextGuard.over(x) {
                 HStack {
                     Label(CtxGuard.shared.wasSent(c.sessionId) ? "已請它收尾" : "context 快滿，該收尾了", systemImage: "exclamationmark.triangle.fill")
                         .font(.caption).foregroundStyle(.red)
@@ -379,7 +379,7 @@ struct BubbleDetail: View {
     }
 
     static func verdict(_ v: String) -> String {
-        switch v { case "pass": "✅ 通過"; case "concern": "⚠️ 有疑慮"; case "fail": "❌ 不通過"; default: v }
+        switch v { case "pass": "✅ 通過"; case "concern": "⚠️ 有疑慮"; case "fail": "❌ 不通過"; case "skip": "略過（這輪沒動手）"; default: v }
     }
 }
 

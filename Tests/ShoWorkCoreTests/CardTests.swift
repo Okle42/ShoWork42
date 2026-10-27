@@ -77,6 +77,20 @@ struct CardTests {
         #expect(CardRules.excerpt(Data(lines.joined(separator: "\n").utf8), limit: 10).hasPrefix("⋯（前面省略）"))
     }
 
+    @Test("待命輪不用審：只發卡片／查名冊算沒動手")
+    func lastTurnDidWork() {
+        let ask = #"{"type":"user","message":{"content":"巡檢"}}"#
+        let card = #"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"\"/x/bin/showork\" card --doing \"待命\""}}]}}"#
+        let res = #"{"type":"user","message":{"content":[{"type":"tool_result","content":"ok"}]}}"#
+        let edit = #"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/a"}}]}}"#
+        let talk = #"{"type":"assistant","message":{"content":[{"type":"text","text":"沒事"}]}}"#
+        func run(_ l: [String]) -> Bool { CardRules.lastTurnDidWork(Data(l.joined(separator: "\n").utf8)) }
+        #expect(!run([ask, card, res, talk]))
+        #expect(!run([edit, ask, talk]))
+        #expect(run([ask, card, res, edit]))
+        #expect(run([card, res, talk]))          // 看不到使用者那句：保守當作有動手
+    }
+
     @Test("帳號流量快照（statusline 存的格式）")
     func rateLimits() throws {
         let j = #"{"rate_limits": {"five_hour": {"used_percentage": 27, "resets_at": 1791457200}, "seven_day": {"used_percentage": 59.5, "resets_at": 1791774000}}, "at": "2026-10-08 18:12:08"}"#
@@ -106,6 +120,9 @@ struct CardTests {
         #expect(!ContextGuard.shouldWrapUp(card: card(.review, "等你回答"), ctx: c, alreadySent: false, threshold: 85)) // 不打斷它問你的問題
         #expect(!ContextGuard.shouldWrapUp(card: card(.done), ctx: c, alreadySent: true, threshold: 85))              // 只送一次
         #expect(!ContextGuard.shouldWrapUp(card: card(.done), ctx: ContextUse(percent: 84.9), alreadySent: false, threshold: 85))
+        #expect(ContextGuard.over(ContextUse(percent: 26, tokens: 260_000), threshold: 70, tokenLimit: 250_000))   // 1M 視窗：250k 就收尾
+        #expect(!ContextGuard.over(ContextUse(percent: 60, tokens: 120_000), threshold: 70, tokenLimit: 250_000))  // 200k 視窗：不會被 token 線誤殺
+        #expect(ContextGuard.over(ContextUse(percent: 75, tokens: 150_000), threshold: 70, tokenLimit: 250_000))   // 百分比門檻照舊
         #expect(ContextGuard.wrapUpPrompt(percent: 86.4).contains("86%") && ContextGuard.wrapUpPrompt(percent: 86).contains("允許才 push"))
     }
 }

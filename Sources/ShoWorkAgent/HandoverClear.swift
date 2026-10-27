@@ -14,9 +14,13 @@ import ShoWorkCore
 final class HandoverClear {
     static let shared = HandoverClear()
     private var busy = false
+    private var lastWhy: [String: Date] = [:]
+    private var checked = false
 
     func check(_ cards: [BoardCard], records: [String: HandoverRecord], captain: String?) {
-        guard Engine.current != nil, !busy, !records.isEmpty else { return }   // 只有正式 agent 會動手；測試視窗不動
+        guard Engine.current != nil, !busy else { return }   // 只有正式 agent 會動手；測試視窗不動
+        if !checked { checked = true; selfCheck() }
+        guard !records.isEmpty else { return }
         let now = Date()
         for snap in records.values {
             // 快照可能是舊的（背景讀的）；動手前一律以磁碟上的為準，免得同一筆送兩次
@@ -27,7 +31,13 @@ final class HandoverClear {
                 let key = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .keyDown)
                 guard Handover.readyToClear(state: r.state, lastKind: c.report?.kind, working: c.column == .active,
                                             dialog: c.permit != nil || c.reason == "等你回答",
-                                            lastActivity: c.lastActivity, keyIdle: key, now: now) else { continue }
+                                            lastActivity: c.lastActivity, keyIdle: key, now: now) else {
+                    if now.timeIntervalSince(lastWhy[r.sid] ?? .distantPast) > 60 {   // 等太久時查得到卡在哪個條件
+                        lastWhy[r.sid] = now
+                        log("wait \(r.name) kind=\(c.report?.kind ?? "nil") col=\(c.column.rawValue) permit=\(c.permit != nil) reason=\(c.reason) key=\(Int(key))")
+                    }
+                    continue
+                }
                 busy = true; defer { busy = false }
                 // 先記「送出中」再按鍵：/clear 後的 SessionStart 會讀這筆、改成 taken 寫回，晚寫會把它蓋掉（10-24 實測撞到）
                 r.state = .clearing; r.clearAt = now
@@ -88,24 +98,51 @@ final class HandoverClear {
               ProcTree.ttys(under: g.processIdentifier).contains(tty) else {
             return .failure(CardError("\(r.name) 不在 tmux 也不在 Ghostty，看板送不了"))
         }
-        guard let tid = GhosttyProbe.resolve(tty: tty, ghosttyPID: g.processIdentifier)?.terminalID else {
-            return .failure(CardError("Ghostty 找不到 \(tty) 對應的分頁"))
+        // tty 探不到時（10-26 Tina：Claude 畫面吃掉探測、Ghostty 待重啟更新）退一步用分頁標題：開頭是它英文名的分頁剛好一個才送
+        guard let tid = GhosttyProbe.resolve(tty: tty, ghosttyPID: g.processIdentifier)?.terminalID ?? Self.uniqueTerminal(named: r.name) else {
+            return .failure(CardError("Ghostty 找不到 \(tty) 對應的分頁" + (Script.lastError.map { "（AppleScript：\($0)）" } ?? "")))
         }
         let id = Self.q(tid)
         let title = Script.string("tell application id \"com.mitchellh.ghostty\" to get name of (first terminal whose id is \"\(id)\")") ?? ""
         guard Handover.titleMatches(title, name: r.name) else {
             return .failure(CardError("Ghostty 分頁標題「\(title)」對不上 \(r.name)，不送"))
         }
+        // 10-27：input text＝「貼上」，Claude Code 把貼上的 /clear 當一般訊息（Sam 收到「 /clear」）；斜線指令改用 Ghostty 的 text: 動作直接打進去
+        let input = text.hasPrefix("/") ? "perform action \"text:\(Self.q(text))\" on t" : "input text \"\(Self.q(text))\" to t"
         let ok = Script.run("""
             tell application id "com.mitchellh.ghostty"
               set t to first terminal whose id is "\(id)"
-              input text "\(Self.q(text))" to t
+              \(input)
               delay 0.15
               send key "enter" to t
               return "ok"
             end tell
             """)?.stringValue == "ok"
         return ok ? .success("ghostty") : .failure(CardError("Ghostty AppleScript 送字失敗"))
+    }
+
+    /// 標題開頭是這個英文名的 Ghostty 分頁；不是剛好一個就不認（寧可失敗也不送錯分頁）
+    /// 開機自檢：看板能不能用 AppleScript 讀 Ghostty 分頁（讀不到＝自動 /clear 一定失敗，多半是沒給自動化權限）
+    func selfCheck() {
+        let n = Script.int("tell application id \"com.mitchellh.ghostty\" to count terminals")
+        log(Script.lastError == nil ? "selfcheck Ghostty AppleScript OK（\(n ?? 0) 個分頁）" : "selfcheck Ghostty AppleScript 失敗：\(Script.lastError ?? "?")")
+    }
+
+    private static func uniqueTerminal(named name: String) -> String? {
+        let out = Script.string("""
+            tell application id "com.mitchellh.ghostty"
+              set r to ""
+              repeat with t in terminals
+                set r to r & (id of t) & (character id 9) & (name of t) & linefeed
+              end repeat
+              return r
+            end tell
+            """) ?? ""
+        let hits = out.split(separator: "\n").compactMap { l -> String? in
+            let p = l.split(separator: "\t", maxSplits: 1).map(String.init)
+            return p.count == 2 && Handover.titleMatches(p[1], name: name) ? p[0] : nil
+        }
+        return hits.count == 1 ? hits[0] : nil
     }
 
     private func fail(_ r: inout HandoverRecord, _ why: String) {

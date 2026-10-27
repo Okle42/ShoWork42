@@ -103,7 +103,8 @@ if args.first == "title" {
     // 開工卡（T1024033803 ①）：使用者直接下的指令 ⇒ 提醒動手前先發；隊長自己不用（隊長只審不做）；指定的無頭秘書 session 不發
     //   距上一道使用者指令超過 10 分鐘＝完整提醒；10 分鐘內＝只在換了任務時才發
     //   使用者打「放行」／「放行 <單號>」＝放行這個 session 被擋下的指令（寫 board/permits/releases.jsonl）
-    if event == "UserPromptSubmit", let sid { Handover.noteNewPrompt(sid: sid) }   // 收尾後又下指令 ⇒ 不自動 /clear
+    // 收尾後只有使用者本人又下指令才不自動 /clear；其他 session／看板的訊息回一段「交接中」提醒（T1026230337）
+    let handoverNote = event == "UserPromptSubmit" ? sid.flatMap { Handover.noteNewPrompt(sid: $0, prompt: prompt) } : nil
     let startNag: String? = {
         guard event == "UserPromptSubmit", let sid, CaptainLink.needsStart(prompt: prompt) else { return nil }
         let p = (prompt ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -127,12 +128,14 @@ if args.first == "title" {
         }
         return CaptainLink.startContext(showork: showork)
     }()
-    if let sid, NicknameStore.get(sid) == nil, let startNag {
-        print(Nicknames.hookOutput(nil, done: done, event: event, context: startNag))
+    let context = [startNag, handoverNote].compactMap { $0 }.joined(separator: "\n")
+    let ctx: String? = context.isEmpty ? nil : context
+    if let sid, NicknameStore.get(sid) == nil, let ctx {
+        print(Nicknames.hookOutput(nil, done: done, event: event, context: ctx))
     }
     if let sid, let n = NicknameStore.get(sid) {
         NicknameStore.touch(sid)
-        print(Nicknames.hookOutput(n, done: done, event: event, context: startNag))
+        print(Nicknames.hookOutput(n, done: done, event: event, context: ctx))
         // 做完時 Claude Code 會在 Stop hook 之後把標題改回它自己的 session 標題（10-19 實測：Dora 一閒下來就變回「✳ Handoff 88」），
         // 所以 1.5 秒後直接寫一次 OSC 0 到這個 session 的 tty；閒置時 Claude 不會再動標題
         if done, let tty = TTYFinder.find()?.tty {

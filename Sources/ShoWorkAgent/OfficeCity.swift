@@ -112,7 +112,7 @@ final class CityBuilder {
         let c = s.clouds.map { "\($0.name)|\($0.known)|\($0.alert)" }.joined(separator: ",")      // 剩多少不放（每 5 分鐘都在變，不重建）
         let v = s.servers.prefix(maxBranches).map { "\($0.alias)|\($0.online.map { "\($0)" } ?? "?")" }.joined(separator: ",")
         let f = "\(s.firewall.enabled.map { "\($0)" } ?? "?")|" + s.firewall.gates.prefix(maxGates).map { "\($0.port)\($0.openRed)" }.joined(separator: ",") + "|\(min(maxDoors, s.firewall.doors.count))"
-        let p = "\(s.grid.stage)|\(s.grid.known)|\(CityRules.gridStep(s.grid.fiveLeft) ?? -1)|\(CityRules.gridStep(s.grid.sevenLeft) ?? -1)|\(s.grid.fiveReset.map { Int($0.timeIntervalSince1970 / 60) } ?? 0)"
+        let p = "\(s.grid.stage)|\(s.grid.known)|\(CityRules.pct(s.grid.fiveUsed) ?? -1)|\(CityRules.pct(s.grid.sevenUsed) ?? -1)|\(s.grid.fiveReset.map { Int($0.timeIntervalSince1970 / 60) } ?? 0)"
         return [d, c, v, f, p].joined(separator: "#")
     }
 
@@ -542,11 +542,11 @@ final class CityBuilder {
         let col = Self.stageColor(g.stage)
         k.b(.identity, bx + 1.4, 2.76, bz - 0.6, 0.16, 0.5, 0.16, TM.f(TP.ST1))
         k.b(.identity, bx + 1.4, 3.26, bz - 0.6, 0.42, 0.42, 0.42, g.known ? Self.signal(col) : TM.f(TP.FN6))
-        // 電表（門右邊，朝大樓）：外框＋剩餘量的柱（5% 一格）
+        // 電表（門右邊，朝大樓）：外框＋剩餘量的柱
         let mx = bx + 1.25, mz = bz + 1.75, mh: Float = 1.9
         k.b(.identity, mx, 0, mz, 0.62, mh + 0.2, 0.32, TM.f(TP.ST1))
         k.b(.identity, mx, 0.1, mz + 0.161, 0.42, mh, 0.02, TM.f(TP.FN6))
-        let left = Float(CityRules.gridStep(g.fiveLeft) ?? 0) / 100
+        let left = Float(g.fiveLeft ?? 0) / 100
         if left > 0 { k.b(.identity, mx, 0.1, mz + 0.17, 0.36, max(0.06, mh * left), 0.02, Self.signal(col)) }
         // 油槽（7 天額度）：圓槽（方塊疊）＋正面液位窗
         let tx = Self.fuelX, tz = Self.fuelZ, th: Float = 3.2
@@ -555,7 +555,7 @@ final class CityBuilder {
         k.b(.identity, tx, th, tz, 2.2, 0.12, 2.2, Self.m(TP.ST1))
         let wz = tz + 1.81, wh: Float = 2.4
         k.b(.identity, tx, 0.4, wz, 0.5, wh, 0.03, TM.f(TP.FN6))
-        let fuel = Float(CityRules.gridStep(g.sevenLeft) ?? 0) / 100
+        let fuel = Float(g.sevenLeft ?? 0) / 100
         if fuel > 0 { k.b(.identity, tx, 0.4, wz + 0.01, 0.4, max(0.06, wh * fuel), 0.03, TM.f(fuel <= 0.05 ? 0xEF4444 : 0xC98B3C)) }
         // 油管：油槽 → 電廠
         k.b(.identity, (bx + 2.1 + tx - 1.8) / 2, 0.5, tz + 0.2, tx - 1.8 - bx - 2.1, 0.3, 0.3, Self.m(TP.ST1))
@@ -900,14 +900,14 @@ struct CityDetail: View {
         } else if id == "city:power" || id == "city:fuel" {
             let g = city.grid, now = Date()
             Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 3) {
-                row("5 小時", g.fiveLeft.map { "剩 \(Int($0.rounded()))%" } ?? "讀不到", warn: g.alert)
+                row("5 小時", CityRules.pct(g.fiveUsed).map { "已用 \($0)%・剩 \(100 - $0)%" } ?? "讀不到", warn: g.alert)
                 row("重置", g.fiveReset.map { CityText.clock($0, now: now) } ?? "—")
-                row("7 天", g.sevenLeft.map { "剩 \(Int($0.rounded()))%" } ?? "讀不到", warn: (g.sevenLeft ?? 100) <= 5)
+                row("7 天", CityRules.pct(g.sevenUsed).map { "已用 \($0)%・剩 \(100 - $0)%" } ?? "讀不到", warn: (g.sevenLeft ?? 100) <= 5)
                 row("重置", g.sevenReset.map { CityText.clock($0, now: now) } ?? "—")
                 row("電力", ["正常", "節電（80% 以上，燈調暗）", "吃緊（95% 以上）", "停電（用完，AI 定格）"][g.stage.rawValue], warn: g.alert)
             }
             if let u = g.fiveLeft { UsageBar(value: 1 - u / 100, alert: g.alert) }
-            if !compact { note("資料來自狀態列存的 rate_limits.json（有 session 在跑才會更新）；5% 一格才換畫面") }
+            if !compact { note("資料來自狀態列存的 rate_limits.json（有 session 在跑才會更新）；數字跟視窗右上角同一份") }
         } else if id == "city:cooler" {
             let p = city.power
             Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 3) {

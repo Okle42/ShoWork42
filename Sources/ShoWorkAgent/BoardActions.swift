@@ -133,15 +133,21 @@ final class Reviewer {
         Log.note("REVIEW start \(c.sessionId) force=\(force)")
         BoardModel.shared.refresh()
         let path = "\(BoardPaths.claude)/projects/\(SessionRecord(pid: c.pid, sessionId: c.sessionId, cwd: c.kindCwd).projectSlug)/\(c.sessionId).jsonl"
-        let prompt = { () -> String in
-            let tail = (FileHandle(forReadingAtPath: path)).map { h -> Data in
-                defer { try? h.close() }
-                let size = (try? h.seekToEnd()) ?? 0
-                try? h.seek(toOffset: size > 200_000 ? size - 200_000 : 0)
-                return h.readDataToEndOfFile()
-            } ?? Data()
-            return CardRules.reviewPrompt(project: c.project, title: c.title, report: c.report, excerpt: CardRules.excerpt(tail))
-        }()
+        let tail = (FileHandle(forReadingAtPath: path)).map { h -> Data in
+            defer { try? h.close() }
+            let size = (try? h.seekToEnd()) ?? 0
+            try? h.seek(toOffset: size > 200_000 ? size - 200_000 : 0)
+            return h.readDataToEndOfFile()
+        } ?? Data()
+        // 待命輪（沒動手）不開無頭審核員：一週約省幾百次 sonnet 呼叫；手動「重新審核」照審
+        if !force, !CardRules.lastTurnDidWork(tail) {
+            BoardStore.write("reviews", c.sessionId, Review(progress: nil, confidence: nil, verdict: "skip", issues: [], turn: turn, model: "-", costUSD: 0))
+            Log.note("REVIEW skip \(c.sessionId) 這輪沒動手")
+            running.remove(c.sessionId); started[c.sessionId]?.removeLast()   // 略過不算保險絲次數
+            BoardModel.shared.refresh()
+            return
+        }
+        let prompt = CardRules.reviewPrompt(project: c.project, title: c.title, report: c.report, excerpt: CardRules.excerpt(tail))
         let cwd = c.cwd.flatMap { FileManager.default.fileExists(atPath: $0) ? $0 : nil } ?? BoardPaths.home
         let sid = c.sessionId
         queue.async {
@@ -325,7 +331,7 @@ final class CtxGuard {
         guard Engine.current != nil else { return }             // 只有正式 agent 會提醒、會打字；測試視窗不動手
         var changed = false
         for c in cards where !c.id.contains("#") {
-            guard let x = c.ctx, x.percent >= ContextGuard.threshold else { continue }
+            guard let x = c.ctx, ContextGuard.over(x) else { continue }
             if state.notified[c.sessionId] == nil {
                 state.notified[c.sessionId] = Date(); changed = true
                 notify("\(c.project)：context \(Int(x.percent))%",
@@ -451,7 +457,7 @@ extension BoardActions {
     }
 }
 
-// MARK: - 收件匣：交給隊長（10-21 Kang：隊長的大腦用當下最高的模型 Fable 5.1）
+// MARK: - 收件匣：交給隊長（10-26 Kang：預設 Opus，需要判斷時再升 Fable）
 
 extension BoardActions {
     nonisolated static var captainModel: String {

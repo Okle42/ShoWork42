@@ -4,7 +4,7 @@ import ShoWorkCore
 
 // 收件匣（10-21 Kang：「我一直在操作終端機，戰情中心是不是失去使用意義？」）：
 // 所有在等你的 AI 列在右邊，按選項或打字就把答案送進那個 session（tmux 打字／看板直送），不用切回終端機。
-// 底下是「交給隊長」：隊長不在就開一個背景隊長（模型 captain.model，預設 Fable 5.1）。
+// 底下是「交給隊長」：隊長不在就開一個背景隊長（模型 captain.model，預設 Opus 5.5，10-26 由 Fable 改）。
 // 權限對話框（第 2 步）：允許／一律允許／拒絕，寫回答檔給等著的 PermissionRequest hook（Permit.swift）。
 // 選擇題（AskUserQuestion）與計畫確認（ExitPlanMode）也走同一條 hook（10-25）：按選項／勾多選／打「其他」、核准／退回計畫。
 // 規則在 ShoWorkCore/Inbox.swift；送出走 BoardActions.answer／permit／askCaptain。
@@ -26,6 +26,7 @@ struct InboxPanel: View {
     var personThread: [CaptainLine] = []
     var onPersonSend: (String) -> Void = { _ in }
     var onBack: () -> Void = {}
+    var runs: [RunProgress] = []          // 背景長工作的即時進度（名字下方的進度條；10-26）
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -51,7 +52,7 @@ struct InboxPanel: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 8) {
                         ForEach(items) { it in
-                            InboxRow(item: it, onAnswer: { onAnswer(it, $0) }, onPermit: { onPermit(it, $0) }, onJump: { onJump(it.id) }, onFocus: { onFocus(it.id) })
+                            InboxRow(item: it, onAnswer: { onAnswer(it, $0) }, onPermit: { onPermit(it, $0) }, onJump: { onJump(it.id) }, onFocus: { onFocus(it.id) }, runs: runs)
                         }
                     }
                 }
@@ -61,11 +62,11 @@ struct InboxPanel: View {
             }
             if let p = person {
                 CaptainPanel(captain: p, busy: false, thread: personThread, tasks: [], onSend: onPersonSend, onFocus: onFocus,
-                             person: true, onBack: onBack, onJump: { onJump(p.id) })
+                             person: true, onBack: onBack, onJump: { onJump(p.id) }, runs: runs)
                     .id(p.sessionId)                  // 換人：輸入框、捲動位置重來
                     .frame(maxHeight: .infinity)
             } else {
-                CaptainPanel(captain: captain, busy: captainBusy, thread: thread, tasks: tasks, onSend: onCaptain, onFocus: onFocus)
+                CaptainPanel(captain: captain, busy: captainBusy, thread: thread, tasks: tasks, onSend: onCaptain, onFocus: onFocus, runs: runs)
                     .frame(maxHeight: .infinity)
             }
         }
@@ -81,6 +82,7 @@ private struct InboxRow: View {
     let onPermit: (PermitAnswer) -> Void
     let onJump: () -> Void
     let onFocus: () -> Void
+    var runs: [RunProgress] = []
     @State private var text = ""
     @State private var sentText: String?   // 送出後顯示的那行
 
@@ -101,6 +103,8 @@ private struct InboxRow: View {
                 }
             }
             Text(item.card.project).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .modifier(RunBar(card: item.card, name: item.card.title.split(separator: "-").first.map(String.init) ?? item.card.title, runs: runs, thickness: 2))
             Text(item.question).font(.callout).textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true).lineLimit(6)
             if let c = item.context, item.kind != .reply || item.generic {
@@ -130,9 +134,7 @@ private struct InboxRow: View {
                     }
                 }
                 HStack(spacing: 6) {
-                    TextField("或直接打字回答⋯", text: $text, axis: .vertical)
-                        .textFieldStyle(.roundedBorder).lineLimit(1...4)
-                        .onSubmit { send(text) }
+                    ChatInput(text: $text, placeholder: "或直接打字回答⋯", onSubmit: { send(text) })
                     Button("送出") { send(text) }
                         .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
@@ -405,7 +407,9 @@ private struct CaptainPanel: View {
     var person = false
     var onBack: () -> Void = {}
     var onJump: () -> Void = {}
+    var runs: [RunProgress] = []
     @State private var text = ""
+    @State private var paneHeight: CGFloat = 400     // 輸入框最多拉到窗格一半
     @State private var pending: (text: String, at: Date)?
     @State private var showReports = true
 
@@ -446,7 +450,17 @@ private struct CaptainPanel: View {
                 }
             }
             if person, let c = captain {
-                Text("\(c.project)・\(c.reason)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                HStack(spacing: 6) {
+                    Text("\(c.project)・\(c.reason)").lineLimit(1)
+                    Spacer(minLength: 4)
+                    if let r = RunProgress.pick(runs, for: name) {
+                        Text(r.caption(for: name)).monospacedDigit().lineLimit(1).layoutPriority(1)
+                    }
+                }
+                .font(.caption).foregroundStyle(.secondary)
+                .modifier(RunBar(card: c, name: name, runs: runs))
+            } else if let c = captain {
+                Color.clear.frame(height: 0).modifier(RunBar(card: c, name: name, runs: runs))
             }
             ScrollViewReader { proxy in
                 ScrollView {
@@ -490,10 +504,9 @@ private struct CaptainPanel: View {
                     if tasks.count > 4 { Text("還有 \(tasks.count - 4) 張（showork tasks）").font(.caption2).foregroundStyle(.tertiary) }
                 }
             }
-            HStack(spacing: 6) {
-                TextField(person ? "跟 \(name) 說⋯" : captain == nil ? "要做什麼？會開一個隊長來決定給哪個 AI" : "跟隊長說⋯（交辦、追問、拍板都可以）", text: $text, axis: .vertical)
-                    .textFieldStyle(.roundedBorder).lineLimit(1...4)
-                    .onSubmit(send)
+            HStack(alignment: .bottom, spacing: 6) {
+                ChatInput(text: $text, placeholder: person ? "跟 \(name) 說⋯" : captain == nil ? "要做什麼？會開一個隊長來決定給哪個 AI" : "跟隊長說⋯（交辦、追問、拍板都可以）",
+                          resizable: true, maxHeight: max(80, paneHeight / 2), onSubmit: send)
                 if busy { ProgressView().controlSize(.small) }
                 Button("送出", action: send)
                     .disabled(busy || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -501,6 +514,7 @@ private struct CaptainPanel: View {
             .controlSize(.small)
         }
         .fileDrop($text)          // 檔案拖到對話區任何地方：路徑填進下面的輸入框
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { paneHeight = $0 }
     }
 
     private func color(_ s: CaptainTask.State) -> Color {
@@ -572,5 +586,39 @@ private struct CaptainBubble: View {
     /// **粗體**、`code` 這類行內語法；換行照原樣
     static func markdown(_ s: String) -> AttributedString {
         (try? AttributedString(markdown: s, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(s)
+    }
+}
+
+/// 名字下方的細進度條（10-26）：背景長工作在跑時卡片每輪才更新、看起來像停了。
+/// 優先用 AI 即時寫的 run/progress（10 分鐘沒更新就不算），沒有就退回這一輪自報的 --progress，兩個都沒有不畫。
+/// 條畫在那一行下緣，只多 4pt 高；進度的字放在滑鼠提示和 VoiceOver。
+struct RunBar: ViewModifier {
+    let card: BoardCard
+    let name: String
+    let runs: [RunProgress]
+    var thickness: CGFloat = 3          // 收件匣卡片用 2
+
+    func body(content: Content) -> some View {
+        let run = RunProgress.pick(runs, for: name)
+        let f: Double? = run?.fraction ?? card.report?.progress.map { Double($0) / 100 }
+        let tip = run.map { "\($0.caption(for: name))（即時）" } ?? card.report?.progress.map { "這一輪自報完成度 \($0)%" } ?? ""
+        if let f {
+            content.padding(.bottom, thickness + 1).overlay(alignment: .bottomLeading) {
+                GeometryReader { g in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Color.primary.opacity(0.12))
+                        Capsule().fill(run != nil ? Color.accentColor : Color.secondary.opacity(0.7))
+                            .frame(width: max(3, g.size.width * f))
+                    }
+                }
+                .frame(height: thickness)
+                .animation(.smooth, value: f)
+            }
+            .help(tip)
+            .accessibilityElement(children: .combine)
+            .accessibilityValue(tip)
+        } else {
+            content
+        }
     }
 }
