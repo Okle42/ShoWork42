@@ -15,3 +15,9 @@ spikes/**/wbounds
 spikes/**/setframe
 docs/decisions/img/
 docs/design/office-tower/review/
+
+# per-machine Claude Code overrides (model/permission settings), never committed
+.claude/settings.local.json
+
+# 本機工具資料（claude-flow 外掛），不進 git
+.claude-flow/
