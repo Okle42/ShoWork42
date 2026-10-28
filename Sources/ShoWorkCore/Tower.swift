@@ -3,7 +3,8 @@ import Foundation
 // 科技大樓剖面（10-20 Kang 拍板，規範 docs/design/office-tower/設計規範.md §3）：一層樓＝一個專案部門，樓層疊起來一起看。
 //   一樓大廳（01，前台保全）→ 閒置薄層（多個沒人的專案壓成薄薄一層，只放門牌）→ 有 AI 的專案樓層（固定樓層號由下往上）→ 頂樓空中花園（RF）。
 //   樓層號：第一次依最近 7 天用量排一次（第 1 名 02），之後寫進 board/tower.json 不再重排；新專案接在最後一號。
-//   降樓：全部 AI 關掉後再 2 小時沒人，才降回閒置薄層（中間這 2 小時樓層留著、燈暗著）。
+//   降樓：常駐部門全部 AI 關掉後再 2 小時沒人，才降回閒置薄層（中間這 2 小時樓層留著、燈暗著）。
+//   臨時部門（不在常駐名冊、只因有 AI 才出現）AI 關掉就馬上消失，沒有緩衝、也不進薄層（10-28 使用者拍板）。
 // 這裡只有純邏輯（可測）；讀檔、存檔、算用量在 ShoWorkAgent/TowerSource.swift。
 
 /// 大樓尺寸（公尺）。10-20 第 2 棒 UI/UX 優化（docs/design/office-tower/UIUX優化規劃.md §3.1）：
@@ -169,13 +170,8 @@ public struct TowerPlan: Sendable, Equatable {
                              now: Date) -> (plan: TowerPlan, dirty: Bool) {
         var dirty = registry.assign(departments.map(\.name), usage: usage, now: now)
         dirty = registry.markActive(Set(departments.filter(\.isActive).map(\.name)), now: now) || dirty
-        // 10-20 第 4 棒：臨時部門（不在常駐名冊、只因為有 AI 才出現）AI 一關就從 departments 消失，原本樓層會立刻不見、
-        // 沒有 2 小時緩衝 ⇒ 名冊裡還在緩衝中的補回來（燈暗著）；滿 2 小時就自然消失（臨時部門不進薄層）
-        var departments = departments
-        let listed = Set(departments.map { $0.name.lowercased() })
-        for (k, _) in registry.lastSeen.sorted(by: { $0.key < $1.key }) where !listed.contains(k) && registry.isUp(k, now: now) {
-            departments.append(OfficeDepartment(name: registry.names[k] ?? k, isResident: false, isActive: false))
-        }
+        // 10-28 使用者：臨時部門（不在常駐名冊、只因為有 AI 才出現）AI 一關就從 departments 消失 ⇒ 樓層馬上不見，
+        // 不再從名冊補回來做 2 小時暗燈緩衝（10-20 第 4 棒那段拿掉）；緩衝只留給常駐部門。
         var seats: [String: Int] = [:]
         for c in cards where !c.id.contains("#") { seats[c.project.lowercased(), default: 0] += 1 }
 
@@ -183,8 +179,8 @@ public struct TowerPlan: Sendable, Equatable {
             let na = registry.number(a.name) ?? Int.max, nb = registry.number(b.name) ?? Int.max
             return na != nb ? na < nb : ResidentProjects.order(a.name, b.name)
         }
-        let up = byNumber.filter { $0.isActive || registry.isUp($0.name, now: now) }
-        let idle = byNumber.filter { d in !up.contains { $0.name == d.name } }
+        let up = byNumber.filter { $0.isActive || ($0.isResident && registry.isUp($0.name, now: now)) }
+        let idle = byNumber.filter { d in d.isResident && !up.contains { $0.name == d.name } }   // 臨時部門不進薄層
 
         var floors: [TowerFloor] = []
         var y = 0.0
