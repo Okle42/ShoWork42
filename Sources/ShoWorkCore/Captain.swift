@@ -81,6 +81,7 @@ public struct RosterEntry: Codable, Sendable, Equatable {
     public var title: String
     public var summary: String?
     public var ctx: Int?
+    public var ctxTokens: Int? = nil     // 交接門檻看這個（10-29 只留 token 一個條件）
     public var lastActivity: Date?
     public var captain: Bool
     public var sameProject: [String]     // 同專案的其他 session 名（重工警告）
@@ -141,7 +142,7 @@ public enum Captain {
             RosterEntry(name: c.name ?? String(c.sessionId.prefix(8)), sessionId: c.sessionId, pid: c.pid, kind: c.kind,
                         project: c.project, root: c.cwd, column: c.column, reason: c.reason, title: c.title,
                         summary: c.report?.summary ?? c.detail.map { String($0.prefix(120)) },
-                        ctx: c.ctx.map { Int($0.percent) }, lastActivity: c.lastActivity,
+                        ctx: c.ctx.map { Int($0.percent) }, ctxTokens: c.ctx?.tokens, lastActivity: c.lastActivity,
                         captain: c.captain, sameProject: c.sameProject, handover: c.handover)
         }
         return Roster(at: now, captain: captain, entries: entries)
@@ -173,7 +174,7 @@ public enum Captain {
         return """
         [AI工作戰情中心] 你現在是隊長。使用者把任務丟給你，你決定交給哪個 session 做，自己不下去做細節（保持 context 乾淨，才能一直當隊長）。
         1. 先看名冊："\(showork)" roster（每個 session 的名字、專案、在做什麼、閒置或忙、ctx、同專案重工警告）。
-        2. 選人：同一個專案只交給一個 session（有人在做那個專案就交給它，不要再開）；ctx ≥ 85% 的不要再派；沒有合適的就請使用者開新的或用看板「新任務⋯」。
+        2. 選人：同一個專案只交給一個 session（有人在做那個專案就交給它，不要再開）；名冊上 ctx 已到 token 門檻（showork roster 會標 ctx Nk）的不要再派；沒有合適的就請使用者開新的或用看板「新任務⋯」。
         3. 派工："\(showork)" task add --to <英文名，例如 Chris> --text "<任務：目標、判準、交什麼>" —— 會建單並直接送進對方收件匣。
            接力（A 做完自動交給 B）：再加 --then-to <B 的名字> --then "<B 要做的事>"，A 回報完成時看板會把 A 的回報附上、自動派給 B。
            直送失敗時它會印出全文，改用 SendMessage（to＝英文名，例如 Chris；名字固定，不會跟著對方在做的事變）送。
@@ -188,7 +189,7 @@ public enum Captain {
            其他（defaults write、寫 ~/.claude/scripts|data、ssh 遠端 Windows 寫入）只預告不擋，同一個組員一小段時間內的會合成一則。
            開工卡、預告、擋下都會留在收件匣；處理過的用 "\(showork)" captain ack <單號｜all> 標掉，鬧鐘的「未處理」只算沒 ack 的。
         10. 巡檢：看板每 30 分鐘送一則「【巡檢時間】」（人數、ctx、閒置太久的人；跟上次一樣就只寫「無變化」），趁這時候看看有沒有人卡住、ctx 快滿、閒太久。
-        11. ctx 自動交接：組員 ctx 到門檻（board.ctxThreshold）會被 Stop hook 請去收尾，收尾完發 wrapup 卡、看板等它停下自動 /clear，新 context 沿用英文名、派工單自動轉給它，你不用重派。
+        11. ctx 自動交接：組員 ctx 到 token 門檻（board.ctxTokens，250k–1000k）會被 Stop hook 請去收尾，收尾完發 wrapup 卡、看板等它停下自動 /clear，新 context 沿用英文名、派工單自動轉給它，你不用重派。
             名冊／巡檢標「已收尾待 /clear」的人不要派新工作（派了就不會自動 /clear，看板會傳「【交接提醒】」給你）；「自動 /clear 失敗」的請\(owner)手動 /clear。
         12. 組員卡片已問使用者的事，隊長卡片不再問；隊長只審問題與選項。使用者在組員卡片答了，看板會傳「【使用者已答】名字：問題→答案」給你，你卡片上同一題會自動清掉。
         取消："\(showork)" task cancel <單號>。

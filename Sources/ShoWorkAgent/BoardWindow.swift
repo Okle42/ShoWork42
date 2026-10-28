@@ -146,8 +146,8 @@ struct BoardView: View {
     @State private var newTask = false
     @State private var reviewOn = Reviewer.shared.enabled
     @State private var autoWrap = CtxGuard.shared.autoWrapUp
-    @State private var ctxThreshold = ContextGuard.threshold
     @State private var ctxTokens = ContextGuard.tokenLimit
+    @State private var ctxPop = false
     @State private var sendBackCard: BoardCard?
     @State private var parkCard: BoardCard?
     @State private var dispatchCard: BoardCard?
@@ -222,24 +222,18 @@ struct BoardView: View {
             .onChange(of: reviewOn) { _, v in Reviewer.shared.enabled = v }
             .help("AI 審核：卡片進「待審」時，請 \(Reviewer.model) 獨立審一次（走你的訂閱額度）")
         HStack(spacing: 2) {
-            SwiftUI.Menu {                          // 門檻可調（10-15 Kang）；10-26 Kang 加 token 線，主要看這條
-                Picker("用量到多少就交接", selection: $ctxTokens) {
-                    ForEach(ContextGuard.tokenChoices, id: \.self) { v in Text("\(v / 1000)k" + (v == 250_000 ? "（建議）" : "")).tag(v) }
-                }
-                .pickerStyle(.inline)
-                Picker("或超過視窗的 %（保險）", selection: $ctxThreshold) {
-                    ForEach(ContextGuard.choices, id: \.self) { v in Text("\(Int(v))%").tag(v) }
-                }
-                .pickerStyle(.inline)
-            } label: { Text(short ? "\(ctxTokens / 1000)k" : "ctx \(ctxTokens / 1000)k") }
-            .menuStyle(.borderlessButton).fixedSize()
-            .onChange(of: ctxThreshold) { _, v in ContextGuard.threshold = v }
+            // 門檻只有一個條件：用到幾 token 就交接（10-29 Kang：拿掉 % 保險，250k–1000k 自由調）
+            Button { ctxPop.toggle() } label: {
+                HStack(spacing: 2) { Text(short ? "\(String(ctxTokens / 1000))k" : "ctx \(String(ctxTokens / 1000))k"); Image(systemName: "chevron.down").font(.caption2) }
+            }
+            .buttonStyle(.borderless).fixedSize()
+            .popover(isPresented: $ctxPop, arrowEdge: .bottom) { CtxLimitPanel(tokens: $ctxTokens) }
             .onChange(of: ctxTokens) { _, v in ContextGuard.tokenLimit = v }
-            .help("點一下改門檻：context 到 \(ctxTokens / 1000)k token（或超過視窗 \(Int(ctxThreshold))%）就通知你；開著自動收尾時，也請那個 AI 收尾")
+            .help("點一下改門檻：AI 記憶量用到 \(String(ctxTokens / 1000))k 就通知你；開著自動收尾時，也請那個 AI 收尾")
             Toggle(short ? "收尾" : "自動收尾", isOn: $autoWrap)
                 .toggleStyle(.switch).controlSize(.small).fixedSize()
                 .onChange(of: autoWrap) { _, v in CtxGuard.shared.autoWrapUp = v }
-                .help("自動收尾：context 到 \(ctxTokens / 1000)k（或 \(Int(ctxThreshold))%）會通知你；開著時，等那個 AI 停下來就請它 commit、規則允許才 push、更新交接")
+                .help("自動收尾：AI 記憶量到 \(String(ctxTokens / 1000))k 會通知你；開著時，等那個 AI 停下來就請它 commit、規則允許才 push、更新交接")
         }
     }
 
@@ -604,5 +598,39 @@ struct NewTaskSheet: View {
                 }
             }
         }
+    }
+}
+
+/// ctx 交接門檻：250k–1000k 一條線自由調（10-29 Kang）
+private struct CtxLimitPanel: View {
+    @Binding var tokens: Int
+    private let presets = [250, 400, 600, 800, 1000]
+
+    var body: some View {
+        let k = Binding<Double>(get: { Double(tokens / 1000) },
+                                set: { tokens = ContextGuard.clamp(Int($0.rounded()) * 1000) })
+        VStack(alignment: .leading, spacing: 10) {
+            Text("AI 記憶量用到多少就交接").font(.headline)
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text(verbatim: "\(tokens / 1000)k").font(.system(size: 28, weight: .semibold)).monospacedDigit()
+                if tokens == ContextGuard.defaultTokenLimit { Text("（建議）").foregroundStyle(.secondary) }
+                Spacer()
+                Stepper("", value: k, in: Double(ContextGuard.tokenRange.lowerBound / 1000)...Double(ContextGuard.tokenRange.upperBound / 1000),
+                        step: Double(ContextGuard.tokenStep / 1000)).labelsHidden()
+            }
+            Slider(value: k, in: Double(ContextGuard.tokenRange.lowerBound / 1000)...Double(ContextGuard.tokenRange.upperBound / 1000),
+                   step: Double(ContextGuard.tokenStep / 1000)) {
+                EmptyView()
+            } minimumValueLabel: { Text("250k").font(.caption) } maximumValueLabel: { Text("1000k").font(.caption) }
+            HStack(spacing: 6) {
+                ForEach(presets, id: \.self) { p in
+                    Button(String(p) + "k") { tokens = p * 1000 }
+                        .controlSize(.small).disabled(tokens == p * 1000)
+                }
+            }
+            Text("只看這一個條件：到了就通知你；開著自動收尾時，等那個 AI 停下來就請它收尾交接。")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(16).frame(width: 320)
     }
 }

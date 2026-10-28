@@ -1144,17 +1144,17 @@ enum OfficeDemo {
     static var captainThread: [CaptainLine] {
         let t = Date()
         return [
-            CaptainLine(id: "d1", at: t.addingTimeInterval(-1500), role: .kang, text: "把 ProjectD 上架做完，客製 NFC 訂購頁一起做", via: "戰情中心"),
-            CaptainLine(id: "d2", at: t.addingTimeInterval(-1480), role: .captain, text: "收到，兩條線並行：\n- **Dora** 繼續 ProjectD 上架\n- 客製訂購頁我開 workflow，三個決策已發到收件匣，你拍板就開工"),
-            CaptainLine(id: "d3", at: t.addingTimeInterval(-900), role: .report, text: "【工作回報】Dora（ProjectD）：重建商品 完成度 92%", via: "AI工作戰情中心"),
+            CaptainLine(id: "d1", at: t.addingTimeInterval(-1500), role: .kang, text: "把 ProjectD 的設定頁做完，匯出功能一起做", via: "戰情中心"),
+            CaptainLine(id: "d2", at: t.addingTimeInterval(-1480), role: .captain, text: "收到，兩條線並行：\n- **Dora** 繼續 ProjectD 設定頁\n- 匯出功能我開 workflow，三個決策已發到收件匣，你拍板就開工"),
+            CaptainLine(id: "d3", at: t.addingTimeInterval(-900), role: .report, text: "【工作回報】Dora（ProjectD）：設定頁 完成度 92%", via: "AI工作戰情中心"),
             CaptainLine(id: "d4", at: t.addingTimeInterval(-600), role: .report, text: "【派工回報 T1022020414】Ethan：完成——794c14b 已 push", via: "AI工作戰情中心"),
-            CaptainLine(id: "d5", at: t.addingTimeInterval(-590), role: .captain, text: "Ethan 的固定英文名已上線，我核對過 origin/main 一致。Dora 商品建到 11 個，有 3 個價格被 Apple 限制調整，建完列表給你看。"),
-            CaptainLine(id: "d6", at: t.addingTimeInterval(-120), role: .kang, text: "年繳打七折可以", via: "終端機"),
+            CaptainLine(id: "d5", at: t.addingTimeInterval(-590), role: .captain, text: "Ethan 的固定英文名已上線，我核對過 origin/main 一致。Dora 設定頁做到 11 項，有 3 項要你決定預設值，做完列表給你看。"),
+            CaptainLine(id: "d6", at: t.addingTimeInterval(-120), role: .kang, text: "預設值照你建議的", via: "終端機"),
         ]
     }
     static var captainTasks: [CaptainTask] {
-        [CaptainTask(id: "T1022021500", from: "x", to: "Dora", project: "ProjectD", text: "ProjectD 上架：重建 15 個訂閱商品並列最終價格表"),
-         CaptainTask(id: "T1022022000", from: "x", to: "Bella", project: "Okle42", text: "客製 NFC 訂購頁：先出三版版型")]
+        [CaptainTask(id: "T1022021500", from: "x", to: "Dora", project: "ProjectD", text: "ProjectD 設定頁：15 個選項與預設值"),
+         CaptainTask(id: "T1022022000", from: "x", to: "Bella", project: "ProjectA", text: "匯出功能：先出三版版型")]
     }
     static let start = Date()
 

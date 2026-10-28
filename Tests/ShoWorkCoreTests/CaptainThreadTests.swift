@@ -12,7 +12,7 @@ struct CaptainThreadTests {
             #"{"type":"user","uuid":"t1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"x","content":"ok"}]}}"#,
             #"{"type":"assistant","uuid":"a2","timestamp":"2026-10-21T18:26:28.054Z","message":{"stop_reason":"end_turn","content":[{"type":"text","text":"🧢 miniKang：提醒\n\n收到，**Dora** 接手"}]}}"#,
             #"{"type":"user","uuid":"p1","origin":{"kind":"peer","name":"AI工作戰情中心","body":"【工作回報】Dora：重建商品\n狀態 working"},"message":{"role":"user","content":"x"}}"#,
-            #"{"type":"user","uuid":"p2","origin":{"kind":"peer","name":"AI工作戰情中心（使用者）","body":"【使用者從看板交辦】年繳打七折可以\n請照隊長守則處理：先看名冊"},"message":{"role":"user","content":"x"}}"#,
+            #"{"type":"user","uuid":"p2","origin":{"kind":"peer","name":"AI工作戰情中心（使用者）","body":"【使用者從看板交辦】預設值照你建議的\n請照隊長守則處理：先看名冊"},"message":{"role":"user","content":"x"}}"#,
             #"{"type":"user","uuid":"m1","isMeta":true,"origin":{"kind":"human"},"message":{"role":"user","content":"meta"}}"#,
             #"{"type":"user","uuid":"c1","origin":{"kind":"human"},"message":{"role":"user","content":"<command-name>/clear</command-name>"}}"#,
             "{壞掉的行",
@@ -22,7 +22,7 @@ struct CaptainThreadTests {
         #expect(t[0].text == "把 ProjectD 上架做完" && t[0].via == "終端機" && t[0].at != nil)
         #expect(t[1].text == "收到，**Dora** 接手")
         #expect(t[2].text == "【工作回報】Dora：重建商品")
-        #expect(t[3].text == "年繳打七折可以" && t[3].via == "戰情中心")
+        #expect(t[3].text == "預設值照你建議的" && t[3].via == "戰情中心")
     }
 
     @Test("不上面板：工具輸入／結果、thinking、AI 之間的自由訊息內文")

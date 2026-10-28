@@ -2023,9 +2023,9 @@ final class OfficeBuilder {
                 tint.setFill(); NSRect(x: fr + 10, y: y + 12, width: 14, height: 14).fill()       // 方塊點（像素風）
                 draw(c.title, at: NSPoint(x: fr + 32, y: y + 4), size: 22, weight: .bold, color: .white, width: W * 0.44 - fr - 36)
                 let prog = c.report?.progress ?? c.review?.progress, conf = c.report?.confidence ?? c.review?.confidence
-                let ctx = c.ctx.map { Int($0.percent) }
+                let ctx = c.ctx.map { x in x.tokens.map { "\($0 / 1000)k" } ?? "\(Int(x.percent))%" }
                 let tok = c.tokens.map { "  🔤\(tokenShort($0.total))" } ?? ""
-                let g = "📈\(prog.map { "\($0)%" } ?? "—")  🎯\(conf.map { "\($0)%" } ?? "—")  🧠\(ctx.map { "\($0)%" } ?? "—")" + tok
+                let g = "📈\(prog.map { "\($0)%" } ?? "—")  🎯\(conf.map { "\($0)%" } ?? "—")  🧠\(ctx ?? "—")" + tok
                 let ctxHot = c.ctx.map { ContextGuard.over($0) } ?? false
                 draw(g, at: NSPoint(x: W * 0.44, y: y + 7), size: 17, weight: .semibold,
                      color: ctxHot ? NSColor.systemRed : NSColor(white: 0.92, alpha: 1), width: W * 0.56 - fr - 6)

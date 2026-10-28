@@ -236,9 +236,11 @@ struct Gauges: View {
             item("📈", prog, "完成度")
             item("🎯", conf, "信心度")
             if let x = card.ctx {
-                Text("🧠 \(Int(x.percent))%").foregroundStyle(ContextGuard.over(x) ? .red : x.percent >= 70 ? .orange : .primary)
-                    .fontWeight(x.percent >= 70 ? .semibold : .regular)
-                    .help("ctx（context 用量）\(Int(x.percent))%")
+                let near = (x.tokens ?? 0) * 10 >= ContextGuard.tokenLimit * 8     // 到門檻的 8 成先轉橘
+                Text("🧠 " + (x.tokens.map { "\($0 / 1000)k" } ?? "\(Int(x.percent))%"))
+                    .foregroundStyle(ContextGuard.over(x) ? .red : near ? .orange : .primary)
+                    .fontWeight(near ? .semibold : .regular)
+                    .help("ctx（context 用量）" + (x.tokens.map { "\($0 / 1000)k／門檻 \(ContextGuard.tokenLimit / 1000)k，" } ?? "") + "\(Int(x.percent))%")
             } else {
                 item("🧠", nil, "ctx")
             }
@@ -346,7 +348,7 @@ struct BubbleDetail: View {
                     Label(CtxGuard.shared.wasSent(c.sessionId) ? "已請它收尾" : "context 快滿，該收尾了", systemImage: "exclamationmark.triangle.fill")
                         .font(.caption).foregroundStyle(.red)
                     Spacer()
-                    Button("收尾") { run(.wrapUp) }.controlSize(.small).help(ContextGuard.wrapUpPrompt(percent: x.percent))
+                    Button("收尾") { run(.wrapUp) }.controlSize(.small).help(ContextGuard.wrapUpPrompt(tokens: x.tokens ?? 0))
                 }
             }
             if reviewing {

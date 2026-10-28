@@ -114,15 +114,22 @@ struct CardTests {
         func card(_ col: BoardColumn, _ reason: String = "") -> BoardCard {
             BoardCard(id: "S", column: col, reason: reason, project: "p", title: "t", pid: 1, sessionId: "S")
         }
-        #expect(ContextGuard.shouldWrapUp(card: card(.done), ctx: c, alreadySent: false, threshold: 85))
-        #expect(ContextGuard.shouldWrapUp(card: card(.review), ctx: c, alreadySent: false, threshold: 85))
-        #expect(!ContextGuard.shouldWrapUp(card: card(.active), ctx: c, alreadySent: false, threshold: 85))            // 等它停下來
-        #expect(!ContextGuard.shouldWrapUp(card: card(.review, "等你回答"), ctx: c, alreadySent: false, threshold: 85)) // 不打斷它問你的問題
-        #expect(!ContextGuard.shouldWrapUp(card: card(.done), ctx: c, alreadySent: true, threshold: 85))              // 只送一次
-        #expect(!ContextGuard.shouldWrapUp(card: card(.done), ctx: ContextUse(percent: 84.9), alreadySent: false, threshold: 85))
-        #expect(ContextGuard.over(ContextUse(percent: 26, tokens: 260_000), threshold: 70, tokenLimit: 250_000))   // 1M 視窗：250k 就收尾
-        #expect(!ContextGuard.over(ContextUse(percent: 60, tokens: 120_000), threshold: 70, tokenLimit: 250_000))  // 200k 視窗：不會被 token 線誤殺
-        #expect(ContextGuard.over(ContextUse(percent: 75, tokens: 150_000), threshold: 70, tokenLimit: 250_000))   // 百分比門檻照舊
-        #expect(ContextGuard.wrapUpPrompt(percent: 86.4).contains("86%") && ContextGuard.wrapUpPrompt(percent: 86).contains("允許才 push"))
+        let c3 = ContextUse(percent: 30, tokens: 300_000)
+        #expect(ContextGuard.shouldWrapUp(card: card(.done), ctx: c3, alreadySent: false, tokenLimit: 250_000))
+        #expect(ContextGuard.shouldWrapUp(card: card(.review), ctx: c3, alreadySent: false, tokenLimit: 250_000))
+        #expect(!ContextGuard.shouldWrapUp(card: card(.active), ctx: c3, alreadySent: false, tokenLimit: 250_000))            // 等它停下來
+        #expect(!ContextGuard.shouldWrapUp(card: card(.review, "等你回答"), ctx: c3, alreadySent: false, tokenLimit: 250_000)) // 不打斷它問你的問題
+        #expect(!ContextGuard.shouldWrapUp(card: card(.done), ctx: c3, alreadySent: true, tokenLimit: 250_000))              // 只送一次
+        // 10-29 Kang：只剩 token 一個條件——百分比再高也不觸發，token 到線才觸發
+        #expect(!ContextGuard.over(c, tokenLimit: 250_000))                                          // 86% 但只有 172k
+        #expect(!ContextGuard.over(ContextUse(percent: 95), tokenLimit: 250_000))                    // 沒有 token 數 ⇒ 不觸發
+        #expect(!ContextGuard.over(ContextUse(percent: 24.9, tokens: 249_999), tokenLimit: 250_000))
+        #expect(ContextGuard.over(ContextUse(percent: 25, tokens: 250_000), tokenLimit: 250_000))
+        #expect(!ContextGuard.over(ContextUse(percent: 90, tokens: 900_000), tokenLimit: 1_000_000))
+        #expect(ContextGuard.over(ContextUse(percent: 100, tokens: 1_000_000), tokenLimit: 1_000_000))
+        // 門檻範圍 250k–1000k、10k 一格；沒設過用 250k；以前的 150k／200k 拉回 250k
+        #expect(ContextGuard.clamp(0) == 250_000 && ContextGuard.clamp(150_000) == 250_000 && ContextGuard.clamp(200_000) == 250_000)
+        #expect(ContextGuard.clamp(437_000) == 440_000 && ContextGuard.clamp(5_000_000) == 1_000_000 && ContextGuard.clamp(1_000_000) == 1_000_000)
+        #expect(ContextGuard.wrapUpPrompt(tokens: 312_345).contains("312k") && ContextGuard.wrapUpPrompt(tokens: 300_000).contains("允許才 push"))
     }
 }

@@ -140,8 +140,8 @@ AX 視窗 → CGWindowID 用私有 `_AXUIElementGetWindow`。
 
 ## ctx 顯示、快滿收尾與自動交接（10-09；10-24 閉環）
 
-- 狀態列腳本（`~/.claude/scripts/statusline.py`）把每個 session 的 `context_window.used_percentage` 存成 `~/.claude/cache/ctx/<sessionId>.json`；卡片在完成度／信心度後面顯示 `ctx N%`（70% 起橘、85% 起紅）。狀態列只在那個 session 有互動時更新，久沒動的 session 先不顯示。
-- 超過 85%：系統通知一次；「ctx 85% 自動收尾」開著（預設）時，等那個 AI 停下來（不在工作中、不在問你問題）就打一段收尾指令進它的 tmux pane：commit、**規則允許才 push**（push 與否交給那個 session 的 AI 依 repo 規則判斷，看板不自己跑 git）、更新交接與記憶。每個 session 只送一次（`board/ctxguard.json`）；卡片上也有手動「收尾」按鈕。
+- 狀態列腳本（`~/.claude/scripts/statusline.py`）把每個 session 的 `context_window.used_percentage` 存成 `~/.claude/cache/ctx/<sessionId>.json`；卡片在完成度／信心度後面顯示 `🧠 Nk`（token 數；到門檻 8 成起橘、到門檻紅）。狀態列只在那個 session 有互動時更新，久沒動的 session 先不顯示。
+- 超過 token 門檻（`board.ctxTokens`，250k–1000k；10-29 Kang 改成只看這一個條件）：系統通知一次；「自動收尾」開著（預設）時，等那個 AI 停下來（不在工作中、不在問你問題）就打一段收尾指令進它的 tmux pane：commit、**規則允許才 push**（push 與否交給那個 session 的 AI 依 repo 規則判斷，看板不自己跑 git）、更新交接與記憶。每個 session 只送一次（`board/ctxguard.json`）；卡片上也有手動「收尾」按鈕。
 - 只有正式 agent 會通知、會打字；`--board-window` 測試視窗不動手。
 - 實測（10-09）：把測試 session 的 ctx 檔改成 90%，1.5 秒內通知＋送出，該 session 自己 commit 兩筆、因沒有 remote 不 push、寫了 HANDOFF.md。
 
@@ -149,7 +149,7 @@ AX 視窗 → CGWindowID 用私有 `_AXUIElementGetWindow`。
 
 Kang 原話：「讓他工作超過 70% 以後就自動收尾…自己準備交接文件，處理好之後自己再接手自己的交接文件」。10-18 起 Stop hook 已會請它收尾，但收尾後沒人 /clear（10-24 早上 Quinn 收尾在 72%，又被派工做到 80%）。現在三段接起來：
 
-1. **收尾**（`~/.claude/scripts/hook_ctx_wrapup.py`，Stop hook）：ctx ≥ `board.ctxThreshold` 時 block、請 AI commit／規則允許才 push／更新交接，最後一步發 **收尾卡** `showork card --kind wrapup --handoff <交接文件絕對路徑> --summary "<接手重點>"`，發完就停。收尾卡一定要帶存在的絕對路徑，否則 CLI 拒收。收尾卡寫 `board/handover/<sid>.json`（`HandoverRecord`，pending；記 claude 行程 pid＝往上第一個有 `~/.claude/sessions/<pid>.json` 的祖先——行程名是版本號 `2.1.310` 不是 claude，10-24 實測）。
+1. **收尾**（`~/.claude/scripts/hook_ctx_wrapup.py`，Stop hook）：ctx ≥ `board.ctxTokens`（token 數，250k–1000k，預設 250k；10-29 起只看這一個條件，% 門檻已拿掉）時 block、請 AI commit／規則允許才 push／更新交接，最後一步發 **收尾卡** `showork card --kind wrapup --handoff <交接文件絕對路徑> --summary "<接手重點>"`，發完就停。收尾卡一定要帶存在的絕對路徑，否則 CLI 拒收。收尾卡寫 `board/handover/<sid>.json`（`HandoverRecord`，pending；記 claude 行程 pid＝往上第一個有 `~/.claude/sessions/<pid>.json` 的祖先——行程名是版本號 `2.1.310` 不是 claude，10-24 實測）。
 2. **自動 /clear**（agent `HandoverClear`，每次刷新）：pending 而且 ① 它最後一張卡就是收尾卡（之後又發卡＝還在做或在問問題）② 不在工作欄 ③ 沒開權限對話框、不是「等你回答」④ 停了 5 秒 ⑤ 鍵盤 60 秒沒動（全系統；隊長 10-24 要求，免得 Kang 正在那個分頁打草稿時被接上 /clear）⇒ 送 `/clear`：
    - tmux：claude 行程的 tty 擁有的 pane，`send-keys`。
    - Ghostty（沒 tmux）：用 OSC 7 nonce 從 tty 探出那個分頁的 AppleScript terminal id，再比對 terminal 標題開頭是它的英文名（`Handover.titleMatches`），兩道都對才用 `input text … to terminal` ＋ `send key "enter"` 送——**不搶焦點、不動視窗**。
@@ -159,7 +159,7 @@ Kang 原話：「讓他工作超過 70% 以後就自動收尾…自己準備交�
 3. **自動接手**（`showork brief`，SessionStart hook，原本就掛著、沒改 settings）：讀 hook JSON 的 session_id／source／cwd，`Handover.claim` 認領——compact＝同一個 sid；clear／startup／resume＝同一個 claude 行程，或同資料夾而原 session 已不在，60 分鐘內。認領後：新 sid 沿用英文名（`board/names/<sid>.json` 的 `handoverFrom` 記舊 sid）、開著的派工單 `toSession` 轉到新 sid、注入「【自動接手】你是 <名字> 的接手，先讀 <HANDOFF>…名字沿用、派工單沿用」。
 - **收尾後又派新工作**：收尾到 /clear 之間使用者送出新指令（UserPromptSubmit，`showork title`）⇒ interrupted，不自動 /clear，看板傳「【交接提醒】」給隊長（沒隊長就系統通知）；ctx 再多 15% Stop hook 會再收一次。
 - **看得到**：卡片完成度列多一個橘色「🔁 已收尾待 /clear」（泡泡也是）；`showork roster` 標出來；隊長巡檢列「已收尾、還沒 /clear：…」；隊長守則第 11 條。
-- 開關與門檻照舊：`board.autoWrapUp`、`board.ctxThreshold`（defaults `ai.okle42.showork`）。測試用：claude 行程帶 `SHOWORK_TEST_CTX=72` 啟動，Stop hook 就當 ctx 是 72%。
+- 開關與門檻：`board.autoWrapUp`、`board.ctxTokens`（defaults `ai.okle42.showork`；工具列「ctx 250k」點開是滑桿，250k–1000k、10k 一格）。測試用：claude 行程帶 `SHOWORK_TEST_CTX=300k` 啟動，Stop hook 就當 ctx 用了 300k token。
 - **Ghostty 送字不搶焦點**（隊長 10-24 的四點疑慮逐條判斷）：Ghostty 1.3 的 AppleScript `input text`／`send key` 是直接送給指定的 terminal surface，不是 System Events 的 keystroke，**不需要把視窗拉到前面**。
   ① 使用者閒置：一律要求鍵盤 60 秒沒動才送。② 前景還原：不會改前景，所以不用還原——實測送前／送後前景都是同一個 App。③ 縮在 Dock／別的桌面空間：照樣送得到、視窗不會被叫出來或搬動，所以不用退回「通知手動」——實測縮在 Dock 的分頁送字後仍是縮著、指令有執行。真正的退回條件是「驗不到目標」（tty 探不到分頁、標題對不上英文名、不在 tmux 也不在 Ghostty）。④ 測試只用自己開的 Ghostty 視窗：等使用者閒 20 秒才開、開完立刻縮到 Dock（只縮名字唯一對得上的新窗）、焦點還給原 App，測完以 terminal id 關掉。
 - 實測（10-24，假專案「專案A」、Haiku 測試 session，`SHOWORK_TEST_CTX=72`）：
@@ -179,7 +179,7 @@ Kang 原話：「讓他工作超過 70% 以後就自動收尾…自己準備交�
 - **名冊**：agent 每次刷新把卡片加工後寫成 `board/roster.json`；`showork roster` 印出每個 session 的名字、專案、欄位、在做什麼、ctx、交給它的派工單。超過 30 秒沒更新就當作 agent 沒在跑。
 - **重工警告**：同一個專案名（往上找 `.git`）有兩個以上 session，卡片上顯示「同專案還有 ⋯」（橘色），名冊也會標。隊長自己、家目錄、看不出專案的不算。
 - **派工單**：`showork task add --to <名字> --text "…"` 建 `board/tasks/<單號>.json`，印出要用 SendMessage 送的全文（第一行「【隊長派工 單號】…」，最後附回報方式）。對方回報用 `showork card --task <單號> …`，CLI 直接更新那張單（working／review／done／blocked；done 帶 `--ask` 算 review）。`showork tasks` 看狀態；`showork task cancel <單號>` 取消。
-- **隊長**：`showork captain` 把目前的 session 登記進 `board/captain.json`，並印出隊長守則（先看名冊、同專案只給一個、ctx ≥ 85% 不派、建單、SendMessage＋notify_when_idle、追蹤；小事自己做；不叫別人做自己權限會被擋的事）。第一次 `task add` 也會自動登記。看板上隊長卡有「隊長」皇冠，列出派出去的單；其他卡列出交給它、還沒結束的單。
+- **隊長**：`showork captain` 把目前的 session 登記進 `board/captain.json`，並印出隊長守則（先看名冊、同專案只給一個、ctx 到 token 門檻不派、建單、SendMessage＋notify_when_idle、追蹤；小事自己做；不叫別人做自己權限會被擋的事）。第一次 `task add` 也會自動登記。看板上隊長卡有「隊長」皇冠，列出派出去的單；其他卡列出交給它、還沒結束的單。
 
 ### 看板的已知耦合（b3 交接，10-09）
 
