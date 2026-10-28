@@ -519,13 +519,25 @@ public enum CityParse {
     }
 
     /// 要不要把這個卷當成一個堆場：/Volumes 底下、不是根目錄、不是系統卷（Recovery、Preboot、VM、Update、時光機快照⋯）
-    public static func includeVolume(path: String, name: String, isRoot: Bool, browsable: Bool) -> Bool {
+    /// 10-28：唯讀的磁碟映像（.dmg 掛起來的安裝檔，Protocol＝Disk Image）本來就是滿的，不是硬碟 ⇒ 不算；
+    /// 容量讀到 0 的也不算（畫不出比例，只會誤報）。真的外接碟、隨身碟（含唯讀但不是映像的）照常。
+    public static func includeVolume(path: String, name: String, isRoot: Bool, browsable: Bool,
+                                     readOnly: Bool = false, isDiskImage: Bool = false, total: Int64? = nil) -> Bool {
         guard !isRoot, browsable, path.hasPrefix("/Volumes/") else { return false }
+        if readOnly && isDiskImage { return false }
+        if let t = total, t <= 0 { return false }
         let n = name.lowercased()
         let system = ["recovery", "preboot", "vm", "update", "xarts", "iscpreboot", "hardware", "macintosh hd", "macintosh hd - data"]
         if system.contains(n) { return false }
         if n.contains("timemachine") || n.contains("time machine") || n.hasPrefix("com.apple.") || n.contains("backups of") { return false }
         return true
+    }
+
+    /// DiskArbitration 的描述看起來是不是磁碟映像：DeviceModel／DeviceProtocol＝「Disk Image」，或 DevicePath 走 IOHDIXController（.dmg 的核心驅動）
+    public static func isDiskImage(model: String?, protocol proto: String?, devicePath: String?) -> Bool {
+        let img = { (s: String?) in s?.caseInsensitiveCompare("Disk Image") == .orderedSame }
+        if img(model) || img(proto) { return true }
+        return devicePath?.contains("IOHDIXController") ?? false
     }
 
     /// 曾經看過的外接碟名稱：現在插著的接在後面（不重複、不改舊順序）
