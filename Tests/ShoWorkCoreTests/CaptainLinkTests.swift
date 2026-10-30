@@ -48,22 +48,23 @@ struct CaptainLinkTests {
 
     func names(_ c: String) -> [String] { CaptainLink.match(c, rules: CaptainLink.rules(LocalFixture.config)).map { ($0.block ? "擋:" : "告:") + $0.name } }
 
-    @Test("② 兩級規則：擋 rm／mv 非暫存區、firebase、上傳、LINE；告 defaults、~/.claude、winbox")
+    @Test("② 兩級規則：擋 rm 非暫存區、firebase、上傳、LINE；告 mv、archive、defaults、~/.claude、winbox")
     func rules() {
         #expect(names("rm -rf build/") == ["擋:rm 刪除（暫存區以外）"])
         #expect(names("rm -f /tmp/x.png").isEmpty)
         #expect(names("rm -rf /private/tmp/claude-501/s/scratchpad/a").isEmpty)
         #expect(names("rm /tmp/a.txt src/main.swift") == ["擋:rm 刪除（暫存區以外）"])          // 有一個不在暫存區就擋
         #expect(names("git rm --cached a.txt").isEmpty)
-        #expect(names("mv a.txt b.txt") == ["擋:mv 到非暫存區"])
+        #expect(names("mv a.txt b.txt") == ["告:mv 到非暫存區"])
         #expect(names("mv a.txt /tmp/trash/").isEmpty)
-        #expect(names("mv \"$TMPDIR/x\" ~/Desktop/x") == ["擋:mv 到非暫存區"])
+        #expect(names("mv \"$TMPDIR/x\" ~/Desktop/x") == ["告:mv 到非暫存區"])
         #expect(names("git mv old.swift new.swift").isEmpty)
         #expect(names("git commit -m \"改 rm 規則、mv 也擋\"").isEmpty)                                  // commit 訊息裡的字不算
         #expect(names("python3 - <<'EOF'\nos.system('rm -rf x')\nEOF").isEmpty)                         // heredoc 內文不算
         #expect(names("firebase deploy --only hosting") == ["擋:firebase 部署"])
-        #expect(names("xcodebuild -scheme App archive -archivePath /tmp/a") == ["擋:App 封裝／上傳 App Store Connect"])
-        #expect(names("xcrun altool --upload-app -f a.ipa") == ["擋:App 封裝／上傳 App Store Connect"])
+        #expect(names("xcodebuild -scheme App archive -archivePath /tmp/a") == ["告:App 封裝（xcodebuild archive）"])
+        #expect(names("xcodebuild -scheme App -configuration Release archive -archivePath build/A.xcarchive") == ["告:App 封裝（xcodebuild archive）"])
+        #expect(names("xcrun altool --upload-app -f a.ipa") == ["擋:App 上傳 App Store Connect"])
         // 10-24 隊長：Sam 的上傳漏擋（BM7NC 之後）
         for c in ["xcodebuild -exportArchive -archivePath /tmp/A.xcarchive -exportOptionsPlist opts.plist -exportPath /tmp/out",
                   "cd 專案A && xcodebuild -exportArchive -archivePath build/A.xcarchive -exportOptionsPlist ExportOptions.plist",
@@ -71,7 +72,7 @@ struct CaptainLinkTests {
                   "xcrun notarytool submit a.zip --wait",
                   "/Applications/Transporter.app/Contents/itms/bin/iTMSTransporter -m upload -f a.itmsp",
                   "bundle exec fastlane ios pilot upload", "fastlane deliver"] {
-            #expect(names(c) == ["擋:App 封裝／上傳 App Store Connect"], "\(c)")
+            #expect(names(c) == ["擋:App 上傳 App Store Connect"], "\(c)")
         }
         #expect(names("xcodebuild -scheme 專案A build").isEmpty && names("xcodebuild -showBuildSettings").isEmpty)
         #expect(names("python3 line_send.py 小明 '晚上見'") == ["擋:LINE 對外傳訊（line_send.py）"])
@@ -98,7 +99,7 @@ struct CaptainLinkTests {
         #expect(names("rm -rf '/private/tmp/WT' >/dev/null 2>&1").isEmpty)
         #expect(names("mv a.txt \"/tmp/WT/\" 2>/dev/null").isEmpty)
         #expect(names("rm -rf ~/專案A 2>/dev/null") == ["擋:rm 刪除（暫存區以外）"])
-        #expect(names("mv a.txt ~/專案A/ 2>/dev/null") == ["擋:mv 到非暫存區"])
+        #expect(names("mv a.txt ~/專案A/ 2>/dev/null") == ["告:mv 到非暫存區"])
     }
 
     @Test("② showork 自己的指令不看；串接時摘要只列命中的那段（BR9R8）")
@@ -200,7 +201,8 @@ struct CaptainLinkTests {
         #expect(!CaptainInbox.authorizes("先不要開 PR", rule: gh))
         #expect(!CaptainInbox.authorizes("都先不要", rule: gh))
         #expect(!CaptainInbox.authorizes("好，現在做", rule: gh))                  // 沒點名
-        #expect(!CaptainInbox.authorizes("刪掉吧", rule: rm))                     // rm／mv 不給事先放行
+        #expect(!CaptainInbox.authorizes("刪掉吧", rule: rm))                     // rm 不給事先放行
+        #expect(CaptainInbox.authorizes("好，上傳 TestFlight", rule: "App 上傳 App Store Connect"))
         #expect(CaptainInbox.usePreapproval(sid: "a", rules: [gh], now: t0) == nil)  // 沒回答過
         CaptainInbox.recordAnswer(sid: "a", answer: "開 PR，用 LINE 通知對方", question: "要開 PR 嗎？", now: t0)
         #expect(CaptainInbox.usePreapproval(sid: "b", rules: [gh], now: t0 + 10) == nil)       // 別的 session 不算

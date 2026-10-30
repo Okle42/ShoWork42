@@ -53,7 +53,7 @@ public enum CaptainLink {
         public init(name: String, block: Bool, pattern: String) { self.name = name; self.block = block; self.pattern = pattern }
     }
 
-    /// 暫存區（rm／mv 到這些地方不擋）
+    /// 暫存區（rm 到這些地方不擋、mv 到這些地方不通知）
     static let temp = #"['"]?(?:/tmp/|/private/tmp/|/private/var/folders/|/var/folders/|\$\{?TMPDIR|\$TMP\b|[^\s;&|]*scratchpad)"#
     static let claudeDir = #"(?:~|\$HOME|\$\{HOME\}|/Users/[^/\s]+)/\.claude/(?:scripts|data)\b"#
 
@@ -64,12 +64,15 @@ public enum CaptainLink {
         Rule(name: "rm 刪除（暫存區以外）", block: true,
              // 重導向（2>/dev/null、>log）不是要刪的目標（10-24 BJ6M2：rm -rf "/tmp/WT" 2>/dev/null 被擋）
              pattern: #"^rm\s+(?:-[a-zA-Z]+\s+)*(?:[^\s;&|]+\s+)*?(?!"# + temp + #")(?!-)(?![0-9&]*[<>])[^\s;&|]+"#),
-        Rule(name: "mv 到非暫存區", block: true,
+        // 10-31 Keng：mv 可以復原，改成只通知不擋（rm 刪了救不回來，照擋）
+        Rule(name: "mv 到非暫存區", block: false,
              pattern: #"^mv\s+(?:[^\n]*?\s)?(?!"# + temp + #")(?![0-9&]*[<>])[^\s]+(?:\s+[0-9&]*[<>]>?\s*\S+)*\s*$"#),
         Rule(name: "firebase 部署", block: true, pattern: #"^(?:npx\s+)?firebase\s+deploy\b"#),
-        Rule(name: "App 封裝／上傳 App Store Connect", block: true,
+        // 10-31 Keng：xcodebuild archive 只是本機打包、不對外，改成只通知；真正會上傳的 -exportArchive／altool 等照擋
+        Rule(name: "App 封裝（xcodebuild archive）", block: false, pattern: #"^xcodebuild\b(?!.*\s-exportArchive\b).*\barchive\b"#),
+        Rule(name: "App 上傳 App Store Connect", block: true,
              // 10-24 隊長：-exportArchive 前面是「-」，原本的 \b(-exportArchive) 永遠比不到 ⇒ Sam 的上傳沒擋到。匯出不論有沒有 upload 都擋
-             pattern: #"^xcodebuild\b.*(?:\barchive\b|\s-exportArchive\b)|^(?:xcrun\s+)?(?:altool\b|notarytool\s+submit\b)|^\S*(?:iTMSTransporter|Transporter)\b|^(?:bundle\s+exec\s+)?fastlane\s+(?:\S+\s+)?(?:deliver|pilot|upload_to_app_store|upload_to_testflight)\b"#),
+             pattern: #"^xcodebuild\b.*\s-exportArchive\b|^(?:xcrun\s+)?(?:altool\b|notarytool\s+submit\b)|^\S*(?:iTMSTransporter|Transporter)\b|^(?:bundle\s+exec\s+)?fastlane\s+(?:\S+\s+)?(?:deliver|pilot|upload_to_app_store|upload_to_testflight)\b"#),
         Rule(name: "LINE 對外傳訊（line_send.py）", block: true, pattern: #"^(?:python3?\s+(?:-\S+\s+)*)?\S*line_send\.py\b"#),
         // 10-24 隊長：Sam 在公開 repo 用 gh 留言／開 PR，開工卡回覆前就送出去了。這裡粗篩，Okle42 私有 repo 免擋的細判在 GHGuard
         Rule(name: "GitHub 公開發言（gh）", block: true,
@@ -83,7 +86,7 @@ public enum CaptainLink {
              pattern: #"^ssh\s+"# + NSRegularExpression.escapedPattern(for: h) + #"\b.*\b(?:Set-|Remove-|New-Item|Rename-|Move-Item|Copy-Item|Stop-|Restart-|Install-|Uninstall-|reg(?:\.exe)?\s+(?:add|delete|import))"#)
     } }
     /// preview.tsv 格式版本（舊格式的檔案會被換成新的預設）
-    static let rulesVersion = "格式 v5"
+    static let rulesVersion = "格式 v6"
 
     public static var rulesFile: URL {
         if let p = ProcessInfo.processInfo.environment["SHOWORK_PREVIEW_RULES"] { return URL(fileURLWithPath: p) }
@@ -444,7 +447,7 @@ public enum CaptainInbox {
 /// 戰情中心回答＝事先放行（10-31 使用者：「我交代你做事還要放行」）。
 /// 使用者在戰情中心按選項／打字回答某個 AI 的問題時，答案裡明說的對外動作（例如「開 PR」「LINE 通知」）
 /// 之後被「擋」規則攔下就直接算放行：同一個 session、30 分鐘內、每種動作一次，照樣寫 releases.jsonl（source＝戰情中心回答）並通知隊長。
-/// 點名這個動作的小句有否定字（不要／先不／別⋯）就不算；沒點名的動作照擋。rm／mv 不在內（刪檔搬檔一律要明確放行）。
+/// 點名這個動作的小句有否定字（不要／先不／別⋯）就不算；沒點名的動作照擋。rm 不在內（刪檔一律要明確放行；mv 10-31 起只通知不擋）。
 public struct Preapproval: Codable, Sendable, Equatable {
     public var at: Date
     public var sid: String
@@ -467,7 +470,7 @@ extension CaptainInbox {
         ("GitHub 公開發言", ["PR", "pull request", "issue", "留言", "GitHub", "發 release", "發布"]),
         ("LINE 對外傳訊", ["LINE", "傳訊", "私訊", "通知"]),
         ("firebase 部署", ["部署", "deploy", "firebase", "上線"]),
-        ("App 封裝／上傳", ["上傳", "送審", "TestFlight", "上架", "archive"]),
+        ("App 上傳", ["上傳", "送審", "TestFlight", "上架"]),
     ]
     static let negations = ["不要", "先不", "別", "不用", "暫緩", "取消", "不准", "禁止", "等一下", "等等", "先等"]
 
