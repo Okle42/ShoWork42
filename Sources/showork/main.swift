@@ -192,7 +192,9 @@ if args.first == "guard-push" {
             let project = CaptainStore.roster()?.entries.first { $0.sessionId == sid }?.project
             let name = NicknameStore.get(sid)?.name ?? String(sid.prefix(8))
             let blocks = hits.filter(\.block), notices = hits.filter { !$0.block }
-            if !blocks.isEmpty, !CaptainInbox.consume(sid: sid, fingerprint: fp, now: now),
+            // 放行單只查一次：consume 會把單記成已用，兩個分支各查一次的話，第一次用掉、第二次查不到又開新單（B3PZF→BQYPM）
+            let released = !blocks.isEmpty && CaptainInbox.consume(sid: sid, fingerprint: fp, now: now)
+            if !blocks.isEmpty, !released,
                let pre = CaptainInbox.usePreapproval(sid: sid, rules: blocks.map(\.name), now: now) {
                 // 戰情中心回答已點名這個動作＝事先放行：記成已放行＋已用、通知隊長，照常往下跑
                 let base = CaptainInbox.waiting(sid: sid, fingerprint: fp) ?? CaptainInboxItem(id: CaptainInbox.newID(.block), kind: .block, at: now, sid: sid, name: name,
@@ -202,7 +204,7 @@ if args.first == "guard-push" {
                    case .success = Peer.send(to: to, text: "【已放行 \(item.id)】\(CaptainLink.label(name, project))：使用者在戰情中心回答「\(pre.answer)」已點名這個動作・\(item.text)", fromName: "AI工作戰情中心（動作預告）") {
                     item.delivered = true; CaptainInbox.save(item)
                 }
-            } else if !blocks.isEmpty, !CaptainInbox.consume(sid: sid, fingerprint: fp, now: now) {
+            } else if !blocks.isEmpty, !released {
                 // 擋下等放行：同一個指令重試不再開新單；第一次立即送隊長（不在線就留在收件匣）
                 var item = CaptainInbox.waiting(sid: sid, fingerprint: fp) ?? CaptainInboxItem(id: CaptainInbox.newID(.block), kind: .block, at: now, sid: sid, name: name,
                                                                                                project: project, kinds: hits.map(\.name), text: CaptainLink.hitSummary(cmd, hs) + (ghWhy.map { "（\($0)）" } ?? ""), fingerprint: fp)
