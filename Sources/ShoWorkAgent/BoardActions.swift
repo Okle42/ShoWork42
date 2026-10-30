@@ -220,6 +220,12 @@ enum BoardActions {
     static func answer(_ c: BoardCard, text: String) -> String {
         let line = text.replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespaces)
         defer { tellCaptain(c, answer: line) }
+        // 10-31：戰情中心的回答本身就是使用者的決定 ⇒ 答「放行」直接放行這個 AI 等著的單；答案點名的對外動作記成事先放行（CaptainInbox.usePreapproval）
+        if line.hasPrefix("放行") {
+            _ = CaptainInbox.release(id: nil, target: c.sessionId, by: "戰情中心", byName: "使用者（戰情中心回答）", source: "戰情中心回答", now: Date())
+        } else {
+            CaptainInbox.recordAnswer(sid: c.sessionId, answer: line, question: c.report?.ask, now: Date())
+        }
         if tmuxPane(of: c.pid) != nil {
             if case .typed = sendBack(c, text: line) { return "已送進「\(c.title)」" }
         }

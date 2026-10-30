@@ -440,3 +440,83 @@ public enum CaptainInbox {
         return d.split(separator: 0x0A).compactMap { try? BoardJSON.decoder.decode(ReleaseRecord.self, from: Data($0)) }
     }
 }
+
+/// 戰情中心回答＝事先放行（10-31 使用者：「我交代你做事還要放行」）。
+/// 使用者在戰情中心按選項／打字回答某個 AI 的問題時，答案裡明說的對外動作（例如「開 PR」「LINE 通知」）
+/// 之後被「擋」規則攔下就直接算放行：同一個 session、30 分鐘內、每種動作一次，照樣寫 releases.jsonl（source＝戰情中心回答）並通知隊長。
+/// 點名這個動作的小句有否定字（不要／先不／別⋯）就不算；沒點名的動作照擋。rm／mv 不在內（刪檔搬檔一律要明確放行）。
+public struct Preapproval: Codable, Sendable, Equatable {
+    public var at: Date
+    public var sid: String
+    public var answer: String
+    public var question: String?
+    public var used: [String] = []        // 已經用掉的規則名
+    public init(at: Date, sid: String, answer: String, question: String?) {
+        self.at = at; self.sid = sid; self.answer = answer; self.question = question
+    }
+}
+
+extension CaptainInbox {
+    public static var preapprovalLog: URL {
+        if let p = ProcessInfo.processInfo.environment["SHOWORK_PREAPPROVAL_LOG"] { return URL(fileURLWithPath: p) }
+        return Captain.dir.appendingPathComponent("permits/preapprovals.json")
+    }
+
+    /// 擋規則 → 答案裡要出現的字（點名這個動作）
+    static let preapprovalWords: [(rule: String, words: [String])] = [
+        ("GitHub 公開發言", ["PR", "pull request", "issue", "留言", "GitHub", "發 release", "發布"]),
+        ("LINE 對外傳訊", ["LINE", "傳訊", "私訊", "通知"]),
+        ("firebase 部署", ["部署", "deploy", "firebase", "上線"]),
+        ("App 封裝／上傳", ["上傳", "送審", "TestFlight", "上架", "archive"]),
+    ]
+    static let negations = ["不要", "先不", "別", "不用", "暫緩", "取消", "不准", "禁止", "等一下", "等等", "先等"]
+
+    /// 這則答案有沒有點名放行這條擋規則：按逗號、分號、句號切成小句，
+    /// 有小句點名、而且點名它的小句都沒有否定字才算（「先開 PR，不通知」＝PR 算、LINE 不算）
+    public static func authorizes(_ answer: String, rule: String) -> Bool {
+        guard let ws = preapprovalWords.first(where: { rule.hasPrefix($0.rule) })?.words else { return false }
+        let clauses = answer.lowercased().split(whereSeparator: { "，,、；;。！!？?\n".contains($0) }).map(String.init)
+        let named = clauses.filter { c in ws.contains { c.contains($0.lowercased()) } }
+        return !named.isEmpty && named.allSatisfy { c in !negations.contains { c.contains($0) } && !c.contains("不") }
+    }
+
+    static func loadPreapprovals() -> [Preapproval] {
+        guard let d = FileManager.default.contents(atPath: preapprovalLog.path) else { return [] }
+        return (try? BoardJSON.decoder.decode([Preapproval].self, from: d)) ?? []
+    }
+    static func savePreapprovals(_ xs: [Preapproval]) {
+        try? FileManager.default.createDirectory(at: preapprovalLog.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if let d = try? BoardJSON.encoder.encode(xs) { try? d.write(to: preapprovalLog, options: .atomic) }
+    }
+
+    /// 戰情中心送出回答時記下（只留 24 小時內）
+    public static func recordAnswer(sid: String, answer: String, question: String?, now: Date) {
+        let xs = loadPreapprovals().filter { now.timeIntervalSince($0.at) < 86400 }
+        savePreapprovals(xs + [Preapproval(at: now, sid: sid, answer: answer, question: question)])
+    }
+
+    /// 被擋的這些規則是不是都已經被這個 session 30 分鐘內的戰情中心回答點名放行；是就記用掉、回那則答案
+    public static func usePreapproval(sid: String, rules: [String], now: Date) -> Preapproval? {
+        guard !rules.isEmpty else { return nil }
+        var xs = loadPreapprovals()
+        guard let k = xs.indices.last(where: { i in
+            let p = xs[i]
+            return p.sid == sid && now.timeIntervalSince(p.at) < releaseTTL && now >= p.at
+                && rules.allSatisfy { r in !p.used.contains(r) && authorizes(p.answer, rule: r) }
+        }) else { return nil }
+        xs[k].used += rules
+        savePreapprovals(xs)
+        return xs[k]
+    }
+
+    /// 事先放行的擋單：直接記成已放行＋已用，寫稽核紀錄
+    @discardableResult
+    public static func releaseByAnswer(_ item: CaptainInboxItem, answer: Preapproval, now: Date) -> CaptainInboxItem {
+        var i = item
+        save(i)
+        _ = release(id: i.id, target: i.sid, by: "戰情中心", byName: "使用者（戰情中心回答：\(answer.answer)）", source: "戰情中心回答", now: now)
+        i = self.item(i.id) ?? i
+        i.used = now; save(i)
+        return i
+    }
+}

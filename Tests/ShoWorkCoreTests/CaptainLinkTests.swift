@@ -3,7 +3,7 @@ import Testing
 @testable import ShoWorkCore
 
 // 隊長連動（T1024033803）：假名、假指令（10-22 規矩）
-@Suite("CaptainLink")
+@Suite("CaptainLink", .serialized)
 struct CaptainLinkTests {
     let t0 = Date(timeIntervalSince1970: 1_792_650_000)
 
@@ -182,6 +182,36 @@ struct CaptainLinkTests {
         CaptainInbox.save(item("BDDDD", .block, sid: "a", at: t0 + 60, fp: "y"))
         #expect(CaptainInbox.ack("all", now: t0 + 80) >= 1 && CaptainInbox.pending(now: t0 + 80).isEmpty)
         #expect(CaptainLink.denyReason(r).contains("隊長轉述小明的決定") && CaptainLink.blockText(r).contains("showork release BAAAA"))
+    }
+
+    @Test("④b 戰情中心回答＝事先放行：點名的動作、30 分鐘、每種一次、否定小句不算、rm 不算")
+    func preapproval() throws {
+        LocalFixture.use()
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("preapp-\(UUID().uuidString)")
+        setenv("SHOWORK_CAPTAIN_INBOX", dir.appendingPathComponent("inbox").path, 1)
+        setenv("SHOWORK_RELEASE_LOG", dir.appendingPathComponent("releases.jsonl").path, 1)
+        setenv("SHOWORK_PREAPPROVAL_LOG", dir.appendingPathComponent("pre.json").path, 1)
+        defer { unsetenv("SHOWORK_CAPTAIN_INBOX"); unsetenv("SHOWORK_RELEASE_LOG"); unsetenv("SHOWORK_PREAPPROVAL_LOG"); try? FileManager.default.removeItem(at: dir) }
+        let gh = "GitHub 公開發言（gh）", line = "LINE 對外傳訊（line_send.py）", rm = "rm 刪除（暫存區以外）"
+        #expect(CaptainInbox.authorizes("開 PR，用 LINE 通知對方", rule: gh))
+        #expect(CaptainInbox.authorizes("開 PR，用 LINE 通知對方", rule: line))
+        #expect(CaptainInbox.authorizes("先開 PR，不通知", rule: gh))              // 小句各自算
+        #expect(!CaptainInbox.authorizes("先開 PR，不通知", rule: line))
+        #expect(!CaptainInbox.authorizes("先不要開 PR", rule: gh))
+        #expect(!CaptainInbox.authorizes("都先不要", rule: gh))
+        #expect(!CaptainInbox.authorizes("好，現在做", rule: gh))                  // 沒點名
+        #expect(!CaptainInbox.authorizes("刪掉吧", rule: rm))                     // rm／mv 不給事先放行
+        #expect(CaptainInbox.usePreapproval(sid: "a", rules: [gh], now: t0) == nil)  // 沒回答過
+        CaptainInbox.recordAnswer(sid: "a", answer: "開 PR，用 LINE 通知對方", question: "要開 PR 嗎？", now: t0)
+        #expect(CaptainInbox.usePreapproval(sid: "b", rules: [gh], now: t0 + 10) == nil)       // 別的 session 不算
+        #expect(CaptainInbox.usePreapproval(sid: "a", rules: [gh, rm], now: t0 + 10) == nil)   // 有沒點名的就整條照擋
+        let p = try #require(CaptainInbox.usePreapproval(sid: "a", rules: [gh], now: t0 + 10))
+        #expect(p.answer.hasPrefix("開 PR"))
+        #expect(CaptainInbox.usePreapproval(sid: "a", rules: [gh], now: t0 + 20) == nil)       // 每種一次
+        #expect(CaptainInbox.usePreapproval(sid: "a", rules: [line], now: t0 + 1801) == nil)   // 30 分鐘過期
+        let i = CaptainInbox.releaseByAnswer(item("BPREA", .block, sid: "a", at: t0 + 10, fp: "f"), answer: p, now: t0 + 10)
+        #expect(i.released == t0 + 10 && i.used == t0 + 10 && CaptainInbox.waiting(sid: "a", fingerprint: "f") == nil)
+        #expect(CaptainInbox.releases().last.map { $0.id == "BPREA" && $0.source == "戰情中心回答" } == true)
     }
 
     @Test("⑤ 鬧鐘：名冊一行摘要；沒變化同指紋")
