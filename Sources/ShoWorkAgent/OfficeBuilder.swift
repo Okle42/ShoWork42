@@ -160,7 +160,7 @@ final class OfficeBuilder {
     /// 微縮模型（10-22 Kang「跟體素太像」）：拿掉 1600 m 大地面，整座城放在一塊有木頭邊的底座上；底座外面由後製畫成桌面
     private lazy var plinth: SCNNode = {
         let m = VoxelMesh(), k = Kit(m: m)
-        let x0: Float = -33, x1: Float = 45, z0: Float = -15, z1: Float = 22   // 含港口水面（x 到 44、z 到 21.2）
+        let x0: Float = -33, x1 = CityBuilder.waterX1 + 1, z0: Float = -15, z1 = CityBuilder.waterZ1 + 1   // 含港口水面（11-01 港口搬到正門對面）
         k.b(.identity, (x0 + x1) / 2, -0.4, (z0 + z1) / 2, x1 - x0, 0.4, z1 - z0, VoxMat.dayNight(TP.groundDay, TP.groundNight))
         k.b(.identity, (x0 + x1) / 2, -1.8, (z0 + z1) / 2, x1 - x0 + 0.6, 1.4, z1 - z0 + 0.6, VoxMat.dayNight(0x9A6A40, 0x4A3220))
         let n = m.node(name: "plinth"); n.categoryBitMask = Self.outdoorMask
@@ -170,6 +170,7 @@ final class OfficeBuilder {
         let dio = s == .diorama
         env.isHidden = dio
         if dio { if plinth.parent == nil { world.addChildNode(plinth) } } else { plinth.removeFromParentNode() }
+        city.setSkylineHidden(dio)            // 周邊高樓在底座外面，微縮模型風格不畫（11-01）
     }
 
     /// 目前套用的天色（nil＝還沒套過）
@@ -288,6 +289,7 @@ final class OfficeBuilder {
         camera.camera!.vignettingPower = 1.0
         omniBase = 700 * l.lamps * ps
         weatherFX.setDark(l.dark)
+        city.setDark(Double(l.dark))          // 周邊高樓的窗戶燈（11-01）：暗下來才亮
         omniDirty = true
         assignOmni()
     }

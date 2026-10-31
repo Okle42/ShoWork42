@@ -9,6 +9,7 @@ import ShoWorkCore
 //   walk  ＝閒晃（休息的 4 人照 WanderPlanner 上頂樓，最多同時 3 人在路上），預設 10 fps
 //   move  ＝每 2.2 秒觸發一次搬家（某層跟上一層對調），24 fps
 //   still ＝什麼都不動、照樣每幀畫（跟「閒置不渲染」比較用）
+//   city  ＝外部空間城市的檢查圖（示範城市資料；夜／日 × 預設視角、俯瞰、正上方、分公司特寫、港口特寫），存到 SHOWORK_BENCH_DIR
 // 只是近似：沒有視窗合成、沒有 SwiftUI 疊層；GPU 時間不算在這個行程的 CPU 裡。
 
 @MainActor
@@ -64,6 +65,7 @@ enum OfficeBench {
                 print("bench patrol 出發 \(b.startPatrol())")
             }
         }
+        if mode == "city" { cityShots(b, v, size: size, tower: tower) }
         let trips = wander.states.values.filter { $0.trip != nil }.count
         print("bench mode=\(mode) fps=\(fps) 秒=\(seconds) 路上的人=\(trips) \(b.stats())"); fflush(stdout)
 
@@ -180,6 +182,57 @@ enum OfficeBench {
         let used = cpu() - c0
         print(String(format: "bench %@：%d 張／%.1f 秒（%.1f fps），CPU %.2f 秒 ＝ 平均 %.1f%%（單核）", mode, frames, secs, Double(frames) / secs, used, used / secs * 100))
         print("bench after", b.stats())
+        exit(0)
+    }
+
+    /// city（11-01）：外部空間城市的檢查圖。示範城市資料（假名字）＋一艘出港的船（定在第 1.5 秒），
+    /// 夜／日 × 預設視角／俯瞰城市／正上方俯視 各存一張到 SHOWORK_BENCH_DIR（預設目前資料夾）；城市名牌的錨點畫成小框＋字（名牌本來是 SwiftUI 疊層，SCNRenderer 畫不到）
+    private static func cityShots(_ b: OfficeBuilder, _ v: SCNView, size: CGSize, tower: TowerPlan) -> Never {
+        BoardWindow.testMode = true
+        let env = ProcessInfo.processInfo.environment
+        let dir = env["SHOWORK_BENCH_DIR"] ?? FileManager.default.currentDirectoryPath
+        var s = CityMonitor.demoState()
+        s.ships = [CityShip(repo: "demo-app", at: Date())]
+        b.updateCity(s, animate: false)
+        guard let dev = MTLCreateSystemDefaultDevice() else { print("沒有 Metal"); exit(1) }
+        let r = SCNRenderer(device: dev, options: nil)
+        r.scene = b.scene
+        let views: [(String, () -> Void)] = [
+            ("default", { b.frameCamera(v) }),
+            ("overview", { b.frameCity(v) }),
+            ("top", { b.placeTest(v, target: SIMD3(0, 0, 4), dist: 125, az: 0, el: 89) }),
+            ("branch", { b.placeTest(v, target: SIMD3(Double(CityBuilder.branchX), 1, -0.5), dist: 26, az: 25, el: 32) }),
+            ("port", { b.placeTest(v, target: SIMD3(Double(CityBuilder.portX) + 4, 0, Double(CityBuilder.streetZ) + 3), dist: 30, az: 12, el: 30) }),
+        ]
+        for night in [true, false] {
+            _ = b.setNight(night)
+            for (name, place) in views {
+                place()
+                _ = b.updateLOD(camera: b.camera.position, target: v.defaultCameraController.target)
+                r.pointOfView = v.pointOfView ?? b.camera
+                let img = r.snapshot(atTime: 1.5, with: size, antialiasingMode: .multisampling4X)
+                // 名牌錨點：投影到畫面上，畫一個小框＋字（看位置關係、有沒有疊在一起）
+                let out = NSImage(size: size)
+                out.lockFocus()
+                img.draw(in: NSRect(origin: .zero, size: size))
+                let attr: [NSAttributedString.Key: Any] = [.font: NSFont.boldSystemFont(ofSize: 12), .foregroundColor: NSColor.white,
+                                                           .backgroundColor: NSColor.black.withAlphaComponent(0.6)]
+                for l in b.cityLabelTargets() {
+                    let p = r.projectPoint(l.anchor.presentation.worldPosition)
+                    guard p.z > 0, p.z < 1 else { continue }
+                    let t = NSAttributedString(string: l.text, attributes: attr)
+                    let ts = t.size()
+                    t.draw(at: NSPoint(x: p.x - ts.width / 2, y: p.y + 4))
+                    NSColor.systemYellow.setFill(); NSRect(x: p.x - 2, y: p.y - 2, width: 4, height: 4).fill()
+                }
+                out.unlockFocus()
+                let path = "\(dir)/\(night ? "night" : "day")-\(name).png"
+                if let tiff = out.tiffRepresentation, let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) {
+                    try? png.write(to: URL(fileURLWithPath: path)); print("bench city shot", path); fflush(stdout)
+                }
+            }
+        }
+        print("bench city", b.stats())
         exit(0)
     }
 }

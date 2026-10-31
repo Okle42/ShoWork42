@@ -6,12 +6,17 @@ import ShoWorkCore
 
 // 外部空間城市的 3D（10-21）：大樓四周地面上的街區，資料來自 CityState（CitySource.swift 收集）。
 //   左邊：貨櫃堆場（一個磁碟一個；層數＝已用比例；≥90% 堆到圍籬外＋倉庫頂紅燈；拔掉＝鐵捲門拉下、路斷掉）
-//   右後：電廠（cool42；冷卻塔的煙量＝溫度、hot 以上變紅）
+//   右後：電廠（AI 5 小時額度）＋油槽（7 天額度）；冷卻塔 10-22 搬上頂樓
+//   右邊、電廠與油槽前方的空地：分公司（ssh 伺服器；11-01 從城外搬進來）——沿電廠那條路往正門方向排一列（x 16.4，z −4.4 起每 2.8 公尺一棟，最多 4 棟），
+//     門朝路、小路接上去；在線亮燈開門、離線熄燈關門
 //   天上：飛艇（iCloud Drive、~/Library/CloudStorage 每個資料夾一艘）
 //   城牆圍住整個街區（防火牆關＝缺口）；前牆上的城門＝對外在聽的埠（敞開的紅門＝已知沒認證的）；後牆內側一排關著的門＝只給本機的埠
-//   城外對街：分公司（ssh 伺服器；在線亮燈、離線熄燈關門）、港口（GitHub；剛 push／fetch 一艘貨船出港，約 4 秒）
+//   城外（11-01 照 Windows 版）：前牆外一條馬路（z 14、寬 5：深色柏油＋白色中央虛線＋路緣白線、兩側墊高的人行道、路燈在近側人行道），
+//     正門（mainGateX）出去一道斑馬線直通對街；港口（GitHub）在正門正對面——棧橋＋龍門吊對準正門，貨船往右開出港（只在水面上，不碰馬路）
+//   最外圈：周邊高樓（灰色素面方塊、高低錯落；夜晚窗戶亮暖黃／冷藍）。鏡頭那側（港口右邊、預設視角鏡頭所在的右前方）留空，對街左邊只有矮樓
 // 風格照大樓（規範 §1.1 色票、素色、低彩度）。省電：整個城市合併成一個 VoxelMesh（一種材質一個 draw call），
-// 內容鍵（不含時間）變了才重建；只有兩種會動：狀態剛變時的旋轉警示燈（4 秒）、出港的船（4 秒），都用 playFor，沒有常駐動畫。
+// 內容鍵（不含時間）變了才重建；周邊高樓跟資料無關、只建一次（本體 3 種灰＋亮燈的窗 2 色＝5 個 draw call；窗戶白天藏起來，日夜切換時才動）。
+// 只有兩種會動：狀態剛變時的旋轉警示燈（4 秒）、出港的船（4 秒），都用 playFor，沒有常駐動畫。
 
 @MainActor
 final class CityBuilder {
@@ -30,7 +35,11 @@ final class CityBuilder {
     // 街區範圍（世界座標，大樓 x ±6、z ±2.8 在中間）
     static let x0: Float = -27, x1: Float = 21, z0: Float = -13, z1: Float = 10
     static let wallH: Float = 1.4, wallT: Float = 0.5
-    static let streetZ: Float = 12            // 城外那條街的中線
+    /// 城外那條街（11-01 改成 Windows 版那種馬路）：中線 z、路面寬（雙向兩線道）、兩側人行道寬
+    static let streetZ: Float = 14, streetW: Float = 5, walkW: Float = 1.2
+    /// 近側人行道（貼著前牆外側）、遠側人行道（對街、港口岸邊）的中線
+    static var nearWalkZ: Float { streetZ - streetW / 2 - walkW / 2 }
+    static var farWalkZ: Float { streetZ + streetW / 2 + walkW / 2 }
     static let maxYards = 4, maxGates = 8, maxDoors = 10, maxBranches = 4, maxShips = 4
     /// 大樓前那條路穿過的城門（正門）x、堆場匯流道 x（電梯井外側，看板柱再外面）、電廠中心
     static let mainGateX: Float = 2.0, trunkX: Float = -9.4
@@ -119,7 +128,8 @@ final class CityBuilder {
     // MARK: 重建
 
     private func rebuild(_ s: CityState) {
-        root.childNodes.forEach { if $0.name != "ship" { $0.removeFromParentNode() } }
+        root.childNodes.forEach { if $0.name != "ship" && $0.name != "skyline" { $0.removeFromParentNode() } }
+        if skyline.parent == nil { root.addChildNode(skyline) }
         beacons = [:]; labels = []; points = [:]
         let m = VoxelMesh(ao: 0), k = Kit(m: m)
         if Self.auditOn { m.log = []; tagged = [:] }
@@ -136,15 +146,14 @@ final class CityBuilder {
         // ── 城牆＋城門 ──
         buildWall(k, s.firewall)
 
-        // 城外的街（城門出去，橫過整個街區）
-        k.b(.identity, (Self.x0 + Self.x1 + 10) / 2, 0, Self.streetZ, Self.x1 - Self.x0 + 14, 0.04, 2.6, road)
+        // ── 城外的馬路（11-01：照 Windows 版——深色路面、白色虛線分隔線、兩側墊高的人行道；正門前一道斑馬線通到對街港口）──
+        buildStreet(k)
         // 大樓前面那條路接到城門，再穿過城門接到城外的街（10-21 稽核：原本停在牆前、城門也沒對準這條路）
         // 主路（廣場→城門）2.4 寬＋中央虛線＋兩側人行道（研究 R2-2-5 地坪分區）
         let mz0 = TD.zF + 4.2, mz1 = Self.z1 - Self.wallT / 2
         k.b(.identity, Self.mainGateX, Self.gy, (mz0 + mz1) / 2, 2.4, 0.04, mz1 - mz0, road)
         for z in stride(from: mz0 + 0.3, to: mz1 - 0.6, by: 2.4) { k.b(.identity, Self.mainGateX, 0.10, z + 0.6, 0.06, 0.01, 1.2, Self.m(TP.FN5)) }
         for s: Float in [-1, 1] { k.b(.identity, Self.mainGateX + s * 1.5, Self.gy, (mz0 + mz1) / 2, 0.6, 0.06, mz1 - mz0, Self.walk) }
-        k.b(.identity, Self.mainGateX, 0, (Self.z1 + Self.streetZ - 1.3) / 2, 1.6, 0.04, Self.streetZ - 1.3 - Self.z1, road)
         // 堆場那幾條路的匯流道：沿電梯井外側（x −9.4）接到大樓前廣場（10-21 稽核：原本每條路停在大樓左後方的空地上，哪裡都沒接到）
         if !s.disks.isEmpty {
             let zTop = Self.z0 + 3.5 - 0.55, zEnd = TD.zF + 0.2
@@ -163,12 +172,12 @@ final class CityBuilder {
         // ── 電廠（右後）──
         buildPower(k, s.grid)
 
-        // ── 分公司（城外對街，左半邊）──
+        // ── 分公司（11-01 搬進圍牆內：電廠、油槽前方的空地，沿電廠那條路排一列，門朝路）──
         for (i, sv) in s.servers.prefix(Self.maxBranches).enumerated() {
-            buildBranch(k, sv, x: -21 + Float(i) * 6.2, road: road)
+            buildBranch(k, sv, z: Self.branchZ(i), road: road)
         }
 
-        // ── 港口（城外對街，右半邊）──
+        // ── 港口（11-01：正門出去、馬路正對面）──
         buildPort(k, s)
 
         // ── 飛艇（天上，後面）──
@@ -184,9 +193,11 @@ final class CityBuilder {
             let ok = { (x: Float) in !gaps.contains { x > $0.0 - 1.0 && x < $0.1 + 1.0 } && !lamps.contains { abs($0 - x) < 2 } }
             guard let x = stride(from: Float(0), through: 6, by: 0.2).lazy.flatMap({ [x0 + $0, x0 - $0] }).first(where: ok) else { continue }
             lamps.append(x)
-            k.b(.identity, x, 0, Self.streetZ - 1.6, 0.08, 1.8, 0.08, Self.m(TP.ST1))
-            k.b(.identity, x, 1.8, Self.streetZ - 1.6, 0.26, 0.1, 0.26, lamp)
-            pool(k, x, Self.streetZ - 0.5, top: 0.056, w: 2.6, d: 1.8)
+            // 立在近側人行道上（人行道頂 0.12），燈頭伸到路面上方一點；光池落在近側車道
+            let lz = Self.nearWalkZ + 0.15
+            k.b(.identity, x, Self.walkTop, lz, 0.08, 1.9, 0.08, Self.m(TP.ST1))
+            k.b(.identity, x, Self.walkTop + 1.9, lz + 0.25, 0.26, 0.1, 0.6, lamp)
+            pool(k, x, Self.streetZ - Self.streetW / 2 + 0.95, top: 0.056, w: 2.6, d: 1.8, street: true)
         }
         // 主路上一盞（城門內側）：夜景的視線路徑＝城外大街一串光點 → 城門 → 主路 → 廣場 → 大樓（研究 R2-4 光島）
         let mlz = Self.z1 - Self.wallT / 2 - 0.75
@@ -241,9 +252,9 @@ final class CityBuilder {
     // MARK: 光池、樹、影子（10-21 主光改版）
 
     /// 路燈底下的兩層光池（外層暗、內層亮＝體素風的光暈；白天跟路面同色）
-    private func pool(_ k: Kit, _ x: Float, _ z: Float, top: Float, w: Float, d: Float) {
-        k.b(.identity, x, top - 0.006, z, w, 0.006, d, Self.poolO)
-        k.b(.identity, x, top + 0.004, z, w * 0.46, 0.006, d * 0.55, Self.poolI)
+    private func pool(_ k: Kit, _ x: Float, _ z: Float, top: Float, w: Float, d: Float, street: Bool = false) {
+        k.b(.identity, x, top - 0.006, z, w, 0.006, d, street ? Self.streetPoolO : Self.poolO)
+        k.b(.identity, x, top + 0.004, z, w * 0.46, 0.006, d * 0.55, street ? Self.streetPoolI : Self.poolI)
     }
 
     private func tree(_ k: Kit, _ x: Float, _ z: Float, base: Float, s: Float = 1, out: Bool = false) {
@@ -268,8 +279,45 @@ final class CityBuilder {
             k.b(.identity, (a + b) / 2, Self.gy, bz, b - a, gtop - Self.gy, 1.2, Self.grass)
             for x in trees { tree(k, x, bz, base: gtop, s: 0.9) }
         }
-        // 城外對街（分公司之間、港口左邊）：一排行道樹
-        for x: Float in [-17.9, -11.7, -5.5, 0.7] { tree(k, x, Self.streetZ + 1.85, base: 0, out: true) }
+        // 城外對街（港口左邊）：遠側人行道上一排行道樹（11-01：分公司搬進城內，這段只剩樹）
+        for x in stride(from: Float(-24), through: Self.waterX0 - 2, by: 5) { tree(k, x, Self.farWalkZ + 0.1, base: Self.walkTop, s: 0.9, out: true) }
+    }
+
+    // MARK: 馬路（11-01，照 Windows 版 office.js buildCity：路面 #4A4F55、白色虛線 #E8E4D8、人行道 #B9B4AA）
+
+    /// 人行道頂面（比路面高一階＝路緣石）；虛線、斑馬線的頂面
+    static let walkTop: Float = 0.12, markTop: Float = 0.07
+    static var asphalt: SCNMaterial { VoxMat.dayNight(0x4A4F55, 0x14181E) }
+    static var marking: SCNMaterial { VoxMat.dayNight(0xE8E4D8, 0x8C9096) }
+    static var curbWalk: SCNMaterial { VoxMat.dayNight(0xB9B4AA, 0x2E353F) }
+    /// 馬路上的光池：白天跟柏油同色（看不出來）、夜晚比柏油亮一點點的暖色（原本的光池底色是淺色路面，放在深色柏油上變成一塊塊地毯）
+    static var streetPoolO: SCNMaterial { VoxMat.dayNight(0x4A4F55, 0x1D1E1F, glow: TP.LT1, emit: (0, 0.015)) }
+    static var streetPoolI: SCNMaterial { VoxMat.dayNight(0x4A4F55, 0x2B2822, glow: TP.LT1, emit: (0, 0.04)) }
+    /// 馬路東西兩端（往外延伸到霧裡）
+    static let streetX0: Float = -64, streetX1: Float = 68
+
+    private func buildStreet(_ k: Kit) {
+        let len = Self.streetX1 - Self.streetX0, cx = (Self.streetX0 + Self.streetX1) / 2
+        let sz = Self.streetZ, half = Self.streetW / 2
+        // 路面
+        k.b(.identity, cx, 0, sz, len, 0.04, Self.streetW, Self.asphalt)
+        // 中央白色虛線（2.4 長、間隔 6；正門前的斑馬線那段不畫）
+        let gx = Self.mainGateX, zebra: Float = 1.6
+        for i in Int((Self.streetX0 - gx) / 6)...Int((Self.streetX1 - gx) / 6) {
+            let x = gx + Float(i) * 6 + 3
+            guard abs(x - gx) > zebra + 1.4, x - 1.2 > Self.streetX0, x + 1.2 < Self.streetX1 else { continue }
+            k.b(.identity, x, Self.markTop - 0.01, sz, 2.4, 0.01, 0.15, Self.marking)
+        }
+        // 兩側路緣的白色實線（離路緣 0.3）
+        for s: Float in [-1, 1] { k.b(.identity, cx, Self.markTop - 0.01, sz + s * (half - 0.3), len, 0.01, 0.1, Self.marking) }
+        // 斑馬線：正門出來直接過馬路到對街港口（條紋沿路的方向排、每條 0.45 寬）
+        for i in 0..<6 { k.b(.identity, gx + (Float(i) - 2.5) * 0.6, Self.markTop - 0.01, sz, 0.42, 0.01, Self.streetW - 1.0, Self.marking) }
+        // 兩側人行道（墊高 0.12）
+        for z in [Self.nearWalkZ, Self.farWalkZ] { k.b(.identity, cx, 0, z, len, Self.walkTop, Self.walkW, Self.curbWalk) }
+        // 正門出去的車道：穿過城門、壓過近側人行道接到路面（頂面比人行道高 5 mm＝斜坡口）
+        let wz = Self.z1 + Self.wallT / 2
+        k.b(.identity, gx, Self.gy, (Self.z1 - Self.wallT / 2 + wz) / 2, Self.gateW, 0.04, Self.wallT, Self.road)
+        k.b(.identity, gx, 0, Self.nearWalkZ, 2.4, Self.walkTop + 0.005, Self.walkW, Self.road)
     }
 
     /// 一塊影子：底面 w×d、高 h 的東西，往太陽光的水平方向延伸 h×(0.58, −0.48)（高度上限 4.5 m：大樓 20 m 不能蓋掉半個城）。
@@ -318,8 +366,8 @@ final class CityBuilder {
         // 電廠、冷卻塔
         shadow(k, Self.powerX, Self.powerZ, 4.4, 3.2, 2.76)
         shadow(k, Self.fuelX, Self.fuelZ, 3.6, 3.6, 3.3)
-        // 分公司（城外）
-        for i in 0..<min(Self.maxBranches, s.servers.count) { shadow(k, -21 + Float(i) * 6.2, Self.streetZ + 4.2, 4.6, 3.6, 3.16, out: true) }
+        // 分公司（城內，電廠前）
+        for i in 0..<min(Self.maxBranches, s.servers.count) { shadow(k, Self.branchX, Self.branchZ(i), Self.branchW + 0.2, Self.branchD + 0.2, Self.branchH + 0.16) }
     }
 
     private func label(_ id: String, _ p: SIMD3<Float>, _ text: String, alert: Bool, hit: (SIMD3<Float>, SIMD3<Float>)? = nil) {
@@ -600,39 +648,55 @@ final class CityBuilder {
 
     // MARK: 分公司
 
-    private func buildBranch(_ k: Kit, _ s: CityServer, x: Float, road: SCNMaterial) {
-        let z: Float = Self.streetZ + 4.2
+    /// 分公司（11-01 從城外對街搬進城內）：電廠（powerX/powerZ）、油槽（fuelX/fuelZ）前方（朝正門那側）的空地。
+    /// 那塊地＝電廠那條路（x 10.95–12.05）和右牆（x 20.75）之間、油槽前緣（z −6.0）到大樓前那排樹（z 7.8）之間；
+    /// 一列沿著電廠那條路往前排（z −4.4、−1.6、1.2、4.0），門朝路、各有一條小路接上去。比原本城外那棟小一號（城內空地有限）
+    static let branchX: Float = 16.4, branchW: Float = 3.2, branchD: Float = 2.3, branchH: Float = 2.6
+    static func branchZ(_ i: Int) -> Float { -4.4 + Float(i) * 2.8 }
+
+    private func buildBranch(_ k: Kit, _ s: CityServer, z: Float, road: SCNMaterial) {
+        let x = Self.branchX, w = Self.branchW, d = Self.branchD, h = Self.branchH
         let on = s.online == true
-        k.b(.identity, x, 0, z, 4.4, 3.0, 3.4, Self.m(TP.WL2))
-        k.b(.identity, x, 3.0, z, 4.6, 0.16, 3.6, Self.m(TP.ST2))
+        let base = Self.gy
+        k.b(.identity, x, base, z, w, h, d, Self.m(TP.WL2))
+        k.b(.identity, x, base + h, z, w + 0.2, 0.16, d + 0.2, Self.m(TP.ST2))
         let win = on ? Self.window : TM.f(TP.FN6)
-        for zz in [z - 1.71, z + 1.71] { for i in 0..<3 { k.b(.identity, x - 1.4 + Float(i) * 1.4, 1.8, zz, 0.8, 0.6, 0.04, win) } }
-        // 門（朝街）：在線＝開著（暗的門洞）；離線＝關上
-        if on { k.b(.identity, x, 0, z - 1.71, 1.0, 1.6, 0.04, TM.f(TP.FN6)) }
-        else { k.b(.identity, x, 0, z - 1.73, 1.1, 1.65, 0.08, Self.m(TP.ST2)) }
+        // 窗：前後兩面各 2 扇（朝正門那面＝預設視角看得到）、背路那面 1 扇
+        for zz in [z - d / 2 - 0.01, z + d / 2 + 0.01] { for i in 0..<2 { k.b(.identity, x - 0.7 + Float(i) * 1.4, base + 1.4, zz, 0.8, 0.6, 0.04, win) } }
+        k.b(.identity, x + w / 2 + 0.01, base + 1.4, z, 0.04, 0.6, 0.8, win)
+        // 門（朝電廠那條路＝−x）：在線＝開著（暗的門洞）；離線＝關上
+        let dx = x - w / 2
+        if on { k.b(.identity, dx - 0.01, base, z, 0.04, 1.6, 0.9, TM.f(TP.FN6)) }
+        else { k.b(.identity, dx - 0.03, base, z, 0.08, 1.65, 1.0, Self.m(TP.ST2)) }
         // 屋頂招牌燈：綠＝在線、灰＝離線／還沒測
-        k.b(.identity, x + 1.6, 3.16, z, 0.3, 0.3, 0.3, on ? TM.glow(0x22C55E, 0.6, 1.8) : TM.f(0x6B7280))
-        k.b(.identity, x, 0, z - 2.4, 1.0, 0.07, 1.3, road)       // 接到街上的小路
-        label(s.id, SIMD3(x, 4.3, z), CityText.server(s), alert: s.alert, hit: (SIMD3(x, 1.5, z), SIMD3(4.6, 3.2, 3.6)))
+        k.b(.identity, x + 1.1, base + h + 0.16, z, 0.3, 0.3, 0.3, on ? TM.glow(0x22C55E, 0.6, 1.8) : TM.f(0x6B7280))
+        // 門口接到電廠那條路的小路（路東緣 powerX＋0.55 → 門）
+        let r0 = Self.powerX + 0.55, r1 = dx - 0.06
+        k.b(.identity, (r0 + r1) / 2, Self.gy, z, r1 - r0, 0.04, 1.0, road)
+        label(s.id, SIMD3(x, base + h + 1.3, z), CityText.server(s), alert: s.alert, hit: (SIMD3(x, base + h / 2, z), SIMD3(w + 0.2, h + 0.4, d + 0.2)))
     }
 
     // MARK: 港口
 
-    static let waterX0: Float = 4, waterX1: Float = 44, waterZ0: Float = CityBuilder.streetZ + 2.2, waterZ1: Float = CityBuilder.streetZ + 9
+    /// 11-01：港口搬到正門（mainGateX）出去、馬路正對面：棧橋＋龍門吊對準正門和斑馬線，水面從棧橋左邊 4 公尺往右延伸（船往右開出港）。
+    /// 水面從遠側人行道外緣開始；深 8 公尺（4 艘船錯開 1.6 公尺排得下）
+    static let portX: Float = mainGateX
+    static let waterX0: Float = portX - 4, waterX1: Float = portX + 32
+    static let waterZ0: Float = streetZ + streetW / 2 + walkW, waterZ1: Float = waterZ0 + 8
 
     private func buildPort(_ k: Kit, _ s: CityState) {
         let water = Self.water
         k.b(.identity, (Self.waterX0 + Self.waterX1) / 2, 0, (Self.waterZ0 + Self.waterZ1) / 2, Self.waterX1 - Self.waterX0, 0.03, Self.waterZ1 - Self.waterZ0, water)   // 大地面頂在 y=0：水面高 3 cm（太近會閃）
         // 碼頭：沿街的岸壁＋伸出去的棧橋
         k.b(.identity, (Self.waterX0 + Self.waterX1) / 2, 0, Self.waterZ0 + 0.3, Self.waterX1 - Self.waterX0, 0.14, 0.6, Self.m(TP.ST2))
-        k.b(.identity, 7.0, 0, Self.waterZ0 + 3.4, 2.0, 0.14, 6.2, Self.m(TP.ST2))
+        k.b(.identity, Self.portX, 0, Self.waterZ0 + 3.4, 2.0, 0.14, 6.2, Self.m(TP.ST2))
         // 另外兩邊的岸（10-21 稽核：原本水面另外兩邊直接貼著地面，像一塊藍色地墊，不像港）
         k.b(.identity, Self.waterX0 - 0.15, 0, (Self.waterZ0 + Self.waterZ1) / 2, 0.3, 0.14, Self.waterZ1 - Self.waterZ0, Self.m(TP.ST2))
         k.b(.identity, (Self.waterX0 + Self.waterX1) / 2, 0, Self.waterZ1 + 0.15, Self.waterX1 - Self.waterX0 + 0.3, 0.14, 0.3, Self.m(TP.ST2))
         // 岸邊龍門吊（10-21 第二輪：原本一根柱子＋一條橫臂＋一條吊索，從正面看像十字架 ⇒ 改成真的貨櫃起重機：
         // 四腳門架跨在棧橋上、吊臂往水面伸出去、上面有機房、吊臂下有台車＋吊索＋吊具；沒有任何「一根柱子穿過一條橫桿」的造型）
         tag(k, "crane")
-        let cx: Float = 7.0, cz: Float = Self.waterZ0 + 2.2
+        let cx: Float = Self.portX, cz: Float = Self.waterZ0 + 2.2
         let steel = Self.m(TP.ST1), hi = Self.m(0xC98B3C)            // 吊臂、機房用琥珀（港口機具色，跟貨櫃強調色同一個材質）
         let legX: [Float] = [cx - 0.8, cx + 0.8], legZ: [Float] = [cz - 0.7, cz + 0.7], legTop: Float = 0.14 + 3.4
         for x in legX { for z in legZ { k.b(.identity, x, 0.14, z, 0.16, 3.4, 0.16, steel) } }        // 四隻腳
@@ -659,10 +723,10 @@ final class CityBuilder {
         }
         // 停著的貨櫃：疊在棧橋末端（10-21 稽核：原本放在 x 4.8 的水面上，整疊浮在水上）
         tag(k, "container-port")
-        for i in 0..<3 { k.b(.identity, 7.0, 0.14 + Float(i) * 0.7, Self.waterZ0 + 5.6, 1.5, 0.66, 0.9, Self.m(Self.containerColors[i])) }
+        for i in 0..<3 { k.b(.identity, Self.portX, 0.14 + Float(i) * 0.7, Self.waterZ0 + 5.6, 1.5, 0.66, 0.9, Self.m(Self.containerColors[i])) }
         tag(k, nil)
-        label("city:port", SIMD3(9.5, 5.4, cz), "港口・GitHub\(s.repos > 0 ? " \(s.repos) 個 repo" : "")", alert: false,
-              hit: (SIMD3(8, 2, cz + 1), SIMD3(6, 4.5, 6)))
+        label("city:port", SIMD3(cx + 2.5, 5.4, cz), "港口・GitHub\(s.repos > 0 ? " \(s.repos) 個 repo" : "")", alert: false,
+              hit: (SIMD3(cx + 1, 2, cz + 1), SIMD3(6, 4.5, 6)))
     }
 
     /// 出港：新的船從棧橋邊往右開出去 4 秒後消失（playFor，不常駐）。不能播（被蓋住、太熱）＝不開船；測試視窗定在第 1.5 秒
@@ -675,14 +739,14 @@ final class CityBuilder {
             let posed = BoardWindow.testMode
             guard animate || posed else { continue }
             let n = makeShip(s.repo)
-            let start = SIMD3<Float>(10.4, 0, Self.waterZ0 + 2.0 + Float(i) * 1.6)   // 10-21 稽核：原本 8.6 船身插進棧橋與起重機腳
+            let start = SIMD3<Float>(Self.portX + 3.4, 0, Self.waterZ0 + 2.0 + Float(i) * 1.6)   // 棧橋右邊（10-21 稽核：太靠左船身插進棧橋與起重機腳）
             n.simdPosition = start
             root.addChildNode(n)
             ships[s.id] = n
             if posed {
                 n.simdPosition = start + SIMD3(1.5 / Float(Self.shipDuration) * 13, 0, 0)
             } else {
-                n.runAction(.sequence([.moveBy(x: 13, y: 0, z: 0, duration: Self.shipDuration), .fadeOut(duration: 0.2), .removeFromParentNode()]), forKey: "sail")   // 水面延伸到 x 44，船不會開上岸
+                n.runAction(.sequence([.moveBy(x: 13, y: 0, z: 0, duration: Self.shipDuration), .fadeOut(duration: 0.2), .removeFromParentNode()]), forKey: "sail")   // 終點 portX＋16.4（船頭再 2 公尺）＜水面右緣 portX＋32，船不會開上岸；只在水面上走、不碰馬路
                 play = max(play, Self.shipDuration + 0.4)
             }
         }
@@ -708,6 +772,92 @@ final class CityBuilder {
     /// 船的名牌（錨點跟著船走）
     var shipLabels: [(id: String, anchor: SCNNode, text: String)] {
         ships.compactMap { id, n in n.childNode(withName: "anchor", recursively: false).map { ("ship:\(id)", $0, "⛴ \(id.split(separator: "@").first ?? "")") } }
+    }
+
+    // MARK: 周邊高樓（11-01，照 Windows 版 office.js buildCity）
+
+    /// 城牆外一圈方塊高樓：灰色素面、高低錯落，夜晚窗戶亮暖黃／冷藍的燈。跟資料無關 ⇒ 只建一次（不跟著內容鍵重建）；
+    /// 大樓本體 3 種灰＝3 個 draw call，亮燈的窗另一個節點 2 種顏色＝2 個 draw call（白天整個藏起來、日夜切換時才動，沒有常駐動畫）
+    private lazy var skyline: SCNNode = Self.makeSkyline()
+    private var skylineWindows: SCNNode? { skyline.childNode(withName: "skyline-windows", recursively: false) }
+
+    /// 日夜（0＝白天、1＝夜晚；日出日落連續）：窗戶燈只在暗下來時出現。OfficeBuilder.applyLights 叫
+    func setDark(_ d: Double) {
+        guard let w = skylineWindows else { return }
+        let o = CGFloat(min(1, max(0, (d - 0.3) / 0.4)))
+        w.isHidden = o <= 0.01
+        w.opacity = o
+    }
+    /// 微縮模型風格：整座城放在底座上，底座外的高樓會懸空 ⇒ 藏起來
+    func setSkylineHidden(_ h: Bool) { skyline.isHidden = h }
+
+    /// 一棟周邊高樓（測試用：檢查不跟城市、馬路、港口重疊）
+    struct SkyBlock: Equatable { var x: Float, z: Float, w: Float, d: Float, h: Float, shade: Int }
+
+    /// 不能蓋高樓的範圍（含 1.5 公尺邊距）：城牆街區＋後面的飛艇、馬路兩側人行道（整條）、港口水面；
+    /// 鏡頭那側（遠側人行道以外、z > waterZ0）只准在港口左邊蓋矮樓，港口右邊（預設視角鏡頭所在的右前方）留空
+    static func skylineSpots() -> [SkyBlock] {
+        var seed: UInt32 = 42
+        func rnd() -> Float { seed = UInt32((UInt64(seed) * 16807) % 2147483647); return Float(seed) / 2147483647 }
+        let m: Float = 1.5
+        let keepOut: [(SIMD2<Float>, SIMD2<Float>)] = [
+            (SIMD2(x0 - m - 4, -23 - m), SIMD2(x1 + m + 4, z1 + m)),                                   // 街區＋飛艇（z −17）
+            (SIMD2(-.infinity, nearWalkZ - walkW / 2 - m), SIMD2(.infinity, farWalkZ + walkW / 2 + m)),   // 馬路＋人行道
+            (SIMD2(waterX0 - m, waterZ0 - m), SIMD2(.infinity, .infinity)),                             // 港口與右前方
+        ]
+        var out: [SkyBlock] = []
+        for gx in -9...9 { for gz in -9...4 {
+            let x = Float(gx) * 9 + (rnd() - 0.5) * 3, z = Float(gz) * 9 - 6 + (rnd() - 0.5) * 3
+            let w = 4 + rnd() * 4, d = 4 + rnd() * 4, skip = rnd() < 0.25
+            let r = hypot(x, z), hr = rnd(), shade = Int(rnd() * 3) % 3
+            guard !skip, r < 85 else { continue }
+            let lo = SIMD2(x - w / 2, z - d / 2), hi = SIMD2(x + w / 2, z + d / 2)
+            guard !keepOut.contains(where: { lo.x < $0.1.x && hi.x > $0.0.x && lo.y < $0.1.y && hi.y > $0.0.y }) else { continue }
+            let front = z > waterZ0
+            let h = front ? 2.5 + hr * 3.5 : 5 + hr * (r < 45 ? 12 : 26)
+            out.append(SkyBlock(x: x, z: z, w: w, d: d, h: h, shade: shade))
+        } }
+        return out
+    }
+
+    /// 灰色三種（Windows 版 0x8E98A3／0x9DA6AE／0x7F8994）；夜晚壓暗成藍灰（看得出量體、不搶大樓）
+    static let skylineShades: [(UInt32, UInt32)] = [(0x8E98A3, 0x2C323B), (0x9DA6AE, 0x333A44), (0x7F8994, 0x262C34)]
+    /// 亮燈的窗：不吃燈光（constant）、不吃電力乘數（別人家的燈，我們停電它照亮）
+    static let skylineLit: [SCNMaterial] = ([0xE8C98F, 0xBFD8FF] as [UInt32]).map { h in
+        let m = SCNMaterial(); m.diffuse.contents = VoxMat.color(h); m.lightingModel = .constant; return m
+    }
+
+    private static func makeSkyline() -> SCNNode {
+        let n = SCNNode(); n.name = "skyline"
+        let m = VoxelMesh(ao: 0), k = Kit(m: m), wm = VoxelMesh(), wk = Kit(m: wm)
+        let mats = skylineShades.map { VoxMat.dayNight($0.0, $0.1) }
+        var seed: UInt32 = 7
+        func rnd() -> Float { seed = UInt32((UInt64(seed) * 16807) % 2147483647); return Float(seed) / 2147483647 }
+        for t in skylineSpots() {
+            k.b(.identity, t.x, 0, t.z, t.w, t.h, t.d, mats[t.shade])
+            // 窗（Windows 版：每 1.6 公尺一層、每 1.2 公尺一格、28% 亮、亮的 80% 暖黃）：朝 +z（鏡頭那邊）＋朝大樓那面
+            var faces: [(SIMD2<Float>, Float)] = [(SIMD2(0, 1), t.w)]                                   // (法線, 那面寬)
+            faces.append((SIMD2(t.x > 0 ? -1 : 1, 0), t.d))
+            if t.z > waterZ0 { faces.append((SIMD2(0, -1), t.w)) }                                    // 對街的矮樓：朝馬路那面也開窗
+            for (nrm, fw) in faces {
+                for yy in stride(from: Float(1.5), to: t.h - 1, by: 1.6) {
+                    for u in stride(from: -fw / 2 + 0.8, to: fw / 2 - 0.5, by: 1.2) {
+                        guard rnd() < 0.28 else { continue }
+                        let mat = skylineLit[rnd() < 0.8 ? 0 : 1]
+                        if nrm.y != 0 {
+                            wk.b(.identity, t.x + u, yy, t.z + nrm.y * (t.d / 2 + 0.02), 0.6, 0.7, 0.04, mat)
+                        } else {
+                            wk.b(.identity, t.x + nrm.x * (t.w / 2 + 0.02), yy, t.z + u, 0.04, 0.7, 0.6, mat)
+                        }
+                    }
+                }
+            }
+        }
+        let body = m.node(name: "skyline-body"); body.categoryBitMask = OfficeBuilder.outdoorMask
+        let win = wm.node(name: "skyline-windows"); win.categoryBitMask = OfficeBuilder.outdoorMask
+        win.isHidden = true
+        n.addChildNode(body); n.addChildNode(win)
+        return n
     }
 
     // MARK: 飛艇
