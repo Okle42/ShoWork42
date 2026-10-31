@@ -14,8 +14,8 @@ namespace ShoWork;
 //   光暈狀態（glows）        Mac 讀 Application Support\ShoWork42\state.json；Windows 的 agent 也存 %LOCALAPPDATA%\ShoWork42\state.json
 //                            （[{Pid,Created,Agent,State}]），一樣讀得到，key 是 claude.exe 的 pid。
 //   teams\、inboxes\         Claude Code 的功能，Windows 應該一樣；Surface 上還沒有，讀不到就空。
-//   board\cards 等           自報／審核／決定：Windows 還沒有寫的人 ⇒ 空。
-//   board\captain.json       隊長：Windows 還沒有 `showork captain` ⇒ 空。
+//   board\cards 等           自報：W5 起 showork card 會寫（showork\Core\CardReport.cs）；審核／決定 Windows 還沒有寫的人 ⇒ 空。
+//   board\captain.json       隊長：W5 起由 `showork captain` 寫。
 //   cache\rate_limits.json   流量、cache\ctx\<sid>.json：由 statusLine 腳本存，Surface 沒有 ⇒ 空（流量表、🧠 不顯示）。
 public sealed class BoardReader
 {
