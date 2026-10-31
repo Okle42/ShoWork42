@@ -81,7 +81,8 @@ static class HookCli
             var buf = new byte[64 << 10];
             int n;
             while (ms.Length < max && (n = s.Read(buf, 0, buf.Length)) > 0) ms.Write(buf, 0, n);
-            return Encoding.UTF8.GetString(ms.ToArray());
+            // Windows PowerShell 用管線餵原生程式時會在前面加 BOM（11-01 Surface 實測：guard-push 因此整段 JSON 解析失敗、不擋）
+            return Encoding.UTF8.GetString(ms.ToArray()).TrimStart('﻿');
         }
         catch { return null; }
     }
