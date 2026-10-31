@@ -124,6 +124,11 @@ public sealed class BoardReader
                 if (Text(f) is { } ib) s.Inbox.AddRange(TeamMessage.DecodeInbox(ib, Path.GetFileNameWithoutExtension(f)));
         }
         s.Reports = ReadAll<SelfReport>("cards");
+        // 英文名＋任務以 showork 的名冊（board\names\<sid>.json，W5 寫）為準：Windows 的 title hook 只掛 UserPromptSubmit，
+        // Claude Code 存的 session 名停在送出指令那一刻（還沒報任務 ⇒ 只有「Alex」，11-01 Surface 實測名牌變「Alex · Alex」）
+        var nicks = ReadAll<NameEntry>("names");
+        s.Sessions = s.Sessions.Select(r => nicks.GetValueOrDefault(r.SessionId) is { Name.Length: > 0 } n
+            ? r with { Name = n.Doing is { Length: > 0 } d ? $"{n.Name}-{d}" : n.Name } : r).ToList();
         s.Reviews = ReadAll<Review>("reviews");
         s.Decisions = ReadAll<Decision>("decisions");
         var rl = Environment.GetEnvironmentVariable("SHOWORK_RATE_LIMITS") is { Length: > 0 } x ? x : Path.Combine(ClaudeDir, "cache", "rate_limits.json");
