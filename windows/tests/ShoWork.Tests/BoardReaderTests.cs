@@ -73,6 +73,19 @@ public class BoardReaderTests : IDisposable
         Assert.Equal("找到了", reader.Cards(reader.Read(), DateTime.UtcNow).Single().Title);
     }
 
+    [Fact] // 名字＋任務以 showork 名冊為準（Claude Code 存的 session 名可能只有「Alex」）；沒名冊照舊
+    public void NameFromRoster()
+    {
+        Put(Path.Combine(Claude, "sessions", "5.json"), $$"""{"pid":5,"sessionId":"S5","cwd":{{J(Home)}},"status":"busy","name":"Alex"}""");
+        Put(Path.Combine(Claude, "sessions", "6.json"), $$"""{"pid":6,"sessionId":"S6","cwd":{{J(Home)}},"status":"busy","name":"Bella"}""");
+        Put(Path.Combine(Support, "board", "names", "S5.json"), """{"name":"Alex","doing":"Windows 實測","at":"2026-11-01T01:31:22Z"}""");
+        var reader = new BoardReader(Claude, Support, Home) { Alive = _ => true };
+        var cards = reader.Cards(reader.Read(), DateTime.UtcNow).ToDictionary(c => c.SessionId);
+        Assert.Equal("Alex-Windows 實測", cards["S5"].Name);
+        Assert.Equal("Bella", cards["S6"].Name);
+        Assert.Equal(("Alex", "Windows 實測"), OfficeNames.Assign(cards.Values)[cards["S5"].Id]);
+    }
+
     [Fact] // 增量讀 cwd：第二次只讀新增的行，沒寫完的半行等下次
     public void IncrementalCwds()
     {

@@ -548,3 +548,10 @@ public static class Board
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
     };
 }
+
+/// showork 名冊（board\names\<sid>.json）：{"name":"Alex","doing":"…","at":"…"}，寫的人是 showork\Core\Nickname.cs
+public sealed record NameEntry
+{
+    public string Name { get; init; } = "";
+    public string? Doing { get; init; }
+}
