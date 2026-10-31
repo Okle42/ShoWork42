@@ -14,8 +14,9 @@ namespace ShoWork;
 ///   ShoWorkAgent.exe --install-autostart | --uninstall-autostart     HKCU Run
 ///   ShoWorkAgent.exe --status
 ///   ShoWorkAgent.exe --board-dump                戰情中心看板目前的卡片（JSON，唯讀，不開視窗；比照 Mac 的 --board-dump）
-///   ShoWorkAgent.exe --board-window [--board-demo] [--size 820x700] [--shot a.png [--exit-after-shot]] [--topmost]
-///                                                只開戰情中心視窗（不開 pipe、不發光，比照 Mac）；--board-demo 用固定的示範卡片（截圖驗收）
+///   ShoWorkAgent.exe --board-window [--board-demo] [--board-tower|--board-cards] [--size 820x700] [--shot a.png [--exit-after-shot]] [--topmost]
+///                                                只開戰情中心視窗（不開 pipe、不發光，比照 Mac）；--board-demo 用固定的示範卡片（截圖驗收）；
+///                                                --board-tower 一開就看 3D 大樓（W6，WebView2）
 /// W0 debugging:
 ///   ShoWorkAgent.exe --console-hwnd <pid> <outfile>   write the console window HWND of process <pid>
 ///   ShoWorkAgent.exe --glow <hwnd> [working|done|input] [seconds]   glow around that window
@@ -110,7 +111,8 @@ static class Program
         if (Arg("--size") is { } sz && sz.Split('x') is [var w, var h] && int.TryParse(w, out var wi) && int.TryParse(h, out var hi)) size = new Size(wi, hi);
         var opt = new BoardForm.Options(
             Demo: args.Contains("--board-demo") || Environment.GetEnvironmentVariable("SHOWORK_BOARD_DEMO") is "1",
-            Size: size, Shot: Arg("--shot"), ExitAfterShot: args.Contains("--exit-after-shot"), TopMost: args.Contains("--topmost"));
+            Size: size, Shot: Arg("--shot"), ExitAfterShot: args.Contains("--exit-after-shot"), TopMost: args.Contains("--topmost"),
+            Tower: args.Contains("--board-tower") ? true : args.Contains("--board-cards") ? false : null);
         CatchUiErrors(boardOnly: true);
         ApplicationConfiguration.Initialize();
         Application.Run(new BoardForm(opt));
@@ -125,7 +127,7 @@ static class Program
         Application.ThreadException += (_, e) =>
         {
             var st = e.Exception.StackTrace ?? "";
-            bool board = boardOnly || new[] { "BoardForm", "IslandCardView", "IslandArt", "KuboArt", "UsageBar" }.Any(st.Contains);
+            bool board = boardOnly || new[] { "BoardForm", "IslandCardView", "IslandArt", "KuboArt", "UsageBar", "ViewSwitch", "OfficeHost", "WebView2" }.Any(st.Contains);
             Log.Note($"UI exception board={board}: {e.Exception}");
             if (board) BoardForm.CloseAfterError();
         };
