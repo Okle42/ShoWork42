@@ -9,6 +9,27 @@
 | W2 | 設定視窗（三種狀態同一頁）；六種光芒；動態島（系統匣）；全螢幕邊緣光 | ✅（見 W2W3-結果.md） |
 | W3 | 自動排版（每台螢幕各自排，Ctrl+Alt+L） | ✅（Windows 預設關） |
 | W4 | 打包單一 exe（ShoWork42.exe 內含 runtime／ShoWork42-small.exe），雙擊安裝、「設定 > 應用程式」解除安裝 | ✅（見 W2W3-結果.md 的 W4 一節） |
+| W5 | hook 端：卡片、閘門、放行（`showork brief／card／title／guard-push／preview-check／names／captain／release`，Mac 版移植，資料檔格式相同） | 🟡 macOS 上單元測試＋跟 Mac 版 preview-check 逐條比對一致；**Windows 真機都還沒跑過**（見下） |
+
+### W5：hook 端（卡片、閘門、放行）
+
+邏輯在 `showork\Core\`（不碰 WinForms、不呼叫 Win32），子指令在 `showork\HookCli.cs`；測試 `tests\ShoWork.Tests\HookTests.cs` 在 macOS 上跑。
+安裝器（`ShoWork.Win\InstallerHooks.cs`）多裝三組 hook：SessionStart → `brief`、UserPromptSubmit → `title`、PreToolUse(Bash) → `guard-push`（都不 async）；
+舊版裝過的升級時只換掉 ShoWork 自己的 hook 組，卸載照樣回到安裝前的位元組。
+資料都在 `%LOCALAPPDATA%\ShoWork42\board\`：`cards\`、`names\`、`captain-inbox\`、`captain.json`、`permits\releases.jsonl`、`permits\preapprovals.json`、`guard\preview.tsv`、`guard\pushes.jsonl`，
+欄位與時間格式跟 Mac 一樣。測試用的路徑變數同 Mac：`SHOWORK_CAPTAIN_INBOX`、`SHOWORK_RELEASE_LOG`、`SHOWORK_PREAPPROVAL_LOG`、`SHOWORK_PREVIEW_RULES`、`SHOWORK_LOCAL_CONFIG`、`SHOWORK_CLAUDE_DIR`，外加 `SHOWORK_HOME`。
+
+**沒在 Windows 真機驗證過的**（都只在 macOS 上用 `dotnet` 跑過）：
+- 整條 hook 流程（Git Bash 跑 showork.exe、stdin 的 hook JSON、stdout 的中文、`CLAUDE_CODE_SESSION_ID` 在 Bash 工具裡有沒有）。
+- 寄給隊長（`Peer`）：Windows 版 Claude Code 的 `messagingSocketPath` 長什麼樣子沒看過；`\\.\pipe\…` 當 named pipe、其他當 AF_UNIX socket。連不上就單子留在收件匣（delivered=false），新隊長跑 `showork captain` 會看到。
+- NativeAOT 版 showork.exe（Mac 上只做到 build 時 AOT 分析器 0 警告、trimmed publish 0 警告）。
+- git／gh 從 PATH 找 `git.exe`／`gh.exe`；`cd /c/Users/…` 這種 Git Bash 路徑換成 `C:/Users/…`。
+
+**跟 Mac 不同、刻意的**：`title` 不帶 `terminalSequence`、做完時也不補寫視窗標題（W1 的 WT 分頁判斷靠主控台標題）；只輸出 `sessionTitle`＋`additionalContext`。
+`brief` 沒有自動接手、`card --kind wrapup` 只存卡片（沒有自動 /clear）。`showork.exe` 也算 showork 自己的指令（不預告）。
+規則清單照 Mac：Windows 的暫存區（`%TEMP%`、`C:\Users\…\AppData\Local\Temp`）**不算**暫存區，rm 到那裡會被擋；要放寬改 `preview.tsv`。
+
+**還沒做**：permit（收件匣按允許）、事先放行的「回答」UI（Windows 看板還不寫 `preapprovals.json`，只會讀與用掉）、預告合併送隊長（`notice` 只進收件匣）、roster／task／b1、自動交接。
 
 ## 做法（對照 macOS 版）
 

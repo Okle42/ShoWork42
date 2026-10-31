@@ -1,11 +1,12 @@
 // showork.exe — the tiny command every adapter (Claude Code hook) calls.
 //   showork emit <working|done|input|clear> [--agent claude] [--pid N]
 //   showork console <pid> [<pid>…]      (for the agent) print "pid<TAB>console hwnd<TAB>console title" per pid
+//   showork brief|card|title|guard-push|preview-check|names|captain|release   戰情中心的 hook 端（W5，見 HookCli.cs）
 //
 // Contract with the AI tools that call us (hooks): this must NEVER slow them down or fail them.
 //   • always exits 0, prints nothing on success
-//   • gives up after 200 ms if the agent isn't there (a missing pipe returns at once)
-//   • never reads stdin (hook JSON may be large; we don't need it)
+//   • emit gives up after 200 ms if the agent isn't there (a missing pipe returns at once)
+//   • emit never reads stdin (hook JSON may be large; we don't need it); brief／title／guard-push do (they need session_id, prompt, command)
 using System.Runtime.InteropServices;
 using System.Text;
 using ShoWork;
@@ -18,6 +19,7 @@ static class Cli
     {
         try
         {
+            if (args.Length >= 1 && HookCli.Handles(args[0])) return HookCli.Run(args);
             if (args.Length >= 2 && args[0] == "emit") Emit(args);
             else if (args.Length >= 2 && args[0] == "console") return Consoles(args);
         }

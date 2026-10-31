@@ -14,6 +14,10 @@
     <Compile Include="..\..\ShoWork.Win\Board\*.cs" LinkBase="Board" />
     <Compile Include="..\..\ShoWork.Win\WorkState.cs" Link="WorkState.cs" />
     <Compile Include="..\..\Shared\Wire.cs" Link="Wire.cs" />
+    <!-- W5 hook 端（showork card／title／guard-push）：純邏輯都在 showork\Core，HookCli 只讀寫 stdin／stdout -->
+    <Compile Include="..\..\showork\Core\*.cs" LinkBase="Hooks" />
+    <Compile Include="..\..\showork\HookCli.cs" Link="Hooks\HookCli.cs" />
+    <Compile Include="..\..\ShoWork.Win\InstallerHooks.cs" Link="InstallerHooks.cs" />
   </ItemGroup>
 
   <ItemGroup>
