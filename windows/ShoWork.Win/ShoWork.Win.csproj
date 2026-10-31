@@ -33,6 +33,25 @@
     <EmbeddedResource Include="$(PackShowork)" LogicalName="showork.exe" Condition="'$(PackShowork)' != ''" />
   </ItemGroup>
 
+  <!-- W6 3D office tower: WebView2 (Win11 ships the runtime; missing runtime falls back to the card view) -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4314.35" />
+  </ItemGroup>
+  <!-- the package always references its WPF wrapper too (WindowsBase 4 vs 5 warning, ~extra dll in the output);
+       this is a WinForms app, drop it -->
+  <Target Name="DropWebView2Wpf" BeforeTargets="ResolveAssemblyReferences">
+    <ItemGroup>
+      <Reference Remove="@(Reference)" Condition="'%(Filename)' == 'Microsoft.Web.WebView2.Wpf'" />
+    </ItemGroup>
+  </Target>
+  <!-- the page (three.js r170 vendored, no CDN): copied next to the exe for normal builds, and embedded so the
+       single-file / installed exe can extract it to %LOCALAPPDATA%\ShoWork42\office-web\ (OfficeHost.WebFolder) -->
+  <ItemGroup>
+    <None Remove="Board\Web\**" />
+    <Content Include="Board\Web\**" Link="Web\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Never" />
+    <EmbeddedResource Include="Board\Web\**" LogicalName="Web/$([System.String]::Copy('%(RecursiveDir)').Replace('\','/'))%(Filename)%(Extension)" />
+  </ItemGroup>
+
   <!-- Release: replace the copied .NET showork.exe with the native one. Without VS Build Tools this only warns
        and the .NET build stays (it works, it is just ~70 ms slower per hook). -->
   <Target Name="NativeShowork" AfterTargets="Build" Condition="'$(Configuration)' == 'Release' And '$(SkipNativeShowork)' != 'true' And '$(PackShowork)' == ''">
