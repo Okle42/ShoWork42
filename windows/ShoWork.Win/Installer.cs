@@ -66,5 +66,22 @@ static partial class Installer
             File.Copy(f, tmp, overwrite: true);
             File.Move(tmp, Path.Combine(to, name), overwrite: true);   // never a half-copied binary
         }
+        // W6 office tower: the page (Web\) and WebView2Loader.dll (runtimes\win-*\native\) live in subfolders of a normal build
+        // (the packed single exe carries both inside, so these folders only exist for dev builds)
+        foreach (var sub in new[] { "Web", "runtimes" })
+            if (Directory.Exists(Path.Combine(from, sub))) CopyTree(Path.Combine(from, sub), Path.Combine(to, sub));
+    }
+
+    static void CopyTree(string from, string to)
+    {
+        Directory.CreateDirectory(to);
+        foreach (var f in Directory.GetFiles(from))
+        {
+            var name = Path.GetFileName(f);
+            var tmp = Path.Combine(to, "." + name + ".new");
+            File.Copy(f, tmp, overwrite: true);
+            File.Move(tmp, Path.Combine(to, name), overwrite: true);
+        }
+        foreach (var d in Directory.GetDirectories(from)) CopyTree(d, Path.Combine(to, Path.GetFileName(d)));
     }
 }

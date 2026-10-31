@@ -10,9 +10,10 @@ namespace ShoWork;
 /// 戰情中心視窗（唯讀版）：部門島卡片格＋工具列的帳號流量。Mac 版 BoardWindow.swift／IslandView.swift 的移植。
 /// 不做會動到別的東西的按鈕（新任務、交給隊長、AI 審核、自動收尾、退回、放行、丟待辦），也不跳到終端機視窗。
 /// 每 1.5 秒重讀一次看板（同 Mac），沒變就不重畫；島的動畫 8 fps，只在有人在動、視窗看得到、沒開「減少動態效果」時跑。
+/// W6：左上「卡片／大樓」切換；大樓＝WebView2＋three.js（OfficeHost），WebView2 Runtime 不在或壞掉就退回卡片、切換鈕變灰。
 sealed class BoardForm : Form
 {
-    public sealed record Options(bool Demo = false, Size? Size = null, string? Shot = null, bool ExitAfterShot = false, bool TopMost = false);
+    public sealed record Options(bool Demo = false, Size? Size = null, string? Shot = null, bool ExitAfterShot = false, bool TopMost = false, bool? Tower = null);
 
     static BoardForm? instance;
 
@@ -38,6 +39,20 @@ sealed class BoardForm : Form
     List<Island> islands = new();
     string signature = "";
     bool reading, shown;
+
+    // MARK: 大樓檢視（W6）
+    readonly ViewSwitch switcher;
+    OfficeHost? office;
+    bool tower;                                     // 現在看大樓
+    TowerRegistry? registry;                        // 樓層號名冊（board\tower.json；示範資料只放記憶體）
+    List<BoardCard> lastCards = new();
+    string officeJson = "";
+    DateTime officeAt;                              // 上次組大樓的時間（資料沒變也每分鐘重組一次：2 小時降樓要看時間）
+    Panel? detail;                                  // 點角色後浮在大樓上的那張卡（沿用 IslandCardView）
+    IslandCardView? detailView;
+    string? detailId;
+    static string ViewPrefPath => Path.Combine(Wire.SupportDir, "board", "board-view.txt");
+    static string RegistryPath => Path.Combine(Wire.SupportDir, "board", "tower.json");
 
     public BoardTheme Theme { get; private set; } = BoardTheme.Current();
     public BoardFonts Fonts { get; private set; } = new();
@@ -66,6 +81,9 @@ sealed class BoardForm : Form
         scroller.Scroll += (_, _) => AnimateTick();
         scroller.MouseWheel += (_, _) => AnimateTick();
         usage = new UsageBar(this);
+        switcher = new ViewSwitch(this);
+        switcher.Changed += t => SetTower(t, remember: true);
+        Controls.Add(switcher);
         Controls.Add(usage);
         Controls.Add(scroller);
         ApplyTheme();
@@ -112,6 +130,11 @@ sealed class BoardForm : Form
         base.OnShown(e);
         shown = true;
         Invalidate(true);                           // OnHandleCreated 改過大小：第一次畫的時候可能還是舊大小
+        // 一開始看哪個：--board-tower／SHOWORK_BOARD_VIEW=tower|cards（測試）＞上次選的＞卡片
+        bool want = opt.Tower ?? (Environment.GetEnvironmentVariable("SHOWORK_BOARD_VIEW") is { Length: > 0 } ev ? ev == "tower" : ReadViewPref());
+        switcher.Enabled = OfficeHost.RuntimeVersion != null;
+        if (!switcher.Enabled) Tips.SetToolTip(switcher, "這台電腦沒有 WebView2 Runtime，只能看卡片（Windows 11 內建；Windows 10 要另外裝）");
+        if (want) SetTower(true, remember: false);
         Log.Note($"BOARD open demo={opt.Demo} dpi={DeviceDpi} size={Size} client={ClientSize} reduce={ReduceMotion}");
         Refresh_();
         refresh.Start();
@@ -140,10 +163,15 @@ sealed class BoardForm : Form
         float s = S;
         int pad = (int)(16 * s);
         int w = Math.Max(0, ClientSize.Width - pad * 2);
-        int uh = usage.HeightFor(w);
-        usage.Bounds = new Rectangle(pad, (int)(12 * s), w, uh);
-        int top = usage.Bottom + (int)(12 * s);
+        var sw = switcher.PreferredSize;
+        switcher.Bounds = new Rectangle(pad, (int)(12 * s), sw.Width, sw.Height);
+        int uw = Math.Max(0, w - sw.Width - (int)(12 * s));
+        int uh = usage.HeightFor(uw);
+        usage.Bounds = new Rectangle(switcher.Right + (int)(12 * s), (int)(12 * s), uw, uh);
+        int top = Math.Max(usage.Bottom, switcher.Bottom) + (int)(12 * s);
         scroller.Bounds = new Rectangle(pad, top, w, Math.Max(0, ClientSize.Height - top - pad));
+        if (office != null) office.View.Bounds = scroller.Bounds;
+        LayoutDetail();
         LayoutGrid();
     }
 
@@ -239,9 +267,11 @@ sealed class BoardForm : Form
     void Apply(List<BoardCard> cards, RateLimits? limits, string sig)
     {
         if (IsDisposed) return;
-        if (sig == signature) { usage.Set(limits, islands.Count); Retime(); return; }
+        lastCards = cards;
+        if (sig == signature) { usage.Set(limits, islands.Count); UpdateOffice(force: false); Retime(); return; }
         signature = sig;
         islands = Islands.Build(cards);
+        UpdateOffice(force: true);
         // 同一座島沿用同一個控制項（影分身出現／離開的時間記在裡面）
         var old = views.ToDictionary(v => v.Project, StringComparer.OrdinalIgnoreCase);
         var next = new List<IslandCardView>();
@@ -262,12 +292,124 @@ sealed class BoardForm : Form
         Log.Note($"BOARD apply islands={islands.Count} cards={cards.Count} anim={anim.Enabled} visible={visibleOnScreen}");
     }
 
+    // MARK: 大樓（W6）
+
+    static bool ReadViewPref() { try { return File.Exists(ViewPrefPath) && File.ReadAllText(ViewPrefPath).Trim() == "tower"; } catch { return false; } }
+    static void WriteViewPref(bool t)
+    {
+        try { Directory.CreateDirectory(Path.GetDirectoryName(ViewPrefPath)!); File.WriteAllText(ViewPrefPath, t ? "tower" : "cards"); } catch { }
+    }
+
+    /// 切換卡片／大樓。大樓第一次打開才建 WebView2；不能用就留在卡片
+    void SetTower(bool on, bool remember)
+    {
+        if (on && (OfficeHost.RuntimeVersion == null || office?.Failed == true)) on = false;
+        if (remember) WriteViewPref(on);
+        tower = on;
+        switcher.Tower = on;
+        if (on && office == null)
+        {
+            office = new OfficeHost();
+            office.Selected += id => { try { BeginInvoke(() => ShowDetail(id)); } catch { } };
+            office.Broken += why => { try { BeginInvoke(() => OfficeBroken(why)); } catch { } };
+            office.View.Bounds = scroller.Bounds;
+            Controls.Add(office.View);
+            office.View.BringToFront();
+            office.Start();
+        }
+        if (office != null) office.View.Visible = on && visibleOnScreen;
+        scroller.Visible = !on;
+        if (!on) ShowDetail(null);
+        UpdateOffice(force: true);
+        Retime();
+        Log.Note($"BOARD view={(on ? "tower" : "cards")}");
+    }
+
+    void OfficeBroken(string why)
+    {
+        if (IsDisposed) return;
+        switcher.Enabled = false;
+        Tips.SetToolTip(switcher, "大樓畫面打不開，先看卡片（" + why + "）");
+        SetTower(false, remember: false);
+        if (office != null) { Controls.Remove(office.View); office.Dispose(); }
+    }
+
+    /// 卡片 → 大樓 JSON，內容變了才推；資料沒變時每分鐘重組一次（2 小時降樓要看時間）
+    void UpdateOffice(bool force)
+    {
+        if (!force && DateTime.UtcNow - officeAt < TimeSpan.FromMinutes(1)) return;
+        officeAt = DateTime.UtcNow;
+        registry ??= opt.Demo ? new TowerRegistry() : TowerRegistry.Decode(ReadText(RegistryPath));
+        var colors = new Dictionary<string, string>
+        {
+            ["working"] = Hex(GlowWindow.ColorOf(WorkState.Working)), ["waiting"] = Hex(GlowWindow.ColorOf(WorkState.Input)),
+            ["finished"] = Hex(GlowWindow.ColorOf(WorkState.Done)),
+        };
+        var (snap, dirty) = OfficeScene.Build(lastCards, registry, DateTime.UtcNow, colors: colors, reduceMotion: ReduceMotion);
+        if (dirty && !opt.Demo)
+        {
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(RegistryPath)!);
+                var tmp = RegistryPath + $".{Environment.ProcessId}.tmp";
+                File.WriteAllText(tmp, registry.Encode());
+                File.Move(tmp, RegistryPath, overwrite: true);
+            }
+            catch (Exception x) { Log.Note($"OFFICE registry save failed {x.Message}"); }
+        }
+        if (detailId != null) ShowDetail(detailId);             // 細節卡跟著資料更新（人走了就收掉）
+        officeJson = OfficeScene.Json(snap);
+        office?.Push(officeJson);                               // OfficeHost 自己比對，沒變就不推
+    }
+
+    /// 光暈顏色 → #RRGGBB（關掉的狀態是透明，給頁面預設灰）
+    static string Hex(Color c) => c.A == 0 ? "#8E8E93" : $"#{c.R:X2}{c.G:X2}{c.B:X2}";
+    static string? ReadText(string p) { try { return File.Exists(p) ? File.ReadAllText(p) : null; } catch { return null; } }
+
+    /// 點了角色：大樓左下角浮一張卡（同一個 IslandCardView，只放這個人）；null＝收掉
+    void ShowDetail(string? id)
+    {
+        if (IsDisposed) return;
+        var who = id == null ? default : islands.SelectMany(i => i.People.Select(p => (Island: i, Person: p))).FirstOrDefault(x => x.Person.Id == id);
+        if (who.Person == null || !tower)
+        {
+            if (detail != null) { Controls.Remove(detail); detail.Dispose(); detail = null; detailView = null; }
+            if (detailId != null && id == null) office?.Deselect();
+            detailId = null;
+            return;
+        }
+        detailId = id;
+        if (detail == null)
+        {
+            detail = new Panel { BackColor = Theme.Back };
+            detailView = new IslandCardView(this) { Dock = DockStyle.Fill };
+            var close = new Label { Text = "✕", AutoSize = false, TextAlign = ContentAlignment.MiddleCenter, Cursor = Cursors.Hand, ForeColor = Theme.Secondary, BackColor = Theme.Card };
+            close.Click += (_, _) => ShowDetail(null);
+            detail.Controls.Add(close);
+            detail.Controls.Add(detailView);
+            close.BringToFront();
+            Controls.Add(detail);
+        }
+        detail.BringToFront();
+        detailView!.SetIsland(new Island { Project = who.Island.Project, People = new() { who.Person } });
+        LayoutDetail();
+    }
+
+    void LayoutDetail()
+    {
+        if (detail == null) return;
+        float s = S;
+        int dw = (int)Math.Min(480 * s, scroller.Width - 24 * s), dh = (int)(200 * s);
+        detail.Bounds = new Rectangle(scroller.Left + (int)(12 * s), scroller.Bottom - dh - (int)(12 * s), Math.Max(0, dw), dh);
+        if (detail.Controls.OfType<Label>().FirstOrDefault() is { } x) x.Bounds = new Rectangle(detail.Width - (int)(30 * s), (int)(6 * s), (int)(22 * s), (int)(22 * s));
+    }
+
     // MARK: 動畫
 
     /// 要動才開計時器：有人在動、視窗看得到、沒開「減少動態效果」
     void Retime()
     {
-        bool run = visibleOnScreen && !ReduceMotion && views.Any(v => v.Art.Moving);
+        bool run = visibleOnScreen && !ReduceMotion && !tower && views.Any(v => v.Art.Moving);
         if (run && !anim.Enabled) anim.Start();
         else if (!run && anim.Enabled) anim.Stop();
     }
@@ -302,6 +444,8 @@ sealed class BoardForm : Form
         if (v == visibleOnScreen) return;
         visibleOnScreen = v;
         Log.Note($"BOARD visible={v} frames={frames} anim={anim.Enabled}");
+        // 看不到就把 WebView2 藏起來：瀏覽器自己停掉 requestAnimationFrame，大樓不耗 GPU
+        if (office != null) office.View.Visible = tower && v;
         if (v) Refresh_();
         Retime();
     }
@@ -419,6 +563,8 @@ sealed class BoardForm : Form
             try { File.WriteAllText(stats, $"frames={frames}\n"); } catch { }
         Log.Note($"BOARD close frames={frames} paints={IslandArt.PaintCount} paint_ms_avg={(IslandArt.PaintCount == 0 ? 0 : IslandArt.PaintTicks * 1000.0 / Stopwatch.Frequency / IslandArt.PaintCount):F2}");
         SystemEvents.UserPreferenceChanged -= PreferenceChanged;
+        office?.Dispose();
+        office = null;
         shotTimer?.Dispose();
         shotTimer = null;
         refresh.Dispose();
@@ -690,5 +836,62 @@ sealed class UsageBar : Control
         if (fw > 0.5f)
             using (var bar = IslandCardView.Rounded(new RectangleF(x, by, Math.Max(fw, bh), bh), bh / 2))
             using (var fb = new SolidBrush(level)) g.FillPath(fb, bar);
+    }
+}
+
+/// 左上角的「卡片／大樓」切換（兩格的分段按鈕）。不能用時整個變灰、點了沒反應
+sealed class ViewSwitch : Control
+{
+    readonly BoardForm owner;
+    bool towerOn;
+    static readonly string[] Labels = { "卡片", "大樓" };
+    public event Action<bool>? Changed;
+
+    public ViewSwitch(BoardForm owner)
+    {
+        this.owner = owner;
+        SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+        SetStyle(ControlStyles.Selectable, false);
+        Cursor = Cursors.Hand;
+    }
+
+    float S => DeviceDpi / 96f;
+    Font F => owner.Fonts.Get(12 * S);
+
+    public bool Tower { get => towerOn; set { if (towerOn == value) return; towerOn = value; Invalidate(); } }
+
+    int SegW => (int)(TextRenderer.MeasureText("大樓", F).Width + 22 * S);
+    public override Size GetPreferredSize(Size proposedSize) => new(SegW * 2 + (int)(4 * S), (int)(26 * S));
+
+    protected override void OnEnabledChanged(EventArgs e) { base.OnEnabledChanged(e); Cursor = Enabled ? Cursors.Hand : Cursors.Default; Invalidate(); }
+
+    protected override void OnMouseClick(MouseEventArgs e)
+    {
+        base.OnMouseClick(e);
+        if (!Enabled || e.Button != MouseButtons.Left) return;
+        bool t = e.X >= Width / 2;
+        if (t == towerOn) return;
+        Tower = t;
+        Changed?.Invoke(t);
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        var th = owner.Theme;
+        float s = S;
+        g.Clear(th.Back);
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        using (var p = IslandCardView.Rounded(new RectangleF(0.5f, 0.5f, Width - 1, Height - 1), 7 * s))
+        using (var b = new SolidBrush(th.Card)) g.FillPath(b, p);
+        float pad = 2 * s, half = (Width - pad * 2) / 2f;
+        using (var p = IslandCardView.Rounded(new RectangleF(pad + (towerOn ? half : 0), pad, half, Height - pad * 2), 5 * s))
+        using (var b = new SolidBrush(th.Dark ? Color.FromArgb(0x55, 0x55, 0x58) : Color.White)) g.FillPath(b, p);
+        for (int i = 0; i < 2; i++)
+        {
+            var r = Rectangle.Round(new RectangleF(pad + i * half, 0, half, Height));
+            var c = !Enabled ? th.Tertiary : (i == 1) == towerOn ? th.Text : th.Secondary;
+            TextRenderer.DrawText(g, Labels[i], F, r, c, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+        }
     }
 }

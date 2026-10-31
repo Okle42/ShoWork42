@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI工作戰情中心・辦公大樓</title>
+<!--
+  ShoWork42 Windows 戰情中心的 3D 辦公大樓（W6）。WebView2 以 SetVirtualHostNameToFolderMapping 載入；
+  資料由 C# 用 PostWebMessageAsJson 推進來（格式見 Board\Office.cs），頁面只畫、不讀檔。
+  不靠 Windows 單獨看：python3 -m http.server 後開 office.html?demo=1（內建假資料）。
+  three.js r170（MIT，vendor\three-r170\LICENSE），離線可用，不從 CDN 載。
+-->
+<link rel="stylesheet" href="office.css">
+<script type="importmap">
+{ "imports": { "three": "./vendor/three-r170/three.module.min.js" } }
+</script>
+</head>
+<body>
+<div id="stage"></div>
+<div id="labels"></div>
+<div id="bar">
+  <div id="counts"></div>
+  <div class="spacer"></div>
+  <label class="ctl" title="燈光：白天／夜晚／自動（依這台電腦的時間，06:00–18:00 白天）">
+    <span id="lightIcon">◐</span>
+    <select id="lighting">
+      <option value="auto">自動</option>
+      <option value="day">白天</option>
+      <option value="night">夜晚</option>
+    </select>
+  </label>
+  <button id="reset" class="ctl" title="回到預設視角">⌖ 重設視角</button>
+  <button id="help" class="ctl icon" title="操作說明">?</button>
+</div>
+<div id="helpPop" hidden>
+  <b>操作</b>
+  <div>左鍵拖曳：轉視角</div>
+  <div>滾輪：縮放</div>
+  <div>中鍵（或右鍵）拖曳：平移</div>
+  <div>點角色：看這個 AI 的卡片</div>
+  <div class="dim">紫＝工作中、綠＝做完了你還沒看、紅＝等你回答、橘＝卡住</div>
+</div>
+<div id="detail" hidden></div>
+<div id="empty" hidden>讀取中⋯</div>
+<script type="module" src="office.js"></script>
+</body>
+</html>
