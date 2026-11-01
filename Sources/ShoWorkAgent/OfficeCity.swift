@@ -161,7 +161,8 @@ final class CityBuilder {
         }
         // 電廠的路：廣場右端 → 電廠正門（10-21 稽核：電廠原本沒有門也沒有路）
         k.b(.identity, Self.powerX, Self.gy, (Self.powerZ + 1.5 + TD.zF + 1.3) / 2, 1.1, 0.04, TD.zF + 1.3 - Self.powerZ - 1.5, road)
-        k.b(.identity, (TD.W / 2 + 4 + Self.powerX + 0.55) / 2, Self.gy, TD.zF + 0.75, Self.powerX + 0.55 - TD.W / 2 - 4, 0.04, 1.1, road)
+        let laneEnd = s.servers.isEmpty ? Self.powerX + 0.55 : Self.laneX1     // 有分公司：這段支路往右延伸成巷子（分公司門口都接到這裡）
+        k.b(.identity, (TD.W / 2 + 4 + laneEnd) / 2, Self.gy, Self.laneZ, laneEnd - TD.W / 2 - 4, 0.04, 1.1, road)
 
         // ── 貨櫃堆場（左邊，一個磁碟一個）──
         for (i, d) in s.disks.prefix(Self.maxYards).enumerated() {
@@ -174,7 +175,7 @@ final class CityBuilder {
 
         // ── 分公司（11-01 搬進圍牆內：電廠、油槽前方的空地，沿電廠那條路排一列，門朝路）──
         for (i, sv) in s.servers.prefix(Self.maxBranches).enumerated() {
-            buildBranch(k, sv, z: Self.branchZ(i), road: road)
+            buildBranch(k, sv, at: Self.branchPos(i), road: road)
         }
 
         // ── 港口（11-01：正門出去、馬路正對面）──
@@ -367,7 +368,7 @@ final class CityBuilder {
         shadow(k, Self.powerX, Self.powerZ, 4.4, 3.2, 2.76)
         shadow(k, Self.fuelX, Self.fuelZ, 3.6, 3.6, 3.3)
         // 分公司（城內，電廠前）
-        for i in 0..<min(Self.maxBranches, s.servers.count) { shadow(k, Self.branchX, Self.branchZ(i), Self.branchW + 0.2, Self.branchD + 0.2, Self.branchH + 0.16) }
+        for i in 0..<min(Self.maxBranches, s.servers.count) { let p = Self.branchPos(i); shadow(k, p.x, p.z, Self.branchW + 0.2, Self.branchD + 0.2, Self.branchH + 0.16) }
     }
 
     private func label(_ id: String, _ p: SIMD3<Float>, _ text: String, alert: Bool, hit: (SIMD3<Float>, SIMD3<Float>)? = nil) {
@@ -651,28 +652,38 @@ final class CityBuilder {
     /// 分公司（11-01 從城外對街搬進城內）：電廠（powerX/powerZ）、油槽（fuelX/fuelZ）前方（朝正門那側）的空地。
     /// 那塊地＝電廠那條路（x 10.95–12.05）和右牆（x 20.75）之間、油槽前緣（z −6.0）到大樓前那排樹（z 7.8）之間；
     /// 一列沿著電廠那條路往前排（z −4.4、−1.6、1.2、4.0），門朝路、各有一條小路接上去。比原本城外那棟小一號（城內空地有限）
-    static let branchX: Float = 16.4, branchW: Float = 3.2, branchD: Float = 2.3, branchH: Float = 2.6
-    static func branchZ(_ i: Int) -> Float { -4.4 + Float(i) * 2.8 }
+    /// 11-01 第二版（Kang：別跟電廠油槽擠在一起）：搬到大樓右前方那塊大空地。廣場右端那段電廠支路往右延伸成一條巷子（z＝laneZ），
+    /// 前兩棟並排在巷子前面（門朝巷子＝−z、正面朝城門）；第 3、4 棟在巷子後面（門朝巷子＝＋z）
+    static let branchW: Float = 3.2, branchD: Float = 2.3, branchH: Float = 2.6
+    static let laneZ: Float = TD.zF + 0.75, laneX1: Float = 20.0
+    static let branchX: Float = 14.0
+    static func branchPos(_ i: Int) -> (x: Float, z: Float, front: Bool) {
+        let x: Float = i % 2 == 0 ? 14.0 : 18.4, front = i < 2      // 電廠支路東緣 12.05、右牆內側 20.75，兩棟中間留 1.2
+        return (x, front ? laneZ + 0.55 + 0.4 + 2.3 / 2 : laneZ - 0.55 - 0.4 - 2.3 / 2, front)
+    }
 
-    private func buildBranch(_ k: Kit, _ s: CityServer, z: Float, road: SCNMaterial) {
-        let x = Self.branchX, w = Self.branchW, d = Self.branchD, h = Self.branchH
+    private func buildBranch(_ k: Kit, _ s: CityServer, at p: (x: Float, z: Float, front: Bool), road: SCNMaterial) {
+        let x = p.x, z = p.z, w = Self.branchW, d = Self.branchD, h = Self.branchH
         let on = s.online == true
         let base = Self.gy
         k.b(.identity, x, base, z, w, h, d, Self.m(TP.WL2))
         k.b(.identity, x, base + h, z, w + 0.2, 0.16, d + 0.2, Self.m(TP.ST2))
         let win = on ? Self.window : TM.f(TP.FN6)
-        // 窗：前後兩面各 2 扇（朝正門那面＝預設視角看得到）、背路那面 1 扇
-        for zz in [z - d / 2 - 0.01, z + d / 2 + 0.01] { for i in 0..<2 { k.b(.identity, x - 0.7 + Float(i) * 1.4, base + 1.4, zz, 0.8, 0.6, 0.04, win) } }
-        k.b(.identity, x + w / 2 + 0.01, base + 1.4, z, 0.04, 0.6, 0.8, win)
-        // 門（朝電廠那條路＝−x）：在線＝開著（暗的門洞）；離線＝關上
-        let dx = x - w / 2
-        if on { k.b(.identity, dx - 0.01, base, z, 0.04, 1.6, 0.9, TM.f(TP.FN6)) }
-        else { k.b(.identity, dx - 0.03, base, z, 0.08, 1.65, 1.0, Self.m(TP.ST2)) }
+        // 窗：不朝巷子那面 2 扇（前排＝朝城門，預設視角看得到）、朝巷子那面門的兩側各 1 扇、左右兩側各 1 扇
+        let lane: Float = p.front ? -1 : 1, doorZ = z + lane * d / 2, backZ = z - lane * (d / 2 + 0.01)
+        for i in 0..<2 { k.b(.identity, x - 0.7 + Float(i) * 1.4, base + 1.4, backZ, 0.8, 0.6, 0.04, win) }
+        for sx: Float in [-1, 1] {
+            k.b(.identity, x + sx * 1.05, base + 1.4, doorZ + lane * 0.01, 0.6, 0.6, 0.04, win)
+            k.b(.identity, x + sx * (w / 2 + 0.01), base + 1.4, z, 0.04, 0.6, 0.8, win)
+        }
+        // 門（朝巷子）：在線＝開著（暗的門洞）；離線＝關上
+        if on { k.b(.identity, x, base, doorZ + lane * 0.01, 0.9, 1.6, 0.04, TM.f(TP.FN6)) }
+        else { k.b(.identity, x, base, doorZ + lane * 0.03, 1.0, 1.65, 0.08, Self.m(TP.ST2)) }
         // 屋頂招牌燈：綠＝在線、灰＝離線／還沒測
         k.b(.identity, x + 1.1, base + h + 0.16, z, 0.3, 0.3, 0.3, on ? TM.glow(0x22C55E, 0.6, 1.8) : TM.f(0x6B7280))
-        // 門口接到電廠那條路的小路（路東緣 powerX＋0.55 → 門）
-        let r0 = Self.powerX + 0.55, r1 = dx - 0.06
-        k.b(.identity, (r0 + r1) / 2, Self.gy, z, r1 - r0, 0.04, 1.0, road)
+        // 門口接到巷子的小路（巷子邊緣 → 門）
+        let r0 = Self.laneZ + lane * -0.55, r1 = doorZ + lane * 0.06
+        k.b(.identity, x, Self.gy, (r0 + r1) / 2, 1.0, 0.04, abs(r1 - r0), road)
         label(s.id, SIMD3(x, base + h + 1.3, z), CityText.server(s), alert: s.alert, hit: (SIMD3(x, base + h / 2, z), SIMD3(w + 0.2, h + 0.4, d + 0.2)))
     }
 

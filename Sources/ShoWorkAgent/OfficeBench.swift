@@ -201,7 +201,7 @@ enum OfficeBench {
             ("default", { b.frameCamera(v) }),
             ("overview", { b.frameCity(v) }),
             ("top", { b.placeTest(v, target: SIMD3(0, 0, 4), dist: 125, az: 0, el: 89) }),
-            ("branch", { b.placeTest(v, target: SIMD3(Double(CityBuilder.branchX), 1, -0.5), dist: 26, az: 25, el: 32) }),
+            ("branch", { b.placeTest(v, target: SIMD3(Double(CityBuilder.branchX) + 1.9, 1, Double(CityBuilder.laneZ) + 1), dist: 26, az: 25, el: 32) }),
             ("port", { b.placeTest(v, target: SIMD3(Double(CityBuilder.portX) + 4, 0, Double(CityBuilder.streetZ) + 3), dist: 30, az: 12, el: 30) }),
         ]
         for night in [true, false] {
