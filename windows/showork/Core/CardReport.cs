@@ -108,7 +108,28 @@ sealed class CardReport
         return o;
     }
 
+    /// 讀回卡片檔（showork tick 轉送隊長用；status、at 一定要有）
+    public static CardReport? From(JsonNode? o)
+    {
+        if (o.Str("status") is not { } st || !Statuses.Contains(st) || o.Date("at") is not { } at) return null;
+        return new CardReport
+        {
+            Status = st, Progress = o.Int("progress"), Confidence = o.Int("confidence"), Summary = o.Str("summary"), Ask = o.Str("ask"), Report = o.Str("report"),
+            Task = o.Str("task"), Doing = o.Str("doing"), Options = o?["options"] is JsonArray ? o.Strs("options") : null, How = o.Str("how"), Kind = o.Str("kind"),
+            Handoff = o.Str("handoff"), Touch = o.Str("touch"), Outward = o.Str("outward"), At = at,
+        };
+    }
+
     public static string CardPath(string sid) => Path.Combine(HookPaths.Board, "cards", sid + ".json");
+
+    /// board\cards 裡全部的卡（sessionId → 卡）
+    public static Dictionary<string, CardReport> All()
+    {
+        var out_ = new Dictionary<string, CardReport>();
+        foreach (var f in HookJson.Files(Path.Combine(HookPaths.Board, "cards"), "*.json"))
+            if (From(HookJson.ReadObject(f)) is { } r) out_[Path.GetFileNameWithoutExtension(f)] = r;
+        return out_;
+    }
 }
 
 static class Brief

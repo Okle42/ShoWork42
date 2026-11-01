@@ -471,7 +471,7 @@ public sealed class InstallerHookTests : IDisposable
     public void InstallUpgradeUninstall()
     {
         Assert.Equal("merged", Installer.InstallHooks(Settings, Exe));
-        Assert.Equal(11, Installer.CountOurs(Settings));
+        Assert.Equal(13, Installer.CountOurs(Settings));                                      // 11-02 加 permit、ctx-wrapup
         var pre = Hooks()["PreToolUse"]!.AsArray();
         Assert.Equal("other-tool check", Cmd(pre[0]));                                       // 別人的留在原位
         Assert.Equal("\"C:/Users/Demo User/AppData/Local/ShoWork42/bin/showork.exe\" guard-push", Cmd(pre[^1]));
@@ -492,9 +492,9 @@ public sealed class InstallerHookTests : IDisposable
             h[ev] = new JsonArray(keep);
         }
         File.WriteAllText(Settings, root0.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n");
-        Assert.Equal(8, Installer.CountOurs(Settings));
+        Assert.Equal(10, Installer.CountOurs(Settings));                                      // 11-02：emit 那幾組多了 permit、ctx-wrapup
         Assert.Equal("merged", Installer.InstallHooks(Settings, Exe));
-        Assert.Equal(11, Installer.CountOurs(Settings));
+        Assert.Equal(13, Installer.CountOurs(Settings));                                      // 11-02 加 permit、ctx-wrapup
         Assert.Equal("other-tool check", Cmd(Hooks()["PreToolUse"]!.AsArray()[0]));
 
         // 移除：回到原本的位元組

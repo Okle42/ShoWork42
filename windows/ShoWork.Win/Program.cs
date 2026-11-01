@@ -40,6 +40,7 @@ static class Program
         {
             // the downloaded ShoWork42.exe asks to install itself; the installed copy (and a dev build) is the agent
             case null when Package.IsPacked && !Package.RunningInstalled: return Package.FirstRun(settings);
+            case null or "--after" or "--agent" when HandoverClear.Start(): return RunAgent(args);   // 11-02：自動交接／名冊／showork tick 的背景迴圈（HandoverClear.cs），Start() 一定回 true
             case null or "--after" or "--agent": return RunAgent(args);
             case "--version": return Report(() => Package.Version, quiet: true);
             case "--install": return Report(() => Package.Install(settings), quiet);

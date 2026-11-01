@@ -9,7 +9,7 @@ namespace ShoWork.Hooks;
 //      git push 不在這裡（1 樓保全 PushGuard 照舊）。只看 Bash 工具。
 // 正規表示式：Mac 是 NSRegularExpression（ICU），這裡是 .NET Regex。用到的語法（lookahead、\b、\s、反向參照、不分大小寫）兩邊意思相同；
 // 已知的小差異：Swift 把 "\r\n" 當成一個字，所以 CRLF 的指令在 Mac 不會在 \r\n 切段，這裡會（Windows 比較合理）。
-static class CaptainLink
+static partial class CaptainLink
 {
     // MARK: ① 開工卡
 

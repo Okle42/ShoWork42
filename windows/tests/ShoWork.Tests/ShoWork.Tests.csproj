@@ -24,6 +24,8 @@
     <Compile Include="..\..\ShoWork.Win\InstallerHooks.cs" Link="InstallerHooks.cs" />
     <!-- 打字進終端機：純邏輯部分（按鍵、找目標、能不能送）；Win32 呼叫只宣告不執行 -->
     <Compile Include="..\..\ShoWork.Win\TermSend.cs" Link="TermSend.cs" />
+    <!-- 11-02 自動交接的看板端（收尾完送 /clear、再打接手）＋寫名冊：不碰 WinForms，送字換成假的測 -->
+    <Compile Include="..\..\ShoWork.Win\HandoverClear.cs" Link="HandoverClear.cs" />
   </ItemGroup>
 
   <ItemGroup>

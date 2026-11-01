@@ -166,7 +166,7 @@ static class NicknameStore
         return out_;
     }
 
-    static void Save(string sid, Nickname n) => HookJson.WriteAtomic(Path.Combine(Dir, sid + ".json"), HookJson.Text(n.ToJson()));
+    public static void Save(string sid, Nickname n) => HookJson.WriteAtomic(Path.Combine(Dir, sid + ".json"), HookJson.Text(n.ToJson()));
 
     /// 這個 session 的名字；還沒有就從沒用到的名字裡挑一個存起來
     public static Nickname Ensure(string sid, DateTime? now = null)

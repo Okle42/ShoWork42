@@ -25,7 +25,10 @@ static partial class Installer
         }
     }
 
-    static readonly Regex Ours = new(@"showork\.exe""? (emit (working|done|input|clear) --agent claude|brief|title|guard-push)$");
+    static readonly Regex Ours = new(@"showork\.exe""? (emit (working|done|input|clear) --agent claude|brief|title|guard-push|permit|ctx-wrapup)$");
+    static readonly Regex OurStatusLine = new(@"showork\.exe""? statusline$");
+    /// 使用者原本的 statusLine（`showork statusline` 串接它；showork\Core\StatusLine.cs 的 ChainPath 讀同一個檔）
+    public static string StatusChain => Path.Combine(SupportDir, "statusline-chain.json");
 
     /// Claude Code on Windows runs hook commands with Git Bash: quote the path (the user folder has a
     /// space) and use forward slashes (a backslash is an escape character to bash).
@@ -77,9 +80,11 @@ static partial class Installer
             ["PreToolUse"] = pre,
             // Windows 09-28: the permission_prompt Notification also comes ~6 s after the dialog appears;
             // PermissionRequest fires as the dialog opens. (Answer within 6 s and the Notification never comes.)
-            ["PermissionRequest"] = Group(null, "input"),
+            // 11-02：permit 等你在戰情中心收件匣按允許／拒絕（最久 1 小時，同 Mac 的 3660 秒）；跟 emit input 分開兩組，各跑各的
+            ["PermissionRequest"] = new JsonArray(Group(null, "input")[0]!.DeepClone(), Sub(null, "permit", 3660)),
             ["PostToolUse"] = Group("*", "working", async: true),
-            ["Stop"] = Group(null, "done"),
+            // 11-02：ctx 到門檻就請它收尾（Mac 是使用者自己的 hook_ctx_wrapup.py；Windows 做進 showork）
+            ["Stop"] = new JsonArray(Group(null, "done")[0]!.DeepClone(), Sub(null, "ctx-wrapup", 5)),
             // permission prompts / questions only — the 60 s idle reminder would turn green into red
             ["Notification"] = Group("permission_prompt|elicitation_dialog", "input"),
             ["SessionEnd"] = Group(null, "clear"),
@@ -110,6 +115,7 @@ static partial class Installer
             hooks[ev] = new JsonArray(others.Concat(want.Select(g => g!.DeepClone())).ToArray());
             changed = true;
         }
+        if (InstallStatusLine(root, showork)) changed = true;
         if (!changed) return "already installed";
         // remember the untouched file, once: an uninstall that gets back to it restores these exact bytes
         if (!HasOurs(original))
@@ -140,6 +146,7 @@ static partial class Installer
             }
             if (changed && hooks.Count == 0) root.Remove("hooks");
         }
+        if (UninstallStatusLine(root)) changed = true;
         if (!changed) return "nothing to remove";
         Backup(settings);
         if (File.Exists(Pristine) && JsonNode.DeepEquals(root, Parse(File.ReadAllBytes(Pristine))))
@@ -162,9 +169,51 @@ static partial class Installer
     static bool HasOurs(byte[]? bytes)
     {
         if (bytes == null) return false;
-        try { return Parse(bytes)?["hooks"] is JsonObject h && h.Any(kv => kv.Value is JsonArray a && a.Any(IsOurs)); }
+        try { return Parse(bytes) is JsonObject o && (o["hooks"] is JsonObject h && h.Any(kv => kv.Value is JsonArray a && a.Any(IsOurs)) || IsOurStatusLine(o["statusLine"])); }
         catch { return false; }
     }
+
+    // MARK: statusLine（11-02：Windows 版 Claude Code 沒有 Mac 那支 statusline.py ⇒ 5 小時／7 天用量檔由 `showork statusline` 寫）
+    //   沒有 statusLine ⇒ 設成我們的；有使用者自己的 ⇒ 原樣記在 statusline-chain.json，我們的指令每次把同一份 stdin 交給它、印它的輸出（串接，不蓋掉）
+    //   解除安裝 ⇒ 還原成記下的那一個（記下的是「沒有」就拿掉 statusLine）。改檔前 Save 一樣先留 settings.json.bak-時間
+
+    static bool IsOurStatusLine(JsonNode? s) => s?["command"] is JsonValue v && v.GetValueKind() == JsonValueKind.String && OurStatusLine.IsMatch(v.GetValue<string>());
+
+    public static JsonObject OurStatusLineNode(string showork, JsonNode? original) => new()
+    {
+        ["type"] = "command", ["command"] = $"\"{showork.Replace('\\', '/')}\" statusline",
+        ["padding"] = original?["padding"]?.DeepClone() ?? 0,
+    };
+
+    /// 回傳有沒有改 root
+    static bool InstallStatusLine(JsonObject root, string showork)
+    {
+        var cur = root["statusLine"];
+        if (IsOurStatusLine(cur))
+        {
+            var want = OurStatusLineNode(showork, cur);
+            if (JsonNode.DeepEquals(cur, want)) return false;
+            root["statusLine"] = want;                                  // exe 搬家了：只改路徑，串接的那一個不動
+            return true;
+        }
+        Directory.CreateDirectory(SupportDir);
+        File.WriteAllText(StatusChain, new JsonObject { ["statusLine"] = cur?.DeepClone(), ["at"] = DateTime.UtcNow.ToString("o") }
+            .ToJsonString(new JsonSerializerOptions { WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping }), new UTF8Encoding(false));
+        root["statusLine"] = OurStatusLineNode(showork, cur);
+        return true;
+    }
+
+    static bool UninstallStatusLine(JsonObject root)
+    {
+        if (!IsOurStatusLine(root["statusLine"])) { TryDelete(StatusChain); return false; }
+        JsonNode? orig = null;
+        try { if (File.Exists(StatusChain)) orig = Parse(File.ReadAllBytes(StatusChain))?["statusLine"]; } catch { }
+        if (orig is JsonObject) root["statusLine"] = orig.DeepClone(); else root.Remove("statusLine");
+        TryDelete(StatusChain);
+        return true;
+    }
+
+    static void TryDelete(string p) { try { File.Delete(p); } catch { } }
 
     static (JsonObject root, byte[]? original) Load(string path)
     {

@@ -101,6 +101,13 @@ static class CaptainInbox
 
     public static InboxItem? Item(string id) => InboxItem.From(HookJson.ReadObject(Path.Combine(Dir, id.ToUpperInvariant() + ".json")));
 
+    /// 7 天前的刪掉（巡檢時順便）
+    public static void Prune(DateTime now)
+    {
+        foreach (var i in All().Where(i => now - i.At > TimeSpan.FromDays(7)))
+            try { File.Delete(Path.Combine(Dir, i.Id + ".json")); } catch { }
+    }
+
     /// 未處理：隊長還沒 ack、而且沒送到隊長的或還在等放行的（24 小時內）
     public static List<InboxItem> Pending(DateTime now) =>
         All().Where(i => i.Acked == null && now - i.At < TimeSpan.FromDays(1) && (!i.Delivered || (i.Kind == "block" && i.Released == null))).ToList();
@@ -152,7 +159,7 @@ static class CaptainInbox
     static readonly (string Rule, string[] Words)[] PreapprovalWords =
     {
         ("GitHub 公開發言", new[] { "PR", "pull request", "issue", "留言", "GitHub", "發 release", "發布" }),
-        ("LINE 對外傳訊", new[] { "LINE", "傳訊", "私訊", "通知" }),
+        ("LINE 對外傳訊", new[] { "LINE", "傳訊", "私訊", "通知", "傳給", "發給", "傳到", "發到", "發訊息", "傳訊息" }),   // 11-01 2ce3a8a 加「傳給…」
         ("firebase 部署", new[] { "部署", "deploy", "firebase", "上線" }),
         ("App 上傳", new[] { "上傳", "送審", "TestFlight", "上架" }),
     };
@@ -212,7 +219,7 @@ static class CaptainInbox
 }
 
 /// 隊長、名冊、派工單（Mac 的 CaptainStore；hook 端只要讀隊長、設隊長、讀專案名、更新派工單）
-static class CaptainStore
+static partial class CaptainStore
 {
     public static string CaptainFile => Path.Combine(HookPaths.Board, "captain.json");
     public static string RosterFile => Path.Combine(HookPaths.Board, "roster.json");
@@ -277,7 +284,6 @@ static class CaptainStore
                 名冊／巡檢標「已收尾待 /clear」的人不要派新工作（派了就不會自動 /clear，看板會傳「【交接提醒】」給你）；「自動 /clear 失敗」的請{owner}手動 /clear。
             12. 組員卡片已問使用者的事，隊長卡片不再問；隊長只審問題與選項。使用者在組員卡片答了，看板會傳「【使用者已答】名字：問題→答案」給你，你卡片上同一題會自動清掉。
             取消："{showork}" task cancel <單號>。
-            （Windows 版目前只有 card、names、captain、release 與 hook 端的開工卡／動作預告；roster、task、tasks、b1、巡檢、自動交接還沒有，派工改用 SendMessage。）
             """;
     }
 }

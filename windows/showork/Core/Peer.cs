@@ -12,7 +12,7 @@ namespace ShoWork.Hooks;
 // Mac 的 messagingSocketPath 是 Unix socket（/tmp/cc-socks/<pid>.sock）。Windows 版 Claude Code 這欄長什麼樣子還沒在真機看過：
 //   \\.\pipe\… 或 //./pipe/… ⇒ 當 named pipe 連；其他 ⇒ 當 Unix socket 檔（.NET 8 在 Windows 10 1803+ 也支援 AF_UNIX）。
 // ⚠ Windows 這兩條都沒在真機驗證過。連不上就回錯誤：呼叫端不標 delivered，單子留在收件匣，新隊長跑 showork captain 會看到（Mac 也是這個退路）。
-// Mac 的 Handover.shouldHold（收尾中先暫存）Windows 沒有自動交接，不做。
+// 收尾中（Handover.ShouldHold）的 session：看板／隊長流程的訊息先暫存，新 context 接手時一起交給它（同 Mac）。
 static class Peer
 {
     /// 開著的 session（行程還在）
@@ -67,6 +67,11 @@ static class Peer
     /// 送出；成功回傳訊息 id
     public static (string? Id, string? Error) Send(PeerSession r, string text, string fromName, string? replyTo = null)
     {
+        if (Handover.ShouldHold(r.SessionId, fromName))     // 收尾中：先暫存，新 context 接手時一起給（T1026230337）
+        {
+            Handover.Hold(r.SessionId, text, fromName, DateTime.UtcNow);
+            return ("held", null);
+        }
         if (r.MessagingSocketPath is not { Length: > 0 } path) return (null, $"{r.Name ?? r.SessionId} 沒有收件匣（版本太舊或是背景 session）");
         if (Token(r) is not { } token) return (null, $"找不到 {r.Name ?? r.SessionId} 的收件鑰匙");
         var id = Guid.NewGuid().ToString().ToLowerInvariant();
