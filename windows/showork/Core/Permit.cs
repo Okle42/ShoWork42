@@ -180,7 +180,7 @@ static class Permit
     /// 要執行的東西，一行（太長截斷）
     public static string Summary(string tool, JsonObject input)
     {
-        var s = SummaryKeys.Select(k => input.Str(k)).FirstOrDefault(v => !string.IsNullOrEmpty(v)) ?? HookJson.Text(Sorted(input));
+        var s = SummaryKeys.Select(k => input.Str(k)).FirstOrDefault(v => !string.IsNullOrEmpty(v)) ?? HookJson.Text(Sorted(input)!);
         return SwiftText.Count(s) > 600 ? SwiftText.Prefix(s, 600) + "⋯" : s;
     }
 
