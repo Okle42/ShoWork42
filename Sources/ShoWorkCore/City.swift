@@ -164,12 +164,13 @@ public struct CityPower: Sendable, Equatable {
     public var alert: Bool { known && (level == "hot" || level == "critical") }
 }
 
-/// GitHub 港口：剛 push／fetch 的 repo（一艘出港的貨船）
+/// GitHub 港口：剛 push（出港的貨船）或 fetch／pull（進港的貨船，11-01 Kang：pull 也該有船進來）的 repo
 public struct CityShip: Sendable, Equatable {
     public var repo: String
     public var at: Date
-    public init(repo: String, at: Date) { self.repo = repo; self.at = at }
-    public var id: String { "\(repo)@\(Int(at.timeIntervalSince1970))" }
+    public var inbound: Bool
+    public init(repo: String, at: Date, inbound: Bool = false) { self.repo = repo; self.at = at; self.inbound = inbound }
+    public var id: String { "\(repo)@\(Int(at.timeIntervalSince1970))\(inbound ? "<" : "")" }
 }
 
 public struct CityState: Sendable, Equatable {
@@ -536,6 +537,13 @@ public enum CityParse {
     }
 
     /// 港口：repo → 最新的遠端 ref 時間；跟上次比變新的 ⇒ 出港。第一次（上次是空的）只當基準，不出港
+    /// 遠端 ref 變了是 push 還是 fetch／pull：fetch 一定會改寫 .git/FETCH_HEAD，push 不會。
+    /// FETCH_HEAD 跟遠端 ref 在幾秒內一起變＝進港；FETCH_HEAD 比較舊（或沒有）＝出港
+    public static func isInbound(refAt: Date, fetchHeadAt: Date?) -> Bool {
+        guard let f = fetchHeadAt else { return false }
+        return f >= refAt.addingTimeInterval(-5)
+    }
+
     public static func departures(old: [String: Date], new: [String: Date]) -> [String] {
         guard !old.isEmpty else { return [] }
         return new.filter { k, t in old[k].map { t > $0 } ?? false }.map(\.key).sorted()

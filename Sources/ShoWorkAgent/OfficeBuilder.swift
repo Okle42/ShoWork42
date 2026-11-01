@@ -160,7 +160,7 @@ final class OfficeBuilder {
     /// 微縮模型（10-22 Kang「跟體素太像」）：拿掉 1600 m 大地面，整座城放在一塊有木頭邊的底座上；底座外面由後製畫成桌面
     private lazy var plinth: SCNNode = {
         let m = VoxelMesh(), k = Kit(m: m)
-        let x0: Float = -33, x1 = CityBuilder.waterX1 + 1, z0: Float = -15, z1 = CityBuilder.waterZ1 + 1   // 含港口水面（11-01 港口搬到正門對面）
+        let x0: Float = -33, x1 = CityBuilder.harborX1 + 1, z0: Float = -15, z1 = CityBuilder.waterZ1 + 1   // 含港口水面（11-01 港口搬到正門對面）
         k.b(.identity, (x0 + x1) / 2, -0.4, (z0 + z1) / 2, x1 - x0, 0.4, z1 - z0, VoxMat.dayNight(TP.groundDay, TP.groundNight))
         k.b(.identity, (x0 + x1) / 2, -1.8, (z0 + z1) / 2, x1 - x0 + 0.6, 1.4, z1 - z0 + 0.6, VoxMat.dayNight(0x9A6A40, 0x4A3220))
         let n = m.node(name: "plinth"); n.categoryBitMask = Self.outdoorMask

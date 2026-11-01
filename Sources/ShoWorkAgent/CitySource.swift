@@ -225,7 +225,7 @@ final class CityMonitor: @unchecked Sendable {
         var s = s0
         let fm = FileManager.default
         let root = BoardPaths.repos
-        var cur: [String: Date] = [:]
+        var cur: [String: Date] = [:], fetched: [String: Date] = [:]
         for name in (try? fm.contentsOfDirectory(atPath: root)) ?? [] where !name.hasPrefix(".") {
             let dir = root + "/" + name
             // 符號連結（SD 卡冷資料）不碰：不為了看 mtime 去喚醒外接碟
@@ -246,8 +246,11 @@ final class CityMonitor: @unchecked Sendable {
                 }
             }
             if let latest { cur[name] = latest }
+            if let f = FileStat.lstat(git + "/FETCH_HEAD")?.date { fetched[name] = f }
         }
-        for r in CityParse.departures(old: refs, new: cur) { s.ships.append(CityShip(repo: r, at: now)) }
+        for r in CityParse.departures(old: refs, new: cur) {
+            s.ships.append(CityShip(repo: r, at: now, inbound: CityParse.isInbound(refAt: cur[r] ?? now, fetchHeadAt: fetched[r])))
+        }
         refs = cur
         s.repos = cur.count
         s.recent = cur.sorted { $0.value > $1.value }.prefix(5).map { CityShip(repo: $0.key, at: $0.value) }
@@ -340,7 +343,7 @@ final class CityMonitor: @unchecked Sendable {
         s.grid = fakeGrid(now: demoShipAt) ?? CityRules.grid(RateLimits(fiveHour: .init(used: 72, resetsAt: demoShipAt.addingTimeInterval(2 * 3600)),
                                                                         sevenDay: .init(used: 40, resetsAt: demoShipAt.addingTimeInterval(4 * 86400))), now: demoShipAt)
         s.repos = 12
-        if let r = ProcessInfo.processInfo.environment["SHOWORK_CITY_SHIP"] { s.ships = [CityShip(repo: r, at: demoShipAt)] }
+        if let r = ProcessInfo.processInfo.environment["SHOWORK_CITY_SHIP"] { s.ships = [CityShip(repo: r, at: demoShipAt, inbound: ProcessInfo.processInfo.environment["SHOWORK_CITY_SHIP_IN"] != nil)] }
         if ProcessInfo.processInfo.environment["SHOWORK_CITY_DEMO"] == "calm" {
             s.disks[2].available = 40 * g; s.servers[1].online = true; s.firewall.ports.removeLast(); s.power = CityPower(temp: 68, cpuAvg: 30, level: "ok")
             s.disks[0].available = 60 * g

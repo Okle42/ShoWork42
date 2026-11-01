@@ -280,7 +280,7 @@ final class CityBuilder {
             for x in trees { tree(k, x, bz, base: gtop, s: 0.9) }
         }
         // 城外對街（港口左邊）：遠側人行道上一排行道樹（11-01：分公司搬進城內，這段只剩樹）
-        for x in stride(from: Float(-24), through: Self.waterX0 - 2, by: 5) { tree(k, x, Self.farWalkZ + 0.1, base: Self.walkTop, s: 0.9, out: true) }
+        for x in stride(from: Float(-24), through: Self.harborX0 - 2, by: 5) { tree(k, x, Self.farWalkZ + 0.1, base: Self.walkTop, s: 0.9, out: true) }
     }
 
     // MARK: 馬路（11-01，照 Windows 版 office.js buildCity：路面 #4A4F55、白色虛線 #E8E4D8、人行道 #B9B4AA）
@@ -293,8 +293,8 @@ final class CityBuilder {
     /// 馬路上的光池：白天跟柏油同色（看不出來）、夜晚比柏油亮一點點的暖色（原本的光池底色是淺色路面，放在深色柏油上變成一塊塊地毯）
     static var streetPoolO: SCNMaterial { VoxMat.dayNight(0x4A4F55, 0x1D1E1F, glow: TP.LT1, emit: (0, 0.015)) }
     static var streetPoolI: SCNMaterial { VoxMat.dayNight(0x4A4F55, 0x2B2822, glow: TP.LT1, emit: (0, 0.04)) }
-    /// 馬路東西兩端（往外延伸到霧裡）
-    static let streetX0: Float = -64, streetX1: Float = 68
+    /// 馬路東西兩端：一路延伸到霧裡（11-01 Kang：原本 −64～68，拉遠看得到路的盡頭、短短一條很假；霧最遠 230 起跳，±420 一定看不到頭）
+    static let streetX0: Float = -420, streetX1: Float = 420
 
     private func buildStreet(_ k: Kit) {
         let len = Self.streetX1 - Self.streetX0, cx = (Self.streetX0 + Self.streetX1) / 2
@@ -681,7 +681,9 @@ final class CityBuilder {
     /// 11-01：港口搬到正門（mainGateX）出去、馬路正對面：棧橋＋龍門吊對準正門和斑馬線，水面從棧橋左邊 4 公尺往右延伸（船往右開出港）。
     /// 水面從遠側人行道外緣開始；深 8 公尺（4 艘船錯開 1.6 公尺排得下）
     static let portX: Float = mainGateX
-    static let waterX0: Float = portX - 4, waterX1: Float = portX + 32
+    /// 港池（棧橋、船、右前方留空、微縮底座）＝原本那塊水面；河道本身沿著馬路一路延伸到霧裡（11-01：港池兩端原本是岸，看起來像一塊藍色地墊）
+    static let harborX0: Float = portX - 4, harborX1: Float = portX + 32
+    static let waterX0: Float = streetX0, waterX1: Float = streetX1
     static let waterZ0: Float = streetZ + streetW / 2 + walkW, waterZ1: Float = waterZ0 + 8
 
     private func buildPort(_ k: Kit, _ s: CityState) {
@@ -690,8 +692,7 @@ final class CityBuilder {
         // 碼頭：沿街的岸壁＋伸出去的棧橋
         k.b(.identity, (Self.waterX0 + Self.waterX1) / 2, 0, Self.waterZ0 + 0.3, Self.waterX1 - Self.waterX0, 0.14, 0.6, Self.m(TP.ST2))
         k.b(.identity, Self.portX, 0, Self.waterZ0 + 3.4, 2.0, 0.14, 6.2, Self.m(TP.ST2))
-        // 另外兩邊的岸（10-21 稽核：原本水面另外兩邊直接貼著地面，像一塊藍色地墊，不像港）
-        k.b(.identity, Self.waterX0 - 0.15, 0, (Self.waterZ0 + Self.waterZ1) / 2, 0.3, 0.14, Self.waterZ1 - Self.waterZ0, Self.m(TP.ST2))
+        // 對岸（10-21 稽核：水面直接貼著地面像一塊藍色地墊）；11-01 河道延伸到霧裡，兩端不再封岸
         k.b(.identity, (Self.waterX0 + Self.waterX1) / 2, 0, Self.waterZ1 + 0.15, Self.waterX1 - Self.waterX0 + 0.3, 0.14, 0.3, Self.m(TP.ST2))
         // 岸邊龍門吊（10-21 第二輪：原本一根柱子＋一條橫臂＋一條吊索，從正面看像十字架 ⇒ 改成真的貨櫃起重機：
         // 四腳門架跨在棧橋上、吊臂往水面伸出去、上面有機房、吊臂下有台車＋吊索＋吊具；沒有任何「一根柱子穿過一條橫桿」的造型）
@@ -729,7 +730,7 @@ final class CityBuilder {
               hit: (SIMD3(cx + 1, 2, cz + 1), SIMD3(6, 4.5, 6)))
     }
 
-    /// 出港：新的船從棧橋邊往右開出去 4 秒後消失（playFor，不常駐）。不能播（被蓋住、太熱）＝不開船；測試視窗定在第 1.5 秒
+    /// 出港（push）：新的船從棧橋邊往右開出去 4 秒後消失；進港（fetch／pull，11-01）：船頭朝左從右邊開進來、靠到棧橋邊後消失（卸貨）。都是 playFor，不常駐。不能播（被蓋住、太熱）＝不開船；測試視窗定在第 1.5 秒
     private func updateShips(_ list: [CityShip], animate: Bool) -> TimeInterval {
         var play: TimeInterval = 0
         let live = Set(list.map(\.id))
@@ -739,14 +740,17 @@ final class CityBuilder {
             let posed = BoardWindow.testMode
             guard animate || posed else { continue }
             let n = makeShip(s.repo)
-            let start = SIMD3<Float>(Self.portX + 3.4, 0, Self.waterZ0 + 2.0 + Float(i) * 1.6)   // 棧橋右邊（10-21 稽核：太靠左船身插進棧橋與起重機腳）
+            let pier = SIMD3<Float>(Self.portX + 3.4, 0, Self.waterZ0 + 2.0 + Float(i) * 1.6)   // 棧橋右邊（10-21 稽核：太靠左船身插進棧橋與起重機腳）
+            let dx: Float = s.inbound ? -13 : 13
+            let start = s.inbound ? pier + SIMD3(13, 0, 0) : pier
+            if s.inbound { n.simdEulerAngles.y = .pi }                     // 船頭（+x）轉向左、朝棧橋
             n.simdPosition = start
             root.addChildNode(n)
             ships[s.id] = n
             if posed {
-                n.simdPosition = start + SIMD3(1.5 / Float(Self.shipDuration) * 13, 0, 0)
+                n.simdPosition = start + SIMD3(1.5 / Float(Self.shipDuration) * dx, 0, 0)
             } else {
-                n.runAction(.sequence([.moveBy(x: 13, y: 0, z: 0, duration: Self.shipDuration), .fadeOut(duration: 0.2), .removeFromParentNode()]), forKey: "sail")   // 終點 portX＋16.4（船頭再 2 公尺）＜水面右緣 portX＋32，船不會開上岸；只在水面上走、不碰馬路
+                n.runAction(.sequence([.moveBy(x: CGFloat(dx), y: 0, z: 0, duration: Self.shipDuration), .fadeOut(duration: 0.2), .removeFromParentNode()]), forKey: "sail")   // 終點 portX＋16.4（船頭再 2 公尺）＜水面右緣 portX＋32，船不會開上岸；只在水面上走、不碰馬路
                 play = max(play, Self.shipDuration + 0.4)
             }
         }
@@ -771,7 +775,7 @@ final class CityBuilder {
 
     /// 船的名牌（錨點跟著船走）
     var shipLabels: [(id: String, anchor: SCNNode, text: String)] {
-        ships.compactMap { id, n in n.childNode(withName: "anchor", recursively: false).map { ("ship:\(id)", $0, "⛴ \(id.split(separator: "@").first ?? "")") } }
+        ships.compactMap { id, n in n.childNode(withName: "anchor", recursively: false).map { ("ship:\(id)", $0, (id.hasSuffix("<") ? "⛴ 進港 " : "⛴ 出港 ") + (id.split(separator: "@").first ?? "")) } }
     }
 
     // MARK: 周邊高樓（11-01，照 Windows 版 office.js buildCity）
@@ -803,7 +807,8 @@ final class CityBuilder {
         let keepOut: [(SIMD2<Float>, SIMD2<Float>)] = [
             (SIMD2(x0 - m - 4, -23 - m), SIMD2(x1 + m + 4, z1 + m)),                                   // 街區＋飛艇（z −17）
             (SIMD2(-.infinity, nearWalkZ - walkW / 2 - m), SIMD2(.infinity, farWalkZ + walkW / 2 + m)),   // 馬路＋人行道
-            (SIMD2(waterX0 - m, waterZ0 - m), SIMD2(.infinity, .infinity)),                             // 港口與右前方
+            (SIMD2(-.infinity, waterZ0 - m), SIMD2(.infinity, waterZ1 + m)),                            // 河道（整條）
+            (SIMD2(harborX0 - m, waterZ0 - m), SIMD2(.infinity, .infinity)),                           // 港口與右前方
         ]
         var out: [SkyBlock] = []
         for gx in -9...9 { for gz in -9...4 {

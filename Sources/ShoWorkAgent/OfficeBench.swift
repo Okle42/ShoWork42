@@ -192,7 +192,7 @@ enum OfficeBench {
         let env = ProcessInfo.processInfo.environment
         let dir = env["SHOWORK_BENCH_DIR"] ?? FileManager.default.currentDirectoryPath
         var s = CityMonitor.demoState()
-        s.ships = [CityShip(repo: "demo-app", at: Date())]
+        s.ships = [CityShip(repo: "demo-app", at: Date(), inbound: ProcessInfo.processInfo.environment["SHOWORK_CITY_SHIP_IN"] != nil)]
         b.updateCity(s, animate: false)
         guard let dev = MTLCreateSystemDefaultDevice() else { print("沒有 Metal"); exit(1) }
         let r = SCNRenderer(device: dev, options: nil)
