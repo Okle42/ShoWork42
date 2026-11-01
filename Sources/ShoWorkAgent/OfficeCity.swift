@@ -696,6 +696,9 @@ final class CityBuilder {
     static let harborX0: Float = portX - 4, harborX1: Float = portX + 32
     static let waterX0: Float = streetX0, waterX1: Float = streetX1
     static let waterZ0: Float = streetZ + streetW / 2 + walkW, waterZ1: Float = waterZ0 + 8
+    /// 棧橋右邊沿岸的碼頭平台深度（龍門吊站在上面）；船席從平台外側排出去（船寬 1.2、間距 1.4，4 艘最外緣 waterZ0＋7.8 ＜ 對岸）
+    static let apronD: Float = 2.0
+    static func berthZ(_ i: Int) -> Float { waterZ0 + apronD + 1.0 + Float(i) * 1.4 }
 
     private func buildPort(_ k: Kit, _ s: CityState) {
         let water = Self.water
@@ -705,40 +708,44 @@ final class CityBuilder {
         k.b(.identity, Self.portX, 0, Self.waterZ0 + 3.4, 2.0, 0.14, 6.2, Self.m(TP.ST2))
         // 對岸（10-21 稽核：水面直接貼著地面像一塊藍色地墊）；11-01 河道延伸到霧裡，兩端不再封岸
         k.b(.identity, (Self.waterX0 + Self.waterX1) / 2, 0, Self.waterZ1 + 0.15, Self.waterX1 - Self.waterX0 + 0.3, 0.14, 0.3, Self.m(TP.ST2))
-        // 岸邊龍門吊（10-21 第二輪：原本一根柱子＋一條橫臂＋一條吊索，從正面看像十字架 ⇒ 改成真的貨櫃起重機：
-        // 四腳門架跨在棧橋上、吊臂往水面伸出去、上面有機房、吊臂下有台車＋吊索＋吊具；沒有任何「一根柱子穿過一條橫桿」的造型）
+        // 岸邊龍門吊（10-21 第二輪：不要「一根柱子穿過一條橫桿」的十字架造型；11-01 Kang：方向錯了，該在岸邊）
+        // ⇒ 照真的岸邊貨櫃起重機：棧橋右邊沿岸一段碼頭平台（berth），門架四腳站在平台上、沿岸（x）的軌道走；
+        //    吊臂垂直岸線往水面（＋z）伸出去、後端配重在陸側；台車＋吊索＋吊具停在第一個船席上方
+        let apronZ1 = Self.waterZ0 + Self.apronD
+        k.b(.identity, Self.portX + 1 + 5.5, 0, (Self.waterZ0 + apronZ1) / 2, 11, 0.14, apronZ1 - Self.waterZ0, Self.m(TP.ST2))
         tag(k, "crane")
-        let cx: Float = Self.portX, cz: Float = Self.waterZ0 + 2.2
+        let cx: Float = Self.portX + 5.5, cz: Float = Self.waterZ0 + Self.apronD / 2
         let steel = Self.m(TP.ST1), hi = Self.m(0xC98B3C)            // 吊臂、機房用琥珀（港口機具色，跟貨櫃強調色同一個材質）
         let legX: [Float] = [cx - 0.8, cx + 0.8], legZ: [Float] = [cz - 0.7, cz + 0.7], legTop: Float = 0.14 + 3.4
         for x in legX { for z in legZ { k.b(.identity, x, 0.14, z, 0.16, 3.4, 0.16, steel) } }        // 四隻腳
-        for x in legX {
-            k.b(.identity, x, 0.14, cz, 0.3, 0.16, 1.56, steel)                                       // 腳底的行走台車（沿棧橋）
-            k.b(.identity, x, 1.7, cz, 0.12, 0.12, 1.24, steel)                                       // 中段繫桿（夾在兩腳之間）
-            k.b(.identity, x, legTop, cz, 0.24, 0.24, 1.56, steel)                                    // 頂部橫樑
+        for z in legZ {
+            k.b(.identity, cx, 0.14, z, 1.56, 0.16, 0.3, steel)                                       // 腳底的行走台車（沿岸的軌道）
+            k.b(.identity, cx, 1.7, z, 1.24, 0.12, 0.12, steel)                                       // 中段繫桿
+            k.b(.identity, cx, legTop, z, 1.56, 0.24, 0.24, steel)                                    // 頂部橫樑
         }
-        for z in legZ { k.b(.identity, cx, legTop, z, 1.36, 0.24, 0.2, steel) }                       // 門架前後樑（夾在兩條頂部橫樑之間）
+        for x in legX { k.b(.identity, x, legTop, cz, 0.2, 0.24, 1.16, steel) }                       // 門架左右樑
         let by = legTop + 0.24                                                                         // 吊臂底面
-        k.b(.identity, cx + 1.6, by, cz, 5.8, 0.26, 0.5, hi)                                          // 吊臂（x 4.1–9.9，往水面伸）
-        k.b(.identity, cx - 1.05, by + 0.26, cz, 0.7, 0.4, 0.6, steel)                                // 後端配重
-        k.b(.identity, cx, by + 0.26, cz, 1.0, 0.6, 0.8, hi)                                          // 機房
-        k.b(.identity, cx + 0.62, by + 0.4, cz, 0.24, 0.3, 0.6, Self.window)                          // 機房的窗（朝水面）
+        let bz0 = cz - 1.6, bz1 = Self.waterZ0 + 6.6                                                   // 吊臂：陸側（配重）→ 伸到船席外側
+        k.b(.identity, cx, by, (bz0 + bz1) / 2, 0.5, 0.26, bz1 - bz0, hi)
+        k.b(.identity, cx, by + 0.26, bz0 + 0.35, 0.6, 0.4, 0.7, steel)                              // 後端配重（陸側）
+        k.b(.identity, cx, by + 0.26, cz, 0.8, 0.6, 1.0, hi)                                          // 機房
+        k.b(.identity, cx, by + 0.4, cz + 0.51, 0.6, 0.3, 0.02, Self.window)                         // 機房的窗（朝水面）
         k.b(.identity, cx, by + 0.86, cz, 0.18, 0.12, 0.18, Self.lamp)                                // 機房頂燈
-        let tx = cx + 3.2                                                                              // 台車（吊臂下）
-        k.b(.identity, tx, by - 0.18, cz, 0.6, 0.18, 0.6, steel)
-        for dx: Float in [-0.2, 0.2] { k.b(.identity, tx + dx, 2.26, cz, 0.03, by - 0.18 - 2.26, 0.03, steel) }   // 兩條吊索
-        k.b(.identity, tx, 2.12, cz, 1.5, 0.14, 0.5, hi)                                              // 吊具（跟貨櫃一樣長）
+        let tz = Self.berthZ(0)                                                                        // 台車（吊臂下、第一個船席上方）
+        k.b(.identity, cx, by - 0.18, tz, 0.6, 0.18, 0.6, steel)
+        for dz: Float in [-0.2, 0.2] { k.b(.identity, cx, 2.26, tz + dz, 0.03, by - 0.18 - 2.26, 0.03, steel) }   // 兩條吊索
+        k.b(.identity, cx, 2.12, tz, 1.5, 0.14, 0.5, hi)                                              // 吊具（跟貨櫃一樣長、沿船身）
         tag(k, nil)
         // 夜晚水面：燈的倒影（幾條細長亮線，沿視線方向；水本身不發光）
-        for (gx, len) in [(cx + 0.05, 2.6), (cx + 0.3, 1.6), (cx + 0.55, 2.2)] as [(Float, Float)] {
-            k.b(.identity, gx + 1.4, 0.03, cz + 1.4 + len / 2, 0.08, 0.012, len, Self.glint)
+        for (gx, len) in [(cx - 0.3, 2.6), (cx, 1.6), (cx + 0.3, 2.2)] as [(Float, Float)] {
+            k.b(.identity, gx, 0.03, apronZ1 + 0.2 + len / 2, 0.08, 0.012, len, Self.glint)
         }
         // 停著的貨櫃：疊在棧橋末端（10-21 稽核：原本放在 x 4.8 的水面上，整疊浮在水上）
         tag(k, "container-port")
         for i in 0..<3 { k.b(.identity, Self.portX, 0.14 + Float(i) * 0.7, Self.waterZ0 + 5.6, 1.5, 0.66, 0.9, Self.m(Self.containerColors[i])) }
         tag(k, nil)
-        label("city:port", SIMD3(cx + 2.5, 5.4, cz), "港口・GitHub\(s.repos > 0 ? " \(s.repos) 個 repo" : "")", alert: false,
-              hit: (SIMD3(cx + 1, 2, cz + 1), SIMD3(6, 4.5, 6)))
+        label("city:port", SIMD3(cx, 5.4, cz + 1.5), "港口・GitHub\(s.repos > 0 ? " \(s.repos) 個 repo" : "")", alert: false,
+              hit: (SIMD3(cx - 2, 2, cz + 2), SIMD3(9, 4.5, 7)))
     }
 
     /// 出港（push）：新的船從棧橋邊往右開出去 4 秒後消失；進港（fetch／pull，11-01）：船頭朝左從右邊開進來、靠到棧橋邊後消失（卸貨）。都是 playFor，不常駐。不能播（被蓋住、太熱）＝不開船；測試視窗定在第 1.5 秒
@@ -751,7 +758,7 @@ final class CityBuilder {
             let posed = BoardWindow.testMode
             guard animate || posed else { continue }
             let n = makeShip(s.repo)
-            let pier = SIMD3<Float>(Self.portX + 3.4, 0, Self.waterZ0 + 2.0 + Float(i) * 1.6)   // 棧橋右邊（10-21 稽核：太靠左船身插進棧橋與起重機腳）
+            let pier = SIMD3<Float>(Self.portX + 3.4, 0, Self.berthZ(i))   // 棧橋右邊、碼頭平台外側的船席（10-21 稽核：太靠左船身插進棧橋與起重機腳）
             let dx: Float = s.inbound ? -13 : 13
             let start = s.inbound ? pier + SIMD3(13, 0, 0) : pier
             if s.inbound { n.simdEulerAngles.y = .pi }                     // 船頭（+x）轉向左、朝棧橋
