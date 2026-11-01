@@ -74,6 +74,12 @@ public sealed record SessionRecord
 /// 某個時間點 session 在哪個資料夾
 public readonly record struct CwdMark(string Cwd, DateTime? At);
 
+/// 還沒拿到 tool_result 的工具呼叫（Mac Activity.swift 的 PendingTool）
+public sealed record PendingTool(string Id, string Name, string? Command, string? Description, string? SubagentType)
+{
+    public bool IsAgent => Name is "Agent" or "Task";
+}
+
 /// 從對話紀錄尾端抽出看板要的東西
 public sealed class TranscriptInfo
 {
@@ -86,6 +92,14 @@ public sealed class TranscriptInfo
     public string? LastAssistantText;
     public DateTime? LastActivity;
     public List<string> Queued = new();                 // 排隊中、AI 還沒拿去做的訊息
+    // 11-02 P8：Mac 10-20 的四件事（Activity.swift）——轉寫自 Board.swift 的 TranscriptInfo.consume
+    public List<PendingTool> Pending = new();           // 還沒拿到結果的工具呼叫（照呼叫順序）
+    public List<AsyncAgent> AsyncAgents = new();        // 背景跑的子 agent，還沒收到完成通知
+    public BlockedReason? LastSignal;                   // 最後一筆是 API 錯誤（額度／其他）或工具被拒（權限）；之後有新對話就清掉
+    public bool AwaitingReply;                          // 最後一筆是你的話或工具結果（AI 還沒接話）；AI 講完一段就變 false
+    public TokenUsage? Tokens;                          // 整個檔案累計（BoardReader 增量算，不在 parse 裡）
+
+    public sealed record AsyncAgent(string Id, SubagentInfo Info, DateTime? LaunchedAt = null);
 
     public const int CwdWindow = 400;
 
@@ -116,26 +130,67 @@ public sealed class TranscriptInfo
             if (l.Assistant != null) t.LastAssistantText = l.Assistant;
             if (l.Enqueue) queue.Add(l.Queued);
             if (l.Dequeue && queue.Count > 0) queue.RemoveAt(0);
+            // 背景 agent 做完（queue-operation／user 行的 <task-notification><task-id>X</task-id>）
+            if (l.DoneTask is { } tid) t.AsyncAgents.RemoveAll(x => x.Id == tid);
+            foreach (var r in l.Results)
+            {
+                int k = t.Pending.FindIndex(p => p.Id == r);
+                if (k < 0) continue;
+                var done = t.Pending[k];
+                t.Pending.RemoveAt(k);
+                // 背景 agent／workflow：結果馬上回 async_launched，之後 task-notification（task-id＝agentId 或 taskId）才算做完
+                if ((done.IsAgent || done.Name == "Workflow") && l.Launch is { } la)
+                    t.AsyncAgents.Add(new AsyncAgent(la.Id, new SubagentInfo(done.Description ?? la.Desc ?? "", done.SubagentType ?? la.TaskType, background: true)));
+            }
+            if (l.Kind == LineKind.User)
+            {
+                if (l.UserContent) t.AwaitingReply = true;
+                if (!l.IsMeta) t.LastSignal = l.Denial;
+            }
+            else if (l.Kind == LineKind.Assistant)
+            {
+                t.LastSignal = l.ApiError;
+                t.AwaitingReply = false;
+                foreach (var u in l.Uses) if (!t.Pending.Any(p => p.Id == u.Id)) t.Pending.Add(u);
+            }
         }
         t.Queued = queue.Where(q => q != null).Select(q => q!).ToList();
         return t;
     }
 
+    enum LineKind { Other, User, Assistant }
+    sealed record Launched(string Id, string? Desc, string? TaskType);
+
     /// 一行的結果：先全部取完才套用，取到一半丟例外就整行不算
-    record struct Line(string? Cwd, DateTime? At, string? Title, string? LastPrompt, bool PromptAt, string? Assistant, bool Enqueue, string? Queued, bool Dequeue);
+    sealed class Line
+    {
+        public string? Cwd; public DateTime? At; public string? Title; public string? LastPrompt; public bool PromptAt; public string? Assistant;
+        public bool Enqueue; public string? Queued; public bool Dequeue;
+        public LineKind Kind;
+        public string? DoneTask;                        // <task-notification> 的 task-id
+        public List<string> Results = new();            // tool_result 的 tool_use_id
+        public Launched? Launch;                        // 最外層 toolUseResult 是 async_launched／isAsync
+        public bool UserContent;                        // content 是陣列，或不是系統訊息的字串
+        public bool IsMeta;
+        public BlockedReason? Denial;                   // toolDenialKind：interrupted＝apiError，其他＝permission，沒有＝null
+        public BlockedReason? ApiError;                 // isApiErrorMessage
+        public List<PendingTool> Uses = new();
+    }
 
     /// Foundation 的 JSONSerialization 巢狀上限 512；System.Text.Json 預設 64，太淺會把 Swift 讀得到的行丟掉
     static readonly JsonDocumentOptions LineOptions = new() { MaxDepth = 512 };
 
     static Line ParseLine(ReadOnlySpan<byte> raw)
     {
-        using var doc = JsonDocument.Parse(raw.ToArray(), LineOptions);
+        var bytes = raw.ToArray();
+        using var doc = JsonDocument.Parse(bytes, LineOptions);
         var o = doc.RootElement;
         var l = new Line();
         if (o.ValueKind != JsonValueKind.Object) return l;
         l.Cwd = Str(o, "cwd");
         var ts = Str(o, "timestamp");
         l.At = Iso(ts);
+        bool side = Bool(o, "isSidechain");
         switch (Str(o, "type"))
         {
             case "ai-title": if (Str(o, "aiTitle") is { Length: > 0 } s1) l.Title = s1; break;
@@ -153,28 +208,111 @@ public sealed class TranscriptInfo
                         l.Dequeue = true;
                         break;
                 }
+                if (Str(o, "content") is { } qc && TaskId(qc) is { } qid) l.DoneTask = qid;
                 break;
             case "user":
+                if (side) break;
+                l.Kind = LineKind.User;
+                JsonElement content = default;
+                bool hasMsg = o.TryGetProperty("message", out var m) && m.ValueKind == JsonValueKind.Object;
+                if (hasMsg) m.TryGetProperty("content", out content);
+                if (content.ValueKind == JsonValueKind.String && TaskId(content.GetString()!) is { } uid) l.DoneTask = uid;
+                if (content.ValueKind == JsonValueKind.Array)
+                    foreach (var p in content.EnumerateArray())
+                        if (p.ValueKind == JsonValueKind.Object && Str(p, "type") == "tool_result" && Str(p, "tool_use_id") is { } rid) l.Results.Add(rid);
+                if (o.TryGetProperty("toolUseResult", out var tr) && tr.ValueKind == JsonValueKind.Object
+                    && (Str(tr, "status") == "async_launched" || Bool(tr, "isAsync"))
+                    && (Str(tr, "agentId") ?? Str(tr, "taskId")) is { } aid)
+                    l.Launch = new Launched(aid, Str(tr, "workflowName") ?? Str(tr, "summary") ?? Str(tr, "description"), Str(tr, "taskType"));
+                l.UserContent = content.ValueKind == JsonValueKind.Array || (content.ValueKind == JsonValueKind.String && !IsSystemMessage(content.GetString()!));
+                l.IsMeta = Bool(o, "isMeta");
+                // 被拒：user-rejected／permission-rule／automode-blocked＝權限；interrupted 是回應被中途停掉（實測是安全分類器），不是權限
+                l.Denial = Str(o, "toolDenialKind") is { } dk ? (dk == "interrupted" ? BlockedReason.ApiError : BlockedReason.Permission) : null;
                 // 剛開的 session 還沒有 ai-title／last-prompt，用你最後打的那句當標題
-                if (o.TryGetProperty("message", out var m) && m.ValueKind == JsonValueKind.Object
-                    && Str(m, "content") is { Length: > 0 } uc && !IsSystemMessage(uc))
+                if (content.ValueKind == JsonValueKind.String && content.GetString() is { Length: > 0 } uc && !IsSystemMessage(uc))
                 {
                     l.LastPrompt = uc;
                     l.PromptAt = ts != null;
                 }
                 break;
             case "assistant":
+                if (side) break;
                 if (o.TryGetProperty("message", out var am) && am.ValueKind == JsonValueKind.Object
                     && am.TryGetProperty("content", out var parts) && parts.ValueKind == JsonValueKind.Array)
                 {
+                    l.Kind = LineKind.Assistant;
                     var text = string.Join("\n", parts.EnumerateArray()
                         .Where(p => p.ValueKind == JsonValueKind.Object && Str(p, "type") == "text" && Str(p, "text") != null)
                         .Select(p => Str(p, "text")!)).Trim();
+                    if (Bool(o, "isApiErrorMessage") && System.Text.Json.Nodes.JsonNode.Parse(bytes, null, LineOptions) is System.Text.Json.Nodes.JsonObject jo)
+                        l.ApiError = BlockedReasons.ofApiError(jo, text);
                     if (text.Length > 0) l.Assistant = text;
+                    foreach (var p in parts.EnumerateArray())
+                    {
+                        if (p.ValueKind != JsonValueKind.Object || Str(p, "type") != "tool_use" || Str(p, "id") is not { } id || Str(p, "name") is not { } name) continue;
+                        bool hasInp = p.TryGetProperty("input", out var inp) && inp.ValueKind == JsonValueKind.Object;
+                        l.Uses.Add(new PendingTool(id, name, hasInp ? Str(inp, "command") : null, hasInp ? Str(inp, "description") : null,
+                                                   hasInp ? Str(inp, "subagent_type") : null));
+                    }
                 }
                 break;
         }
         return l;
+    }
+
+    static bool Bool(JsonElement o, string k) => o.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.True;
+
+    /// `<task-notification><task-id>X</task-id>` 裡的 X
+    public static string? TaskId(string s)
+    {
+        if (!s.StartsWith("<task-notification>", StringComparison.Ordinal)) return null;
+        int a = s.IndexOf("<task-id>", StringComparison.Ordinal);
+        if (a < 0) return null;
+        a += "<task-id>".Length;
+        int b = s.IndexOf("</task-id>", a, StringComparison.Ordinal);
+        return b < 0 ? null : s[a..b];
+    }
+
+    /// 你親手送出的訊息（不是工具結果、不是系統通知）
+    public static bool IsPrompt(JsonElement content)
+    {
+        if (content.ValueKind == JsonValueKind.String) { var s = content.GetString()!; return s.Length > 0 && !IsSystemMessage(s); }
+        if (content.ValueKind != JsonValueKind.Array) return false;
+        var parts = content.EnumerateArray().Where(p => p.ValueKind == JsonValueKind.Object).ToList();
+        if (parts.Any(p => Str(p, "type") == "tool_result")) return false;
+        return parts.Any(p => Str(p, "type") == "text" && Str(p, "text") is { } t && !IsSystemMessage(t));
+    }
+
+    /// 最後一個還沒拿到結果的工具 → 現在在做什麼；沒有的話：AI 講完了但背景 agent／workflow 還在跑 ⇒ 交辦中，
+    /// 其餘就是在想（剛收到你的話、或剛講完一段還在忙）
+    public AIActivity CurrentActivity =>
+        Pending.Count == 0 ? (!AwaitingReply && AsyncAgents.Count > 0 ? AIActivity.Delegating : AIActivity.Thinking)
+                           : AIActivities.of(Pending[^1].Name, Pending[^1].SubagentType);
+
+    /// 正在等子 agent：同步的 Agent／Workflow 還沒回結果，或還有背景的沒收到完成通知
+    public bool IsDelegating => AsyncAgents.Count > 0 || Pending.Any(p => p.IsAgent || p.Name == "Workflow");
+
+    /// 進行中的子 agent：同步的（Agent 還沒回結果，`includeSync`＝主 session 還在忙才算）＋背景的（還沒收到完成通知）
+    public List<SubagentInfo> Subagents(bool includeSync)
+    {
+        var sync = includeSync ? Pending.Where(p => p.IsAgent).Select(p => new SubagentInfo(p.Description ?? "", p.SubagentType)) : Enumerable.Empty<SubagentInfo>();
+        return sync.Concat(AsyncAgents.Select(a => a.Info)).ToList();
+    }
+
+    /// 卡住／等你的原因。`waiting`＝光暈紅（等你回答）；`stuck`＝卡住欄
+    public BlockedReason? BlockedReasonFor(bool waiting, bool stuck)
+    {
+        if (waiting)
+        {
+            if (Pending.Count > 0 && Pending[^1].Name is not ("AskUserQuestion" or "ExitPlanMode")) return BlockedReason.Permission;   // 工具在等你按允許
+            return LastSignal;
+        }
+        if (stuck)
+        {
+            if (Pending.Count > 0 && Pending[^1] is { Name: "Bash", Command: { } c } && BlockedReasons.of(c) is { } r) return r;
+            return LastSignal;
+        }
+        return null;
     }
 
     /// 系統自動排進來的（task-notification、跨 session 的閒置／送達通知），不是你交代的事
@@ -513,6 +651,8 @@ public static class Board
             var t = transcripts.GetValueOrDefault(s.SessionId) ?? new TranscriptInfo();
             WorkState? glow = glows.TryGetValue(s.Pid, out var g) ? g : null;
             var b = Column(s.Status, glow, t.LastActivity, now);
+            // Mac 10-20 審查：在等子 agent／workflow 回來時主 session 本來就不寫東西，不算卡住（實測主控 session 開完 workflow 被誤判卡住）
+            if (b.Item1 == BoardColumn.Stuck && t.IsDelegating) b = (BoardColumn.Active, "交辦中，等子 agent 回來");
             var report = CardRules.Fresh(reports?.GetValueOrDefault(s.SessionId), t.LastPromptAt);
             var (col, why) = CardRules.Column(b, glow, report, decisions?.GetValueOrDefault(s.SessionId), t.LastPromptAt, t.LastActivity);
             var review = reviews?.GetValueOrDefault(s.SessionId) is { } r && (t.LastPromptAt is not { } lp || r.Turn >= lp) ? r : null;
@@ -532,6 +672,13 @@ public static class Board
                 Visiting = col == BoardColumn.Active ? visiting : null,     // 只有正在做事才有影分身，閒著不留幽靈
                 Unused = t.LastActivity == null && t.LastPrompt == null,
             });
+            // Mac 10-20：動作／卡住原因／子 agent／token。同步子 agent 只在主 session 還沒停時算（停了還掛著＝被中斷的殘留）
+            bool waiting = col == BoardColumn.Review && glow == WorkState.Input;
+            var me = out_[^1];
+            me.Activity = col == BoardColumn.Active ? t.CurrentActivity : AIActivity.None;
+            me.BlockedReason = t.BlockedReasonFor(waiting, col == BoardColumn.Stuck);
+            me.Subagents = t.Subagents(col is BoardColumn.Active or BoardColumn.Stuck || waiting);
+            me.Tokens = t.Tokens;
             for (int i = 0; i < t.Queued.Count; i++)
             {
                 var q = t.Queued[i];

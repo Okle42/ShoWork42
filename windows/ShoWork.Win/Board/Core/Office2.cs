@@ -27,12 +27,12 @@ public static class CardMirror
         ["from"] = m.From, ["text"] = m.Text, ["summary"] = m.Summary, ["timestamp"] = m.Timestamp, ["msg_id"] = m.MsgId, ["to"] = m.To,
     };
 
-    /// Mac SelfReport 的 15 個欄位；Windows 的 SelfReport 沒有 doing／options／how／kind／handoff／touch／outward（W5 的 card 參數還沒收）
+    /// Mac SelfReport 的 15 個欄位（11-02 P8：Windows 的 SelfReport 也讀 showork card 寫的 doing／options／how／kind／handoff／touch／outward）
     static JsonNode? Report(SelfReport? r) => r == null ? null : new JsonObject
     {
         ["status"] = MacMirror.Camel(r.Status.ToString()), ["progress"] = r.Progress, ["confidence"] = r.Confidence, ["summary"] = r.Summary, ["ask"] = r.Ask,
-        ["report"] = r.Report, ["task"] = r.Task, ["doing"] = null, ["options"] = null, ["how"] = null, ["kind"] = null, ["handoff"] = null,
-        ["touch"] = null, ["outward"] = null, ["at"] = MacMirror.Encode(r.At),
+        ["report"] = r.Report, ["task"] = r.Task, ["doing"] = r.Doing, ["options"] = MacMirror.Encode(r.Options), ["how"] = r.How, ["kind"] = r.Kind, ["handoff"] = r.Handoff,
+        ["touch"] = r.Touch, ["outward"] = r.Outward, ["at"] = MacMirror.Encode(r.At),
     };
 }
 

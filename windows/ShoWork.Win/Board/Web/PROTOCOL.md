@@ -68,14 +68,14 @@
 | `askCaptain` | `text` | `BoardActions.askCaptain(text)`（隊長不在就開一個）。做完回 `toast` 並帶 `captainDone:true` | 收件匣下方「交給隊長」 |
 | `focus` | `id, sessionId, pid, kind` | `BoardActions.focus(pid:)`：跳到終端機視窗。找不到時回 toast：`kind == "bg"` 回「這是背景 session，沒有視窗；用 claude attach 打開」，其他回「找不到這個 session 的視窗」 | 回答卡、收件匣、右鍵「跳到這個視窗」、對話窗格終端機鈕 |
 | `approve` | `id, sessionId` | `BoardActions.approve`（放行） | 右鍵「放行」（只有 review 欄） |
-| `dispatch` | `id, sessionId` | `onDispatch(card)`：開「派工給它⋯」對話框（BoardWindow 的 sheet，C# 端要做） | 右鍵 |
-| `sendBack` | `id, sessionId` | `onSendBack(card)`：開「退回並補指示⋯」對話框（同上） | 右鍵 |
+| `dispatch` | `id, sessionId` | `onDispatch(card)`：開「派工給它⋯」對話框（BoardWindow 的 sheet；C# 端在 `Board\View\BoardSheets.cs`） | 右鍵 |
+| `sendBack` | `id, sessionId` | `onSendBack(card)`：開「退回並補指示⋯」對話框（同上；送出走 TermSend 打進終端機） | 右鍵 |
 | `park` | `id, sessionId` | `onPark(card)`：開「丟回待辦⋯」對話框（同上） | 右鍵 |
 | `review` | `id, sessionId, force: true` | `Reviewer.shared.start(card, force: true)` | 右鍵「重新審核」 |
 | `redecorate` | `project` | `BoardModel.redecorate(project)`，回 toast | 右上「重新裝潢」、右鍵 |
 | `guardScan` | | `BoardModel.guardScan()`，回 toast「開始掃描 Wi-Fi（約數十秒）」或「已經在掃描了」 | 保全面板、保全右鍵 |
 | `pushAllow` | `dir, head, repo` | `PushGuard.allow(event)` | 保全面板「放行一次」 |
-| `watch` | `sessionId \| null` | `BoardModel.watch(sid)`：右側對話窗格改讀這個 AI 的對話（推到 `sessionThread`）；null＝隊長 | 點角色、對話窗格返回 |
+| `watch` | `sessionId \| null`, `id?` | `BoardModel.watch(sid)`：右側對話窗格改讀這個 AI 的對話（推到 `sessionThread`）；null＝隊長。`id`＝點的那個角色的卡片 id（點角色才帶；C# 用它開左下角細節卡，取代舊的 `{type:"select"}`），返回鈕不帶 | 點角色、對話窗格返回 |
 | `openGraph` | `project` | `GraphSource.openBuilding(clicked:)`：用預設瀏覽器開整棟大樓的知識星雲，回 toast | 點 B1 神經網路 |
 | `b1Refresh` | | 讀 `board/b1-board.jsonl`，回 `{type:"b1Posts"}` | 點 B1 留言板、重新整理 |
 | `weatherSearch` | `query` | `OfficeWeather.search`（Open-Meteo 地名搜尋），回 `weatherResults` | 天氣地點面板 |
@@ -85,3 +85,11 @@
 拷貝 Session ID 由網頁自己處理（`navigator.clipboard`），不送 C#。
 
 網頁也把設定存在 `localStorage`（`office.*`），重開時先用這份。C# 收到 `setPref` 後要自己保存，因為 C# 也要靠這些設定算 `look` 和巡邏。
+
+## C# 端（11-02 P8 第二輪）
+- 動作都在 `Board\View\BoardForm.cs` 的 `HandleAction` 接，邏輯在 `Board\BoardActions.cs`（Mac BoardActions.swift 轉寫）。
+- 打字進終端機（`answer`、`sendBack`）：先 `TermSend`（Mac 的 tmux send-keys），打不進去再走 Peer（收件匣直送），最後拷貝到剪貼簿並跳到那個視窗。
+- 權限／選擇題／計畫確認的請求與回答檔、派工單、事先放行、B1 留言板的檔案格式用 hook 端的 `showork\Core`（`ShoWork.Hooks.*`），兩邊同一份。
+- `guardScan`：Windows 沒有 Mac 的 wifiwatch.sh；有 `~/.claude/scripts/wifiwatch.ps1`（或 `SHOWORK_WIFIWATCH_SCRIPT`）才跑，沒有就回原因。
+- `openGraph`：開那個專案（或任一份）的 graphify 輸出 `graph3d.html`／`graph.html`；整棟版（Mac GraphSource.openBuilding）還沒轉寫。
+- `setPref` 存在 `%LOCALAPPDATA%\ShoWork42\board\prefs.json`（`office.lighting`／`office.style`／`office.guardPatrol`），天氣開關與地點沿用 `office-weather-off`／`office-weather.json`。

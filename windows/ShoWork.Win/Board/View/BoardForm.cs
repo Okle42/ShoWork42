@@ -7,8 +7,9 @@ using static ShoWork.Native;
 
 namespace ShoWork;
 
-/// 戰情中心視窗（唯讀版）：部門島卡片格＋工具列的帳號流量。Mac 版 BoardWindow.swift／IslandView.swift 的移植。
-/// 不做會動到別的東西的按鈕（新任務、交給隊長、AI 審核、自動收尾、退回、放行、丟待辦），也不跳到終端機視窗。
+/// 戰情中心視窗：部門島卡片格＋工具列（新任務⋯、交給隊長⋯、AI 審核、ctx 門檻＋自動收尾、帳號流量）。Mac 版 BoardWindow.swift／IslandView.swift 的移植。
+/// 11-02 P8 第二輪：大樓網頁的按鈕（收件匣回答、權限、選擇題、隊長、派工、退回、丟待辦、放行、重新審核、重新裝潢、天氣地點⋯，見 Web\PROTOCOL.md）
+/// 都在這裡接（OnOfficeAction）；對話框在 BoardSheets.cs。只有正式 agent（系統匣開的）會自動審核、自動回報派工、自動收尾（Mac：Engine.current != nil）。
 /// 每 1.5 秒重讀一次看板（同 Mac），沒變就不重畫；島的動畫 8 fps，只在有人在動、視窗看得到、沒開「減少動態效果」時跑。
 /// W6：左上「卡片／大樓」切換；大樓＝WebView2＋three.js（OfficeHost），WebView2 Runtime 不在或壞掉就退回卡片、切換鈕變灰。
 sealed class BoardForm : Form
@@ -33,6 +34,7 @@ sealed class BoardForm : Form
     readonly System.Windows.Forms.Timer anim = new() { Interval = (int)(1000 / KuboMath.Fps) };
     readonly Panel scroller;
     readonly UsageBar usage;
+    readonly BoardControls controls;
     readonly List<IslandCardView> views = new();
     readonly DateTime demoAt = DateTime.UtcNow;
     System.Windows.Forms.Timer? shotTimer;           // --shot 的一次性計時器：視窗先被關掉時要一起丟掉
@@ -55,6 +57,16 @@ sealed class BoardForm : Form
     IslandCardView? detailView;
     string? detailId;
     static string ViewPrefPath => Path.Combine(Wire.SupportDir, "board", "board-view.txt");
+    // 11-02 P8 第二輪：收件匣、隊長對話、進度條（BoardModel 的 @Published）
+    List<CaptainLine> captainThread = new(), sessionThread = new();
+    List<CaptainTaskInfo> captainTasks = new();
+    List<RunProgress> runs = new();
+    Dictionary<string, Review> reviews = new();
+    bool captainBusy;
+    bool guardScanning;
+    /// 正式 agent（系統匣開的）才會自動審核、自動回報派工、自動收尾、巡邏（Mac：Engine.current != nil）
+    static bool Official => !BoardWindowTestMode && Engine.Current != null;
+    public BoardCard? CaptainCard => lastCards.FirstOrDefault(c => c.Captain && !c.IsQueued);
 
     public BoardTheme Theme { get; private set; } = BoardTheme.Current();
     public BoardFonts Fonts { get; private set; } = new();
@@ -85,6 +97,11 @@ sealed class BoardForm : Form
         usage = new UsageBar(this);
         switcher = new ViewSwitch(this);
         switcher.Changed += t => SetTower(t, remember: true);
+        controls = new BoardControls(this);
+        controls.NewTask += () => OpenSheet(new NewTaskSheet(this, Folders(lastCards), Toast));
+        controls.ToCaptain += () => OpenSheet(new CaptainSheet(this, CaptainCard, BoardWindowTestMode, Toast));
+        controls.Changed += () => { Repaint(); PerformLayout(); };
+        Controls.Add(controls);
         Controls.Add(switcher);
         Controls.Add(usage);
         Controls.Add(scroller);
@@ -93,6 +110,96 @@ sealed class BoardForm : Form
         anim.Tick += (_, _) => AnimateTick();
         SystemEvents.UserPreferenceChanged += PreferenceChanged;
         if (opt.TopMost) TopMost = true;
+        WireActions();
+    }
+
+    // MARK: 動作的接線（BoardActions 的委派：剪貼簿、跳到視窗、通知）
+
+    void WireActions()
+    {
+        BoardActions.CopyToClipboard = text =>
+        {
+            bool ok = false;
+            void Set() { try { Clipboard.SetText(text); ok = true; } catch { } }
+            try { if (InvokeRequired) Invoke(Set); else Set(); } catch { }
+            return ok;
+        };
+        BoardActions.FocusWindow = FocusCard;
+        BoardActions.Notify = (title, body) =>
+        {
+            Log.Note($"NOTICE {title}：{body}");
+            try { BeginInvoke(() => Toast($"{title}：{body}")); } catch { }
+        };
+        Reviewer.Shared.TranscriptOf = c => reader.TranscriptPathOf(c.SessionId);
+        Reviewer.Shared.Changed += AsyncRefresh;
+        TaskRouter.Shared.Changed += AsyncRefresh;
+    }
+
+    void AsyncRefresh() { try { if (!IsDisposed) BeginInvoke(Refresh_); } catch { } }
+
+    /// 跳到那個 AI 的終端機視窗：光暈引擎知道它在哪（Mac：Engine.current.tabs 的 placements）；測試視窗沒有引擎 ⇒ 自己找那個 pid 的主控台
+    static bool FocusCard(BoardCard c)
+    {
+        IntPtr w = IntPtr.Zero;
+        if (Engine.Current?.Sessions.FirstOrDefault(s => s.Pid == c.Pid) is { Window: var ew } && ew != IntPtr.Zero) w = ew;
+        if (w == IntPtr.Zero && c.Pid > 0)
+            try { if (Resolver.Consoles(new[] { c.Pid }).FirstOrDefault() is { Hwnd: var h } && h != IntPtr.Zero) w = Resolver.WindowOf(h); } catch { }
+        if (w == IntPtr.Zero) return false;
+        Engine.JumpTo(w);
+        return true;
+    }
+
+    /// 新任務可選的資料夾：看板上出現過的專案根目錄（Mac BoardView.folders）
+    static List<string> Folders(IEnumerable<BoardCard> cards)
+    {
+        var home = BoardReader.DefaultHome;
+        var seen = new List<string>();
+        foreach (var c in cards)
+            if (c.Cwd is { } d && GitRoot(d, home) is var r && !BoardPath.Same(r, home) && !seen.Contains(r, StringComparer.OrdinalIgnoreCase)) seen.Add(r);
+        return seen;
+    }
+    static string GitRoot(string p, string home)
+    {
+        for (string? d = p; d != null && !BoardPath.Same(d, home); d = BoardPath.Parent(d))
+            if (BoardReader.DefaultIsRepo(d)) return d;
+        return p;
+    }
+
+    /// 對話框（Mac 的 sheet）：置中在戰情中心上、強制回應
+    void OpenSheet(Form f)
+    {
+        try { f.ShowDialog(this); } finally { f.Dispose(); }
+        Refresh_();
+    }
+
+    /// 底部提示（Mac BoardView.show：6 秒後收掉）。大樓在畫面上就交給網頁的 toast；卡片畫面用工具列下方的一行
+    public void Toast(string text)
+    {
+        if (IsDisposed) return;
+        if (tower && office?.Ready == true) { office.Post(new System.Text.Json.Nodes.JsonObject { ["type"] = "toast", ["text"] = text }); return; }
+        toastText = text;
+        toastAt = DateTime.UtcNow;
+        Invalidate();
+        var t = new System.Windows.Forms.Timer { Interval = 6000 };
+        t.Tick += (_, _) => { t.Dispose(); if (DateTime.UtcNow - toastAt >= TimeSpan.FromSeconds(5.9)) { toastText = null; Invalidate(); } };
+        t.Start();
+    }
+    string? toastText;
+    DateTime toastAt;
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        base.OnPaint(e);
+        if (toastText == null) return;
+        // 卡片畫面的提示：浮在底部中間的膠囊（Mac：.regularMaterial Capsule）
+        float s = S;
+        var f = Fonts.Get(13 * s);
+        var sz = TextRenderer.MeasureText(toastText, f, new Size((int)(ClientSize.Width * 0.8), 0), TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix);
+        var r = new Rectangle((ClientSize.Width - sz.Width) / 2 - (int)(14 * s), ClientSize.Height - sz.Height - (int)(36 * s), sz.Width + (int)(28 * s), sz.Height + (int)(16 * s));
+        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        using (var p = IslandCardView.Rounded(r, r.Height / 2f))
+        using (var b = new SolidBrush(Theme.Card)) e.Graphics.FillPath(b, p);
+        TextRenderer.DrawText(e.Graphics, toastText, f, Rectangle.Inflate(r, -(int)(14 * s), -(int)(8 * s)), Theme.Text, TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix | TextFormatFlags.HorizontalCenter);
     }
 
     float S => DeviceDpi / 96f;
@@ -166,11 +273,28 @@ sealed class BoardForm : Form
         int pad = (int)(16 * s);
         int w = Math.Max(0, ClientSize.Width - pad * 2);
         var sw = switcher.PreferredSize;
-        switcher.Bounds = new Rectangle(pad, (int)(12 * s), sw.Width, sw.Height);
-        int uw = Math.Max(0, w - sw.Width - (int)(12 * s));
-        int uh = usage.HeightFor(uw);
-        usage.Bounds = new Rectangle(switcher.Right + (int)(12 * s), (int)(12 * s), uw, uh);
-        int top = Math.Max(usage.Bottom, switcher.Bottom) + (int)(12 * s);
+        int gap = (int)(12 * s), y0 = (int)(12 * s);
+        switcher.Bounds = new Rectangle(pad, y0, sw.Width, sw.Height);
+        // 視窗窄時不硬擠一排（Mac 10-13 ViewThatFits）：一排 → 兩排（流量表換到第二排）→ 兩排短標籤
+        int left = w - sw.Width - gap;
+        int uw1 = usage.MetersWidth;
+        bool one = controls.WidthFor(false) + gap * 2 + uw1 <= left;
+        controls.Short = !one && controls.WidthFor(false) > left;
+        int cw = Math.Min(left, controls.WidthFor(controls.Short));
+        controls.Bounds = new Rectangle(switcher.Right + gap, y0, Math.Max(0, cw), sw.Height);
+        int top;
+        if (one)
+        {
+            int uh = usage.HeightFor(uw1);
+            usage.Bounds = new Rectangle(pad + w - uw1, y0 + Math.Max(0, (sw.Height - uh) / 2), uw1, uh);
+            top = Math.Max(usage.Bottom, switcher.Bottom) + gap;
+        }
+        else
+        {
+            int uh = usage.HeightFor(w);
+            usage.Bounds = new Rectangle(pad, switcher.Bottom + (int)(8 * s), w, uh);
+            top = usage.Bottom + gap;
+        }
         scroller.Bounds = new Rectangle(pad, top, w, Math.Max(0, ClientSize.Height - top - pad));
         if (office != null) office.View.Bounds = scroller.Bounds;
         LayoutDetail();
@@ -236,16 +360,16 @@ sealed class BoardForm : Form
         var now = DateTime.UtcNow;
         Task.Run(() =>
         {
-            List<BoardCard> cards; RateLimits? limits;
+            List<BoardCard> cards; RateLimits? limits; BoardReader.Snapshot? snap = null;
             if (opt.Demo) { cards = BoardDemo.Cards(demoAt); limits = BoardDemo.Limits(demoAt); }
             else
             {
-                var snap = reader.Read();
+                snap = reader.Read();
                 cards = reader.Cards(snap, now);
                 limits = snap.RateLimits;
             }
             var sig = JsonSerializer.Serialize(cards, Board.DumpJson);
-            return (cards, limits, sig);
+            return (cards, limits, sig, snap);
         }).ContinueWith(t =>
         {
             if (t.Exception is { } x) Log.Note($"BOARD read failed {x.InnerException ?? x}");
@@ -255,7 +379,7 @@ sealed class BoardForm : Form
                 BeginInvoke(() =>
                 {
                     reading = false;
-                    try { if (t.IsCompletedSuccessfully) Apply(t.Result.cards, t.Result.limits, t.Result.sig); }
+                    try { if (t.IsCompletedSuccessfully) { ApplySnapshot(t.Result.snap, t.Result.cards); Apply(t.Result.cards, t.Result.limits, t.Result.sig); } }
                     catch (Exception x2) { Failed("apply", x2); }
                 });
             }
@@ -266,11 +390,54 @@ sealed class BoardForm : Form
     /// 門檻改了：卡片上 ctx 的顏色跟著變（資料沒變，只重畫）
     public void Repaint() { foreach (var v in views) v.Invalidate(true); }
 
+    /// 收件匣、隊長對話、派工單、進度條（Mac BoardModel.apply 的後半）＋自動審核、ctx 收尾、派工回報、保全巡邏
+    void ApplySnapshot(BoardReader.Snapshot? s, List<BoardCard> cards)
+    {
+        if (s == null) return;
+        captainThread = s.CaptainThread;
+        sessionThread = reader.Watching != null ? s.SessionThread : new();
+        runs = s.Runs;
+        reviews = s.Reviews;
+        // 隊長面板的派工單：還在做的（3 天內有動靜）＋要你看的（24 小時內）；卡住的排最前面
+        var now = DateTime.UtcNow;
+        int Rank(CaptainTaskInfo.TaskState st) => st == CaptainTaskInfo.TaskState.blocked ? 0 : st == CaptainTaskInfo.TaskState.review ? 1 : 2;
+        captainTasks = s.Tasks.Where(t => (CaptainTasks.Open(t.State) && now - t.UpdatedAt < TimeSpan.FromDays(3))
+                                          || (t.State == CaptainTaskInfo.TaskState.review && now - t.UpdatedAt < TimeSpan.FromDays(1)))
+                              .OrderBy(t => Rank(t.State)).ThenByDescending(t => t.UpdatedAt).ToList();
+        if (Official) Reviewer.Shared.Consider(cards, s.Reviews);
+        CtxGuard.Shared.Check(cards, Official);
+        TaskRouter.Shared.Check(s.Tasks, Official);
+        Patrol();
+    }
+
+    /// 定時巡邏：每 30 分鐘最多一次。只有正式 agent 會巡（測試視窗不動手、不掃網路）
+    void Patrol()
+    {
+        if (!Official) return;
+        var sc = GuardScanner.Shared;
+        if (GuardScanner.PatrolDue(BoardPrefs.Bool("office.guardPatrol", false), sc.IsRunning, officeSource?.Guard.status(DateTime.UtcNow).LastScan, sc.LastStarted, DateTime.UtcNow)
+            && File.Exists(GuardScanner.Script))
+            GuardScan();
+    }
+
+    /// 立即掃描（你按的，或定時巡邏）：背景跑掃描腳本；同時只跑一個（Mac BoardModel.guardScan）
+    bool GuardScan()
+    {
+        if (!File.Exists(GuardScanner.Script)) return false;
+        bool ok = GuardScanner.Shared.Scan(code =>
+        {
+            Log.Note($"GUARD scan done code={code}");
+            try { BeginInvoke(() => { guardScanning = false; UpdateOffice(force: true); Refresh_(); }); } catch { }
+        });
+        if (ok) { guardScanning = true; Log.Note($"GUARD scan start {GuardScanner.Script}"); UpdateOffice(force: true); }
+        return ok;
+    }
+
     void Apply(List<BoardCard> cards, RateLimits? limits, string sig)
     {
         if (IsDisposed) return;
         lastCards = cards;
-        if (sig == signature) { usage.Set(limits, islands.Count); UpdateOffice(force: false); Retime(); return; }
+        if (sig == signature) { usage.Set(limits, islands.Count); UpdateOffice(force: ExtrasChanged()); Retime(); return; }
         signature = sig;
         islands = Islands.Build(cards);
         UpdateOffice(force: true);
@@ -313,6 +480,7 @@ sealed class BoardForm : Form
         {
             office = new OfficeHost();
             office.Selected += id => { try { BeginInvoke(() => ShowDetail(id)); } catch { } };
+            office.ActionReceived += m => { try { BeginInvoke(() => OnOfficeAction(m)); } catch { } };
             office.Broken += why => { try { BeginInvoke(() => OfficeBroken(why)); } catch { } };
             office.View.Bounds = scroller.Bounds;
             Controls.Add(office.View);
@@ -354,7 +522,7 @@ sealed class BoardForm : Form
         // 城市、天氣掛在同一個刷新上（各自比時間決定要不要真的去讀；Mac：看板 15 秒 timer 叫 CityMonitor.tick）
         CityMonitor.shared.tick();
         weather!.tick();
-        officeSource.visible = tower && visibleOnScreen;
+        officeSource.visible = tower && visibleOnScreen && webVisible;
         var colors = new Dictionary<string, string>
         {
             ["working"] = Hex(GlowWindow.ColorOf(WorkState.Working)), ["waiting"] = Hex(GlowWindow.ColorOf(WorkState.Input)),
@@ -362,9 +530,245 @@ sealed class BoardForm : Form
         };
         var city = CityMonitor.off ? null : CityMonitor.shared.current;
         var now = DateTime.UtcNow;
-        officeJson = officeSource.Build(lastCards, now, city, weather.main, weather.current, graph.consider(officeSource.Tower, now), colors, ReduceMotion);
+        officeSource.lighting = Enum.TryParse<OfficeLighting>(BoardPrefs.Str("office.lighting") ?? "", out var lt) ? lt : OfficeLighting.auto;
+        officeJson = officeSource.Build(lastCards, now, city, weather.main, weather.current, graph.consider(officeSource.Tower, now), colors, ReduceMotion,
+                                        scanning: guardScanning, extra: Extras());
         if (detailId != null) ShowDetail(detailId);             // 細節卡跟著資料更新（人走了就收掉）
         office?.Push(officeJson);                               // OfficeHost 自己比對，沒變就不推
+    }
+
+    // MARK: 大樓網頁的選填欄位（PROTOCOL.md 的選填表：收件匣、隊長對話、派工單、進度條、天氣列）
+
+    System.Text.Json.Nodes.JsonObject Extras()
+    {
+        var o = new System.Text.Json.Nodes.JsonObject
+        {
+            ["captainThread"] = MacMirror.Encode(captainThread),
+            ["captainTasks"] = MacMirror.Encode(captainTasks),
+            ["sessionThread"] = MacMirror.Encode(sessionThread),
+            ["runs"] = MacMirror.Encode(runs),
+            ["reviewing"] = MacMirror.Encode(Reviewer.Shared.Running.OrderBy(x => x, StringComparer.Ordinal).ToList()),
+            ["captainBusy"] = captainBusy,
+            ["captainModelTitle"] = BoardActions.ModelTitle(BoardActions.CaptainModel),
+        };
+        if (weather != null) { o["weatherSites"] = weather.sitesJson(); o["weatherMenuStatus"] = weather.menuStatus; }
+        return o;
+    }
+
+    string extrasSig = "";
+    bool ExtrasChanged()
+    {
+        var j = MacMirror.Json(Extras());
+        if (j == extrasSig) return false;
+        extrasSig = j;
+        return true;
+    }
+
+    // MARK: 大樓網頁的動作（{type:"action", action, …}；欄位見 Web\PROTOCOL.md）
+
+    /// 卡片 id（排隊卡是 sid#q0）或 sessionId → 卡片
+    BoardCard? CardOf(JsonElement m)
+    {
+        string? id = Str(m, "id"), sid = Str(m, "sessionId");
+        var all = lastCards.Concat(officeSource?.Islands.SelectMany(i => i.People.Select(p => p.Card)) ?? Enumerable.Empty<BoardCard>());
+        return all.FirstOrDefault(c => id != null && c.Id == id) ?? all.FirstOrDefault(c => sid != null && c.SessionId == sid && !c.IsQueued);
+    }
+    static string? Str(JsonElement m, string k) => m.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+
+    /// 示範卡片（demo-00…）借用的是假的 session：不送任何動作（Mac：OfficeDemo.mode != nil 只顯示 toast）
+    bool DemoCard(BoardCard c) => opt.Demo || c.SessionId.StartsWith("demo-", StringComparison.Ordinal);
+
+    void Post(System.Text.Json.Nodes.JsonObject o) => office?.Post(o);
+    void PostToast(string text, bool captainDone = false)
+    {
+        var o = new System.Text.Json.Nodes.JsonObject { ["type"] = "toast", ["text"] = text };
+        if (captainDone) o["captainDone"] = true;
+        Post(o);
+    }
+
+    /// 背景跑（打字進終端機、送收件匣、開 session 會等），做完回 UI 執行緒
+    void Run<T>(Func<T> work, Action<T> done) =>
+        Task.Run(work).ContinueWith(t =>
+        {
+            if (t.Exception is { } x) Log.Note($"BOARD action failed {x.InnerException ?? x}");
+            try { BeginInvoke(() => { if (!IsDisposed) done(t.IsCompletedSuccessfully ? t.Result : default!); }); } catch { }
+        });
+
+    void OnOfficeAction(JsonElement m)
+    {
+        if (IsDisposed) return;
+        var action = Str(m, "action") ?? "";
+        try { HandleAction(action, m); }
+        catch (Exception x) { Log.Note($"BOARD action {action} failed: {x}"); PostToast($"做不到：{x.Message}"); }
+    }
+
+    void HandleAction(string action, JsonElement m)
+    {
+        Log.Note($"BOARD action {action}");
+        switch (action)
+        {
+            case "answer":
+            {
+                var text = Str(m, "text") ?? "";
+                if (CardOf(m) is not { } c || text.Trim().Length == 0) { PostToast("找不到這張卡片（可能剛結束）"); return; }
+                if (DemoCard(c)) { PostToast($"示範資料：不送出（{text.Length} 字）"); return; }
+                Run(() => BoardActions.Answer(c, text), msg => { PostToast(msg ?? ""); Refresh_(); });
+                return;
+            }
+            case "permit":
+            {
+                if (CardOf(m) is not { } c) { PostToast("找不到這張卡片（可能剛結束）"); return; }
+                if (DemoCard(c)) { PostToast("示範資料：不回答權限"); return; }
+                Dictionary<string, List<string>>? answers = null;
+                if (m.TryGetProperty("answers", out var a) && a.ValueKind == JsonValueKind.Object)
+                {
+                    answers = new();
+                    foreach (var q in a.EnumerateObject())
+                        answers[q.Name] = q.Value.ValueKind == JsonValueKind.Array ? q.Value.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.String).Select(x => x.GetString()!).ToList()
+                                        : q.Value.ValueKind == JsonValueKind.String ? new() { q.Value.GetString()! } : new();
+                }
+                // 網頁看到的那個對話框已經換了（又跳了新的）⇒ 不要把舊答案套到新的上
+                if (Str(m, "permitId") is { } pid && c.Permit is { } p && p.Id != pid) { PostToast($"「{c.Title}」又跳了新的對話框，請再看一次"); Refresh_(); return; }
+                PostToast(BoardActions.AnswerPermit(c, Str(m, "decision") ?? "allow", Str(m, "message"), answers));
+                Refresh_();
+                return;
+            }
+            case "askCaptain":
+            {
+                var text = Str(m, "text") ?? "";
+                if (BoardWindowTestMode) { PostToast("測試：不交給隊長", captainDone: true); return; }
+                captainBusy = true;
+                Post(new System.Text.Json.Nodes.JsonObject { ["type"] = "captainBusy", ["busy"] = true });
+                Run(() => BoardActions.AskCaptain(text), msg =>
+                {
+                    captainBusy = false;
+                    BoardHistory.Append(new Dictionary<string, string> { ["ev"] = "tocaptain", ["text"] = text });
+                    PostToast(msg ?? "送不到隊長", captainDone: true);
+                    Refresh_();
+                });
+                return;
+            }
+            case "focus":
+            {
+                if (CardOf(m) is not { } c) { PostToast("找不到這個 session 的視窗"); return; }
+                if (DemoCard(c)) { PostToast("示範資料：不跳到視窗"); return; }
+                Run(() => BoardActions.Focus(c), msg => { if (msg != null) PostToast(msg); });
+                return;
+            }
+            case "approve":
+                if (CardOf(m) is { } ac && !DemoCard(ac)) { BoardActions.Approve(ac); Refresh_(); }
+                return;
+            case "dispatch":
+                if (CardOf(m) is { } dc)
+                    OpenSheet(new DispatchSheet(this, dc, lastCards.Where(x => !x.IsQueued && x.SessionId != dc.SessionId && !x.Captain && x.Name != null).Select(x => x.Name!).ToList(),
+                                                CaptainCard?.SessionId, Toast));
+                return;
+            case "sendBack":
+                if (CardOf(m) is { } sc) OpenSheet(new SendBackSheet(this, sc, Toast));
+                return;
+            case "park":
+                if (CardOf(m) is { } pc) OpenSheet(new ParkSheet(this, pc, () => { }));
+                return;
+            case "review":
+                if (CardOf(m) is { } rc && !DemoCard(rc)) { Reviewer.Shared.Start(rc, force: true); UpdateOffice(force: true); }
+                return;
+            case "redecorate":
+            {
+                var project = Str(m, "project") ?? "";
+                if (opt.Demo || officeSource == null) { PostToast("示範資料：不重新裝潢"); return; }
+                PostToast(officeSource.Decor.redecorate(project, lastCards));
+                return;
+            }
+            case "guardScan":
+            {
+                string msg;
+                if (opt.Demo) msg = "示範資料：不掃描";
+                else if (BoardWindowTestMode && Environment.GetEnvironmentVariable("SHOWORK_WIFIWATCH_SCRIPT") == null) msg = "測試視窗不掃描真的網路";
+                else if (!File.Exists(GuardScanner.Script)) msg = $"這台電腦沒有 Wi-Fi 掃描腳本（{GuardScanner.Script}）；Mac 的 wifiwatch.sh 不能在 Windows 跑";
+                else msg = GuardScan() ? "開始掃描 Wi-Fi（約數十秒）" : "已經在掃描了";
+                PostToast(msg);
+                return;
+            }
+            case "pushAllow":
+            {
+                if (Str(m, "dir") is { } dir) BoardActions.PushAllow(dir, Str(m, "head"));
+                PostToast("已放行一次：同一個資料夾、同一個 commit 的下一次 push（30 分鐘內）");
+                return;
+            }
+            case "watch":
+            {
+                var sid = Str(m, "sessionId");
+                if (reader.Watching != sid) { reader.Watching = sid; sessionThread = new(); Refresh_(); }
+                // 點了角色：WinForms 細節卡跟著開（11-02 P8：取代舊的 {type:"select"}；網頁的返回鈕沒有 id，不動細節卡）
+                if (m.TryGetProperty("id", out var idv) && idv.ValueKind == JsonValueKind.String) ShowDetail(idv.GetString());
+                return;
+            }
+            case "openGraph":
+            {
+                if (opt.Demo) { PostToast("示範資料：開啟整棟大樓知識星雲"); return; }
+                var project = Str(m, "project") ?? "";
+                Run(() => GraphHtml(project), r =>
+                {
+                    if (r == null) { PostToast("知識圖譜還沒產生（找不到 graphify 的輸出）"); return; }
+                    try { Process.Start(new ProcessStartInfo(r.Value.Path) { UseShellExecute = true }); PostToast($"開啟 {r.Value.Name} 知識圖譜"); }
+                    catch (Exception x) { PostToast($"開不了知識圖譜：{x.Message}"); }
+                });
+                return;
+            }
+            case "b1Refresh":
+                Post(new System.Text.Json.Nodes.JsonObject { ["type"] = "b1Posts", ["posts"] = B1Json.All() });
+                return;
+            case "weatherSearch":
+            {
+                var q = Str(m, "query") ?? "";
+                weather?.search(q, (rs, note) =>
+                {
+                    try { BeginInvoke(() => Post(new System.Text.Json.Nodes.JsonObject { ["type"] = "weatherResults", ["results"] = MacMirror.Encode(rs), ["note"] = note })); } catch { }
+                });
+                return;
+            }
+            case "setPref":
+            {
+                var key = Str(m, "key") ?? "";
+                if (!m.TryGetProperty("value", out var v)) return;
+                switch (key)
+                {
+                    case "lighting": case "style": BoardPrefs.Set("office." + key, v.ValueKind == JsonValueKind.String ? v.GetString() : null); break;
+                    case "guardPatrol": BoardPrefs.Set("office.guardPatrol", v.ValueKind == JsonValueKind.True); break;
+                    case "weather": weather?.setEnabled(v.ValueKind == JsonValueKind.True); break;
+                    case "weatherPlaces":
+                        if (v.ValueKind == JsonValueKind.Array)
+                            weather?.setSites(v.EnumerateArray().Select(x => x.ValueKind == JsonValueKind.Object
+                                ? new WeatherSite(Str(x, "title") ?? "", x.TryGetProperty("lat", out var la) && la.ValueKind == JsonValueKind.Number ? la.GetDouble() : 0,
+                                                  x.TryGetProperty("lon", out var lo) && lo.ValueKind == JsonValueKind.Number ? lo.GetDouble() : 0, Str(x, "detail")) : null)
+                                .OfType<WeatherSite>().ToList());
+                        break;
+                }
+                UpdateOffice(force: true);
+                return;
+            }
+            case "wanderVisible":
+                webVisible = !(m.TryGetProperty("visible", out var wv) && wv.ValueKind == JsonValueKind.False);
+                UpdateOffice(force: true);
+                return;
+        }
+        Log.Note($"BOARD action unknown {action}");
+    }
+    bool webVisible = true;
+
+    /// 點地下室神經網路要開哪一份（Mac GraphSource.htmlFor）：那個專案的 3D 星雲／graph.html；沒有就任一份
+    static (string Name, string Path)? GraphHtml(string project)
+    {
+        string? Html(string dir) => new[] { Path.Combine(dir, "graphify-out", "graph3d.html"), Path.Combine(dir, "graphify-out", "graph.html") }.FirstOrDefault(File.Exists);
+        if (Html(GraphPaths.@out(project)) is { } mine) return (project, mine);
+        try
+        {
+            if (!Directory.Exists(GraphPaths.dir)) return null;
+            foreach (var d in Directory.GetDirectories(GraphPaths.dir).OrderBy(x => x, StringComparer.Ordinal))
+                if (!Path.GetFileName(d).StartsWith('_') && Html(d) is { } h) return (Path.GetFileName(d), h);
+        }
+        catch { }
+        return null;
     }
 
     /// --board-window（不開 pipe、不發光的測試視窗）：不寫名冊、不呼叫 claude、天氣不連網
@@ -663,7 +1067,8 @@ public static partial class ContextGuard
     public static void Set(double v) => GlowSettings.Shared.SetGeneral(GlowSettings.Shared.General with { CtxThreshold = Clamp(v) });
 }
 
-/// 工具列：帳號流量（5 小時、7 天）。左邊寫島數／session 數。放不下一排就換兩排，不壓字（Mac 10-13 的 ViewThatFits）
+/// 工具列右邊：帳號流量（5 小時、7 天；Mac UsageView）。放不下一排就上下疊，不壓字（Mac 10-13 的 ViewThatFits）。
+/// 11-02 P8 第二輪：左邊的「N 座島・唯讀」拿掉（Mac 沒有；看板不再唯讀），ctx 門檻搬到 BoardControls
 sealed class UsageBar : Control
 {
     readonly BoardForm owner;
@@ -679,51 +1084,16 @@ sealed class UsageBar : Control
 
     float S => DeviceDpi / 96f;
 
-    // ctx 門檻（Mac 10-15 Kang：可調，建議 70%）：左邊字後面一個可點的「ctx 85% ⌄」，點開選 60～90%
-    Rectangle ctxHit;
-    string CtxLabel => $"ctx {(int)ContextGuard.Threshold}% ⌄";
-    const string Sep = "　・　";
-
-    protected override void OnMouseMove(MouseEventArgs e)
-    {
-        base.OnMouseMove(e);
-        Cursor = ctxHit.Contains(e.Location) ? Cursors.Hand : Cursors.Default;
-    }
-
-    protected override void OnMouseClick(MouseEventArgs e)
-    {
-        base.OnMouseClick(e);
-        if (e.Button != MouseButtons.Left || !ctxHit.Contains(e.Location)) return;
-        var menu = new ContextMenuStrip { ShowCheckMargin = true, ShowImageMargin = false };
-        menu.Items.Add(new ToolStripLabel("超過就該收尾（卡片上的 ctx 變紅）") { ForeColor = SystemColors.GrayText });
-        foreach (var v in ContextGuard.Choices)
-        {
-            var item = new ToolStripMenuItem($"{(int)v}%" + (v == 70 ? "（建議）" : "")) { Checked = v == ContextGuard.Threshold };
-            item.Click += (_, _) =>
-            {
-                ContextGuard.Set(v);
-                drawn = "";
-                Parent?.PerformLayout();
-                Invalidate();
-                owner.Repaint();
-            };
-            menu.Items.Add(item);
-        }
-        menu.Closed += (_, _) => BeginInvoke(menu.Dispose);
-        menu.Show(this, new Point(ctxHit.Left, ctxHit.Bottom));
-    }
-
-    int islandCount;
-
-    /// 流量＋島數。顯示的字（左邊的「N 座島」、流量的「剩幾分」）變了才重畫
+    /// 流量。顯示的字（「剩幾分」）變了才重畫
     public void Set(RateLimits? l, int islands)
     {
         limits = l;
-        islandCount = islands;
-        var key = Summary() + "|" + string.Join("|", Meters(DateTime.UtcNow).Select(m => m.Head + m.Left + m.Used));
+        var key = string.Join("|", Meters(DateTime.UtcNow).Select(m => m.Head + m.Left + m.Used));
         if (key == drawn) return;
         drawn = key;
-        Parent?.PerformLayout();                    // Summary 寬度變了，一排／兩排可能跟著變
+        owner.Tips.SetToolTip(this, l?.SnapshotAt is { } at ? $"帳號流量（訂閱額度）・資料時間 {at.ToLocalTime():HH:mm}，由 Claude Code 狀態列更新"
+                                                            : l != null ? "帳號流量（訂閱額度）" : "Claude Code 的狀態列要把 rate_limits 存到 ~/.claude/cache/rate_limits.json");
+        Parent?.PerformLayout();                    // 寬度變了，一排／兩排可能跟著變
         Invalidate();
     }
 
@@ -753,29 +1123,26 @@ sealed class UsageBar : Control
 
     int LineH => TextRenderer.MeasureText("國", Small, Size.Empty, F).Height;
     int MeterH => LineH + (int)(3 * S + 6 * S);
-
-    /// 排法：一排（左字＋右流量表）→ 兩排（字一排、流量表一排）→ 三排（流量表也上下疊）
-    (int Rows, bool StackMeters) Plan(int width)
-    {
-        var ms = Meters(DateTime.UtcNow).ToList();
-        int gap = (int)(14 * S);
-        int metersW = ms.Count == 0 ? TextRenderer.MeasureText(NoData, Small, Size.Empty, F).Width : ms.Sum(MeterWidth) + gap * (ms.Count - 1);
-        int summaryW = TextRenderer.MeasureText(Summary() + Sep + CtxLabel, owner.Fonts.Get(12 * S), Size.Empty, F).Width;
-        if (summaryW + gap * 2 + metersW <= width) return (1, false);
-        if (metersW <= width) return (2, false);
-        return (2, true);
-    }
-
+    int Gap => (int)(14 * S);
     const string NoData = "帳號流量：尚無資料";
 
-    string Summary() => islandCount == 0 ? "唯讀" : $"{islandCount} 座島・唯讀";
+    /// 一排放得下的寬度
+    public int MetersWidth
+    {
+        get
+        {
+            var ms = Meters(DateTime.UtcNow).ToList();
+            return ms.Count == 0 ? TextRenderer.MeasureText(NoData, Small, Size.Empty, F).Width + 2 : ms.Sum(MeterWidth) + Gap * (ms.Count - 1);
+        }
+    }
+
+    bool Stack(int width) => MetersWidth > width;
 
     public int HeightFor(int width)
     {
-        var (rows, stack) = Plan(width);
         int n = Meters(DateTime.UtcNow).Count();
-        int meters = n == 0 ? LineH : stack ? n * MeterH + (n - 1) * (int)(6 * S) : MeterH;
-        return rows == 1 ? Math.Max(meters, LineH) : LineH + (int)(8 * S) + meters;
+        if (n == 0) return LineH;
+        return Stack(width) ? n * MeterH + (n - 1) * (int)(6 * S) : MeterH;
     }
 
     protected override void OnPaint(PaintEventArgs e)
@@ -785,33 +1152,19 @@ sealed class UsageBar : Control
         g.Clear(th.Back);
         g.SmoothingMode = SmoothingMode.AntiAlias;
         float s = S;
-        var now = DateTime.UtcNow;
-        var ms = Meters(now).ToList();
-        var (rows, stack) = Plan(Width);
-        int gap = (int)(14 * s);
-        // 左邊的字
-        var sf = owner.Fonts.Get(12 * s);
-        var head = Summary() + Sep;
-        TextRenderer.DrawText(g, head, sf, new Rectangle(0, 0, Width, LineH + (int)(2 * s)), th.Secondary, F | TextFormatFlags.EndEllipsis);
-        int cx = TextRenderer.MeasureText(head, sf, Size.Empty, F).Width;
-        var label = CtxLabel;
-        var lsz = TextRenderer.MeasureText(label, sf, Size.Empty, F);
-        TextRenderer.DrawText(g, label, sf, new Point(cx, 0), th.Text, F);
-        ctxHit = new Rectangle(cx - (int)(4 * s), 0, lsz.Width + (int)(8 * s), LineH + (int)(4 * s));
-        int y = rows == 1 ? 0 : LineH + (int)(8 * s);
+        var ms = Meters(DateTime.UtcNow).ToList();
         if (ms.Count == 0)
         {
-            int w0 = TextRenderer.MeasureText(NoData, Small, Size.Empty, F).Width;
-            TextRenderer.DrawText(g, NoData, Small, new Point(rows == 1 ? Width - w0 : 0, y), th.Secondary, F);
+            TextRenderer.DrawText(g, NoData, Small, new Point(0, 0), th.Secondary, F);
             return;
         }
-        int total = ms.Sum(MeterWidth) + gap * (ms.Count - 1);
-        int x = rows == 1 ? Width - total : 0;
+        bool stack = Stack(Width);
+        int x = 0, y = 0;
         foreach (var m in ms)
         {
             int mw = MeterWidth(m);
             DrawMeter(g, th, m, x, y, mw, s);
-            if (stack) y += MeterH + (int)(6 * s); else x += mw + gap;
+            if (stack) y += MeterH + (int)(6 * s); else x += mw + Gap;
         }
     }
 

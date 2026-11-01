@@ -5,8 +5,8 @@ using System.Text.Json;
 namespace ShoWork;
 
 // 戰情中心的資料層（Mac 版 BoardSource.swift 的 BoardReader）：讀一次本機的 Claude Code 狀態，組成看板。
-// 全部唯讀：不寫 ~/.claude、也不寫 ShoWork 自己的資料夾（Mac 會把隊員進出、信箱訊息記進 board\history.jsonl，
-// Windows 唯讀版先不記，隊伍資料夾被 Claude Code 刪掉後就看不到了）。
+// 不寫 ~/.claude。11-02 P8 第二輪起也讀權限請求（board\permits）、派工單（board\tasks）、隊長對話與右側對話窗格（對話紀錄尾端 1.5MB）、
+// 背景工作進度（~/.claude/run/progress）、自動交接狀態（board\handover，只讀），並照 Mac 從對話紀錄算 activity／blockedReason／subagents／tokens。
 //
 // 各資料來源在 Windows 的狀況（10-15 Surface 實測）：
 //   sessions\<pid>.json      有資料夾、目前是空的（沒開著的 claude）。格式假設同 Mac，見 SessionRecord。
@@ -32,6 +32,13 @@ public sealed class BoardReader
         public Dictionary<string, ContextUse> Contexts = new();
         public RateLimits? RateLimits;
         public string? Captain;                  // 隊長的 sessionId（還開著才算）
+        // 11-02 P8 第二輪（Mac BoardReader.Snapshot）
+        public Dictionary<string, PermitRequest> Permits = new();   // 等你按允許的
+        public List<CaptainTaskInfo> Tasks = new();                 // 派工單
+        public Dictionary<string, string> Handovers = new();        // 自動交接：舊 sid → 卡片上的標記
+        public List<RunProgress> Runs = new();                      // 背景長工作的即時進度
+        public List<CaptainLine> CaptainThread = new();             // 隊長對話
+        public List<CaptainLine> SessionThread = new();             // 右側對話窗格正在看的那個 AI
     }
 
     public const int TailBytes = 512 * 1024;
@@ -135,23 +142,83 @@ public sealed class BoardReader
         s.RateLimits = Text(rl) is { } rj ? RateLimits.Parse(rj) : null;
         foreach (var r in s.Sessions)
             if (Text(Path.Combine(ClaudeDir, "cache", "ctx", r.SessionId + ".json")) is { } cj2 && ContextUse.Parse(cj2) is { } cu) s.Contexts[r.SessionId] = cu;
+        string? capSid = null;
         if (Text(Path.Combine(SupportDir, "board", "captain.json")) is { } capj)
         {
             try
             {
                 using var doc = JsonDocument.Parse(capj);
-                if (doc.RootElement.TryGetProperty("sessionId", out var sid) && sid.GetString() is { } id && s.Sessions.Any(r => r.SessionId == id))
-                    s.Captain = id;
+                if (doc.RootElement.TryGetProperty("sessionId", out var sid) && sid.GetString() is { } id)
+                {
+                    capSid = id;
+                    if (s.Sessions.Any(r => r.SessionId == id)) s.Captain = id;
+                }
             }
             catch { }
         }
+        // 權限請求、交接、派工單的檔案格式與讀法在 hook 端（showork\Core；路徑跟著 Wire.SupportDir／SHOWORK_*）
+        try { s.Permits = PermitCards.Pending(DateTime.UtcNow); } catch { }
+        try { foreach (var h in ShoWork.Hooks.Handover.All()) if (h.Label is { } l) s.Handovers[h.Sid] = l; } catch { }
+        s.Runs = RunProgress.Load(Environment.GetEnvironmentVariable("SHOWORK_RUN_PROGRESS") is { Length: > 0 } rp ? rp : Path.Combine(ClaudeDir, "run", "progress"));
+        try { s.Tasks = CaptainTasks.All(); } catch { }
+        // 隊長對話：隊長登記過就讀（Mac：CaptainStore.captain() 不管還開不開著）
+        s.CaptainThread = capSid != null ? Thread(capSid, s.Sessions, full: false) : DropThread(false);
+        s.SessionThread = Watching is { } w ? Thread(w, s.Sessions, full: true) : DropThread(true);
         return s;
     }
 
-    /// 讀一次＋組成卡片（標上隊長、同專案重工）
-    public List<BoardCard> Cards(Snapshot s, DateTime now) =>
-        Captain.Annotate(Board.Build(s.Sessions, s.Transcripts, s.Glows, s.Teams, s.Inbox, now, Home, IsRepo,
-                                     s.Reports, s.Reviews, s.Decisions, s.Contexts), s.Captain);
+    /// 讀一次＋組成卡片（標上隊長、同專案重工、派工單；掛上權限對話框、交接狀態）
+    public List<BoardCard> Cards(Snapshot s, DateTime now)
+    {
+        var cards = Board.Build(s.Sessions, s.Transcripts, s.Glows, s.Teams, s.Inbox, now, Home, IsRepo, s.Reports, s.Reviews, s.Decisions, s.Contexts);
+        foreach (var c in cards.Where(c => !c.IsQueued))
+        {
+            c.Permit = s.Permits.GetValueOrDefault(c.SessionId);
+            c.Handover = s.Handovers.GetValueOrDefault(c.SessionId);
+        }
+        return Captain.Annotate(cards, s.Captain, s.Tasks);
+    }
+
+    // MARK: 隊長對話、右側對話窗格（Mac BoardReader.thread）
+
+    readonly object watchLock = new();
+    string? watching;
+    /// 右側對話窗格要看哪個 session（畫面在 UI 執行緒設、讀檔在背景讀）
+    public string? Watching
+    {
+        get { lock (watchLock) return watching; }
+        set { lock (watchLock) watching = value; }
+    }
+
+    readonly Dictionary<bool, (string Stamp, List<CaptainLine> Lines)> threadCache = new();   // full → 快取（隊長一份、右側窗格一份）
+    List<CaptainLine> DropThread(bool full) { threadCache.Remove(full); return new(); }
+
+    /// 某個 session 的對話（jsonl 尾端 1.5MB）；檔案沒變就用快取
+    public List<CaptainLine> Thread(string sid, List<SessionRecord> sessions, bool full)
+    {
+        if (TranscriptPathOf(sid, sessions) is not { } path) return DropThread(full);
+        var st = sid + "/" + BoardText.Stamp(path);
+        if (threadCache.TryGetValue(full, out var c) && c.Stamp == st) return c.Lines;
+        var lines = ShoWork.CaptainThread.Parse(BoardText.Tail(path, 1_500_000), full);
+        threadCache[full] = (st, lines);
+        return lines;
+    }
+
+    /// 對話紀錄的路徑：名冊裡有就照專案目錄算；沒有（背景 session 不在名冊）就到 projects\ 底下找一次記起來
+    public string? TranscriptPathOf(string sid, IEnumerable<SessionRecord>? sessions = null)
+    {
+        if (sessions?.FirstOrDefault(r => r.SessionId == sid) is { } rec && TranscriptPath(rec) is { } p) return p;
+        lock (pathCache)
+        {
+            if (pathCache.TryGetValue(sid, out var cp) && File.Exists(cp)) return cp;
+            foreach (var d in Dirs(Path.Combine(ClaudeDir, "projects")))
+            {
+                var q = Path.Combine(d, sid + ".jsonl");
+                if (File.Exists(q)) return pathCache[sid] = q;
+            }
+        }
+        return null;
+    }
 
     /// ShoWork 自己的光暈狀態：agent 每次 Render 都存 state.json（Engine.Save）。同一個 pid 有多筆取最急的。
     public static Dictionary<int, WorkState> Glows(string path)
@@ -194,7 +261,8 @@ public sealed class BoardReader
         var keep = live.Select(r => r.SessionId).ToHashSet();
         foreach (var k in transcriptCache.Keys.Where(k => !keep.Contains(k)).ToList()) transcriptCache.Remove(k);
         foreach (var k in cwdCache.Keys.Where(k => !keep.Contains(k)).ToList()) cwdCache.Remove(k);
-        foreach (var k in pathCache.Keys.Where(k => !keep.Contains(k)).ToList()) pathCache.Remove(k);
+        lock (pathCache) foreach (var k in pathCache.Keys.Where(k => !keep.Contains(k) && k != Watching).ToList()) pathCache.Remove(k);
+        foreach (var k in tokenCache.Keys.Where(k => !keep.Contains(k)).ToList()) tokenCache.Remove(k);
     }
 
     /// 測試用：快取裡記著幾個 session
@@ -205,11 +273,14 @@ public sealed class BoardReader
     {
         var p = Path.Combine(ClaudeDir, "projects", r.ProjectSlug, r.SessionId + ".jsonl");
         if (File.Exists(p)) return p;
-        if (pathCache.TryGetValue(r.SessionId, out var c) && File.Exists(c)) return c;
-        foreach (var d in Dirs(Path.Combine(ClaudeDir, "projects")))
+        lock (pathCache)
         {
-            var q = Path.Combine(d, r.SessionId + ".jsonl");
-            if (File.Exists(q)) return pathCache[r.SessionId] = q;
+            if (pathCache.TryGetValue(r.SessionId, out var c) && File.Exists(c)) return c;
+            foreach (var d in Dirs(Path.Combine(ClaudeDir, "projects")))
+            {
+                var q = Path.Combine(d, r.SessionId + ".jsonl");
+                if (File.Exists(q)) return pathCache[r.SessionId] = q;
+            }
         }
         return null;
     }
@@ -229,10 +300,17 @@ public sealed class BoardReader
             var info = TranscriptInfo.Parse(ReadToEnd(fs));
             if (info.Title == null && c.Info?.Title is { } old) info.Title = old;     // 標題在尾端外就沿用
             info.RecentWorkCwds = WorkCwds(r.SessionId, fs, size);
+            var tally = Tokens(r.SessionId, fs, size);
+            info.Tokens = tally.usage with { };
+            // 背景 agent 以全檔追蹤為準（尾端看不到啟動那行也算）；尾端有的資訊比較完整（subagent_type）就用尾端的。
+            // 超過 12 小時沒收到完成通知的當作已經不在（session 被強制結束就永遠收不到通知）
+            var cutoff = DateTime.UtcNow - AsyncMaxAge;
+            info.AsyncAgents = tally.asyncAgents.Where(a => (a.LaunchedAt ?? DateTime.MaxValue) > cutoff)
+                                                .Select(a => info.AsyncAgents.FirstOrDefault(x => x.Id == a.Id) ?? a).ToList();
             transcriptCache[r.SessionId] = (fi.LastWriteTimeUtc, size, info);
             return info;
         }
-        catch { return new TranscriptInfo(); }
+        catch (Exception x) { Log.Note($"BOARD transcript {r.SessionId} failed: {x.Message}"); return new TranscriptInfo(); }
     }
 
     /// 最近做事的地方：尾端 512KB 常常只剩十幾筆（讀圖的行很大），住哪會亂跳 ⇒ 另外記，第一次往回讀 8MB，之後只讀新增的
@@ -247,6 +325,33 @@ public sealed class BoardReader
         if (all.Count > TranscriptInfo.CwdWindow) all = all.Skip(all.Count - TranscriptInfo.CwdWindow).ToList();
         cwdCache[sid] = (c.Item1 + end, all);
         return all;
+    }
+
+    /// 累計 token：第一次從檔頭掃到尾（512KB 一塊，不一次載入整個檔），之後只讀新增的完整行（Mac 10-20）
+    readonly Dictionary<string, (long Offset, TokenTally Tally)> tokenCache = new();
+    public const int TokenChunk = 512 << 10;
+    public static readonly TimeSpan AsyncMaxAge = TimeSpan.FromHours(12);
+
+    TokenTally Tokens(string sid, FileStream fs, long size)
+    {
+        var c = tokenCache.TryGetValue(sid, out var old) ? old : (0L, new TokenTally());
+        if (size < c.Item1) c = (0L, new TokenTally());                     // 檔案被改寫
+        fs.Seek(c.Item1, SeekOrigin.Begin);
+        var buf = new byte[TokenChunk];
+        var carry = new List<byte>();
+        int n;
+        while ((n = fs.Read(buf, 0, buf.Length)) > 0)
+        {
+            carry.AddRange(new ArraySegment<byte>(buf, 0, n));
+            int nl = carry.LastIndexOf((byte)'\n');
+            if (nl < 0) continue;                                            // 一行比一塊還長：再讀
+            var chunk = carry.GetRange(0, nl + 1).ToArray();
+            c.Item2.consume(System.Text.Encoding.UTF8.GetString(chunk).Split('\n').Select(l => l.TrimEnd('\r')));
+            c.Item1 += nl + 1;
+            carry.RemoveRange(0, nl + 1);
+        }
+        tokenCache[sid] = c;                                                // 最後一行沒寫完的下次再讀
+        return c.Item2;
     }
 
     static byte[] ReadToEnd(Stream s) { using var ms = new MemoryStream(); s.CopyTo(ms); return ms.ToArray(); }

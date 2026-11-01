@@ -26,6 +26,9 @@
 
   <ItemGroup>
     <Compile Include="..\Shared\Wire.cs" Link="Wire.cs" />
+    <!-- 11-02 P8：戰情中心的動作要用 hook 端已轉寫的 Peer（收件匣直送）、CaptainInbox（放行／事先放行）、Nickname、PushGuard：
+         直接連原始檔（namespace ShoWork.Hooks；showork.exe 那份是 internal，不會撞名） -->
+    <Compile Include="..\showork\Core\*.cs" LinkBase="Hooks" />
     <!-- showork.exe (the hook CLI and console helper) must sit next to ShoWorkAgent.exe -->
     <ProjectReference Include="..\showork\showork.csproj" Condition="'$(PackShowork)' == ''" />
     <!-- W4 packaging (pack.ps1): the native showork.exe rides inside the single ShoWork42.exe and is written

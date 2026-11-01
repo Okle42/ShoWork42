@@ -26,9 +26,6 @@ const OfficeMemory = (() => {
   return m;
 })();
 
-// 樓層主題的中文名（scene/tower.js 的 TowerTheme 沒有 title；樓層名牌 builder.labelTargets 讀 Tower.TowerTheme.title）
-TowerTheme.title ??= TowerThemeTitle;
-
 const params = new URLSearchParams(location.search);
 const host = window.chrome?.webview ?? null;
 const demoMode = params.has("demo") ? "all" : null;      // OfficeDemo.mode
@@ -123,11 +120,12 @@ function toast(text) {
 
 // MARK: - OfficeView 的函式
 
-/** 右側對話窗格換人（null＝回到隊長）：資料層改讀那個人的對話紀錄 */
-function talk(id) {
+/** 右側對話窗格換人（null＝回到隊長）：資料層改讀那個人的對話紀錄。
+ *  clicked＝點的那個角色的卡片 id（C# 用它開細節卡；隊長也是 watch null，所以另外帶；返回鈕不帶） */
+function talk(id, clicked = null) {
   S.talkingTo = id; OfficeMemory.talkingTo = id; OfficeMemory.save();
   const sid = id ? id.split("#")[0] : null;      // 卡片 id＝sessionId（排隊卡多 #q…）
-  send("watch", { sessionId: sid }, true);
+  send("watch", clicked ? { sessionId: sid, id: clicked } : { sessionId: sid }, true);
   if (id && !S.wide) S.inboxOpen = true;
 }
 
@@ -181,7 +179,7 @@ function click(id) {
   if (!c) { render(); return; }
   S.guardOpen = false;
   S.answeringId = Mood.of(c) === "waiting" ? id : null;
-  talk(c.captain ? null : id);
+  talk(c.captain ? null : id, id);
   render();
 }
 const boardChanged = () => { OfficeMemory.boardOpen = S.boardOpen; OfficeMemory.save(); };

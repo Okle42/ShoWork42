@@ -5,8 +5,7 @@ namespace ShoWork;
 // Mac 版 Sources/ShoWorkCore/Activity.swift 的轉寫（11-02 P8）：卡片上的四件事——AI 現在在做哪一類動作、卡住／等你的原因、
 // 進行中的子 agent、累計 token。另外放卡片上 Mac 有、Windows 原本沒有的欄位型別（PermitRequest、AskQuestion、CaptainTask），
 // 讓 office2 的 card 跟 Mac 同形狀。
-// 跟 Mac 不同（照實記）：Windows 的 BoardReader 還沒從對話紀錄算這四件事（TranscriptInfo 的 pending／asyncAgents 沒轉寫），
-//   卡片上一律是 none／null／空的；示範卡片（OfficeDemo）才有值。TokenTally 有轉寫（純函式），還沒接到 BoardReader。
+// 11-02 P8 第二輪：BoardReader 照 Mac 從對話紀錄算這四件事（TranscriptInfo 的 pending／asyncAgents＋TokenTally 增量）。
 
 /// AI「現在」在做的工具動作（只有進行中的卡片有意義，其餘一律 none）
 public enum AIActivity { None, Reading, Editing, Running, Searching, Thinking, Delegating }
@@ -86,12 +85,14 @@ public sealed record TokenUsage
     { Input = input; Output = output; CacheCreation = cacheCreation; CacheRead = cacheRead; LastTurnOutput = lastTurnOutput; }
 }
 
-/// token 增量累加（Mac TokenTally 的轉寫，不含背景 agent 追蹤）：整個檔案從頭掃一次，之後只餵新增的完整行。
+/// token 增量累加（Mac TokenTally 的轉寫）：整個檔案從頭掃一次，之後只餵新增的完整行。
 /// 先用字串找 `"role":"assistant"`，讀圖的 user 行一行幾百 KB，直接跳過。
+/// 11-02 P8：背景 agent／workflow 也照 Mac 整個檔案一起追（只看尾端 512KB 會漏掉啟動那行）
 public sealed class TokenTally
 {
     public TokenUsage usage { get; } = new();
     readonly HashSet<string> seen = new();
+    public List<TranscriptInfo.AsyncAgent> asyncAgents { get; } = new();
 
     /// `lines` 必須是完整的行（最後一行沒寫完的不要傳進來）
     public void consume(IEnumerable<string> lines)
@@ -101,6 +102,8 @@ public sealed class TokenTally
 
     void line(string l)
     {
+        if (l.Contains("\"status\":\"async_launched\"")) { launched(l); return; }
+        if (l.Contains("<task-id>") && !l.Contains("\"role\":\"assistant\"")) notified(l);
         if (l.Contains("\"role\":\"assistant\"") && l.Contains("\"usage\""))
         {
             try
@@ -124,6 +127,37 @@ public sealed class TokenTally
             }
             catch { }
         }
+    }
+
+    /// tool_result 的 toolUseResult.status＝async_launched：記住 agentId／taskId（description／workflowName 都在這一行）
+    void launched(string l)
+    {
+        try
+        {
+            if (JsonNode.Parse(l) is not JsonObject o || o["type"]?.ToString() != "user" || o["isSidechain"]?.ToString() == "true"
+                || o["toolUseResult"] is not JsonObject r || r["status"]?.ToString() != "async_launched") return;
+            var id = (r["agentId"] ?? r["taskId"]) is JsonValue iv && iv.TryGetValue<string>(out var x) ? x : null;
+            if (id == null || asyncAgents.Any(a => a.Id == id)) return;
+            string? S(JsonNode? n) => n is JsonValue v && v.TryGetValue<string>(out var t) ? t : null;
+            var desc = S(r["description"] ?? r["workflowName"] ?? r["summary"]) ?? "";
+            var at = TranscriptInfo.Iso(S(o["timestamp"]));
+            asyncAgents.Add(new TranscriptInfo.AsyncAgent(id, new SubagentInfo(desc, S(r["taskType"]), background: true), at));
+        }
+        catch { }
+    }
+
+    /// queue-operation 或 user 行的 <task-notification><task-id>X</task-id>：X 做完了
+    void notified(string l)
+    {
+        if (asyncAgents.Count == 0) return;
+        try
+        {
+            if (JsonNode.Parse(l) is not JsonObject o || o["isSidechain"]?.ToString() == "true") return;
+            var c = (o["content"] is JsonValue cv && cv.TryGetValue<string>(out var cs) ? cs : null)
+                    ?? (o["message"]?["content"] is JsonValue mv && mv.TryGetValue<string>(out var ms) ? ms : null) ?? "";
+            if (TranscriptInfo.TaskId(c) is { } id) asyncAgents.RemoveAll(a => a.Id == id);
+        }
+        catch { }
     }
 
     /// 你親手送出的訊息（不是工具結果、不是系統通知）

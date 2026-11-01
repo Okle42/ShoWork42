@@ -6,7 +6,9 @@ namespace ShoWork;
 
 /// 戰情中心的「大樓」檢視（W6）：WebView2 ＋ Board\Web\office.html（three.js，vendor 在 repo 裡，離線可用）。
 /// 資料：BoardForm 用 OfficeSource（Board\Source\OfficeSource.cs）組成 office2 JSON（形狀同 Mac bench 的 Web/bench/mac-input.json），這裡用 PostWebMessageAsJson 推過去；頁面只畫、不讀檔。
-/// 頁面 → 這裡：{type:"ready"}（載好了，補推最新資料）、{type:"select", id}（點了角色；id null＝點空白）。
+/// 頁面 → 這裡：{type:"ready"}（載好了，補推最新資料）、{type:"action", action, …}（按鈕，格式見 Web\PROTOCOL.md；交給 BoardForm 的 ActionReceived）、
+///   {type:"dropFiles", key}＋附帶的 File（拖進輸入框的檔案 ⇒ 回 {type:"dropPaths", key, paths}）。
+///   11-02 P8：點角色改成 action "watch"（舊的 {type:"select"} 還收，給 office-w6.js）；BoardForm 收到 watch 就開細節卡、換右側對話窗格。
 /// 網頁檔：開發 build 在 exe 旁邊的 Web\；單一 exe／安裝版沒有那個資料夾 ⇒ 從內嵌資源解到 %LOCALAPPDATA%\ShoWork42\office-web\<組件版本>\。
 /// WebView2 Runtime 不在（Win10 沒裝、被移除）、或初始化失敗、或瀏覽器行程掛掉：Failed 事件 ⇒ BoardForm 退回卡片畫面，不丟例外。
 sealed class OfficeHost : IDisposable
@@ -21,8 +23,10 @@ sealed class OfficeHost : IDisposable
 
     public Control View => view;
     public bool Failed { get; private set; }
-    /// 點了角色（null＝點空白處）
+    /// 點了角色（null＝點空白處）：舊版 office-w6.js 的 {type:"select", id}
     public event Action<string?>? Selected;
+    /// 網頁按了會動到東西的按鈕（{type:"action", action, …} 整個物件；UI 執行緒）
+    public event Action<JsonElement>? ActionReceived;
     /// 不能用了（原因一行），BoardForm 收到就退回卡片
     public event Action<string>? Broken;
 
@@ -97,6 +101,24 @@ sealed class OfficeHost : IDisposable
                 case "select":
                     Selected?.Invoke(r.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String ? id.GetString() : null);
                     break;
+                case "action":
+                    ActionReceived?.Invoke(r.Clone());
+                    break;
+                case "dropFiles":
+                    // 拖進輸入框的檔案：WebView2 把 File 換成 CoreWebView2File（有完整路徑）放在 AdditionalObjects
+                    var paths = new List<string>();
+                    try
+                    {
+                        foreach (var o in e.AdditionalObjects)
+                            if (o is CoreWebView2File f && !string.IsNullOrEmpty(f.Path)) paths.Add(f.Path);
+                    }
+                    catch (Exception x) { Log.Note($"OFFICE dropFiles: {x.Message}"); }
+                    Post(new System.Text.Json.Nodes.JsonObject
+                    {
+                        ["type"] = "dropPaths", ["key"] = r.TryGetProperty("key", out var k) ? k.GetString() : null,
+                        ["paths"] = new System.Text.Json.Nodes.JsonArray(paths.Select(x => (System.Text.Json.Nodes.JsonNode?)x).ToArray()),
+                    });
+                    break;
             }
         }
         catch (Exception x) { Log.Note($"OFFICE bad message: {x.Message}"); }
@@ -115,6 +137,15 @@ sealed class OfficeHost : IDisposable
         try { view.CoreWebView2.PostWebMessageAsJson(latest); sent = latest; }
         catch (Exception x) { Fail($"post failed: {x.Message}"); }
     }
+
+    /// 推一則小訊息（toast、captainBusy、b1Posts、weatherResults、dropPaths⋯，見 PROTOCOL.md）；頁面還沒好就丟掉
+    public void Post(System.Text.Json.Nodes.JsonObject o)
+    {
+        if (!ready || Failed || disposed || view.CoreWebView2 == null) return;
+        try { view.CoreWebView2.PostWebMessageAsJson(MacMirror.Json(o)); } catch (Exception x) { Log.Note($"OFFICE post failed: {x.Message}"); }
+    }
+
+    public bool Ready => ready && !Failed && !disposed;
 
     /// WinForms 那邊關掉了細節卡：頁面上的選取框也拿掉
     public void Deselect()

@@ -11,6 +11,12 @@ const F = Math.fround;
 
 /** 預設識別色（規範 §2.1）；key＝TowerTheme.rawValue */
 export const TowerTheme = {
+  /** 中文主題名（TowerTheme.swift 的 title；樓層名牌 builder.labelTargets 讀 Tower.TowerTheme.title） */
+  title: {
+    monitor: "監控中心", app_studio: "App 開發室", library: "研究書房", print_shop: "3D 列印工坊", call_room: "秘書電話室",
+    trading_desk: "交易室", media_studio: "攝影棚", design_studio: "設計工作室", legal_room: "法務室", ledger_room: "財務帳房",
+    game_lab: "遊戲工作室", hw_lab: "硬體實驗室", marketing: "行銷室", dispatch_room: "調度中心", drafting_room: "建築製圖室", general: "通用辦公",
+  },
   accent: {
     monitor: "#5B8DB8", app_studio: "#4E9C8F", library: "#9C6B4E", print_shop: "#C98B3C",
     call_room: "#8C7BB5", trading_desk: "#3F8F5A", media_studio: "#B5525A", design_studio: "#D08A6E",

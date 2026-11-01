@@ -21,6 +21,14 @@ public sealed record SelfReport
     public string? Ask { get; init; }            // 要你決定／回答的事
     public string? Report { get; init; }         // 報告檔路徑
     public string? Task { get; init; }           // 隊長派工單號（--task）
+    // 11-02 P8：showork card（W5，showork\Core\CardReport.cs）也會寫的欄位，Mac SelfReport 同名；看板讀、收件匣用 options
+    public string? Doing { get; init; }          // 正在做的任務（--doing）
+    public List<string>? Options { get; init; }  // --ask 的快速選項（--options "A|B|C"）
+    public string? How { get; init; }
+    public string? Kind { get; init; }           // start（開工卡）／wrapup（收尾完）
+    public string? Handoff { get; init; }
+    public string? Touch { get; init; }
+    public string? Outward { get; init; }
     public DateTime At { get; init; }
 
     public static int Clamp(int v) => Math.Clamp(v, 0, 100);
@@ -58,7 +66,7 @@ public sealed record SelfReport
     }
 }
 
-/// 審核員（另一個 AI）的意見。Windows 沒有審核員，只讀（Mac 那邊同步過來的檔案也讀得懂）。
+/// 審核員（另一個 AI）的意見（11-02 P8 起 Windows 也有審核員：Board\BoardWorkers.cs 的 Reviewer）
 public sealed record Review
 {
     public int? Progress { get; init; }
@@ -236,14 +244,19 @@ public static class Captain
         return out_;
     }
 
-    public static List<BoardCard> Annotate(IEnumerable<BoardCard> cards, string? captain)
+    /// 看板卡片＋派工單 → 標上隊長、重工、派工（Mac Captain.annotate；11-02 P8 起帶派工單）
+    public static List<BoardCard> Annotate(IEnumerable<BoardCard> cards, string? captain, IReadOnlyList<CaptainTaskInfo>? tasks = null)
     {
         var list = cards.ToList();
         var dup = SameProject(list, captain);
+        var ts = tasks ?? Array.Empty<CaptainTaskInfo>();
         foreach (var c in list.Where(c => !c.IsQueued))
         {
             c.Captain = c.SessionId == captain;
             c.SameProject = dup.GetValueOrDefault(c.SessionId) ?? new();
+            c.Tasks = c.Captain
+                ? ts.Where(t => t.From == c.SessionId).OrderByDescending(t => t.CreatedAt).ToList()
+                : ts.Where(t => CaptainTasks.Open(t.State) && (t.ToSession == c.SessionId || (t.ToSession == null && t.To == c.Name))).ToList();
         }
         return list;
     }
