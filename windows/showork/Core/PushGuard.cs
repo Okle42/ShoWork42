@@ -201,12 +201,12 @@ static class PushGuard
         return r;
     }
 
-    /// 遠端網址 → owner/name
+    /// 遠端網址 → owner/name（Windows 的本機遠端是 C:\…\x.git，反斜線也算分隔）
     public static string RepoName(string url)
     {
         var s = url.Trim();
         if (s.EndsWith(".git")) s = s[..^4];
-        var parts = s.Split(new[] { '/', ':' }, StringSplitOptions.RemoveEmptyEntries);
+        var parts = s.Split(new[] { '/', ':', '\\' }, StringSplitOptions.RemoveEmptyEntries);
         return string.Join("/", parts.TakeLast(2));
     }
 

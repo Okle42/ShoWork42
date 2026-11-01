@@ -364,11 +364,15 @@ public sealed class HookTests : IDisposable
         File.WriteAllText(Path.Combine(work, "b.txt"), "給 DemoClientX 的報價\n");
         Sh(work, "add", "."); Sh(work, "commit", "-q", "-m", "two");
 
-        var calls = PushGuard.Calls($"cd {root} && git -C work push origin main 2>&1 | tail -1", "/");
+        // 單引號：Windows 的 root 是 C:\Users\An Kang\…（有空白、有反斜線），沒引號在 bash 裡會被拆字、吃掉反斜線
+        var calls = PushGuard.Calls($"cd '{root}' && git -C work push origin main 2>&1 | tail -1", "/");
         var c = Assert.Single(calls);
         Assert.Equal(Path.GetFullPath(work), c.Dir);
         Assert.Equal(new[] { "origin", "main" }, c.Args);
         Assert.Empty(PushGuard.Calls("git log --oneline", work));
+        Assert.Equal("owner/name", PushGuard.RepoName("git@github.com:owner/name.git"));
+        Assert.Equal("owner/name", PushGuard.RepoName("https://github.com/owner/name"));
+        Assert.Equal("remotes/demo-repo", PushGuard.RepoName(@"C:\Users\Demo User\remotes\demo-repo.git"));   // Windows 本機遠端
 
         var kw = new List<string> { "democlientx" };
         var e = PushGuard.Check(c, RealGit, kw, new(), T0);
