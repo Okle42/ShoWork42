@@ -48,8 +48,9 @@
        single-file / installed exe can extract it to %LOCALAPPDATA%\ShoWork42\office-web\ (OfficeHost.WebFolder) -->
   <ItemGroup>
     <None Remove="Board\Web\**" />
-    <Content Include="Board\Web\**" Link="Web\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Never" />
-    <EmbeddedResource Include="Board\Web\**" LogicalName="Web/$([System.String]::Copy('%(RecursiveDir)').Replace('\','/'))%(Filename)%(Extension)" />
+    <!-- Board\Web\bench：Mac／JS 3D 量尺頁（開發用，不出貨） -->
+    <Content Include="Board\Web\**" Exclude="Board\Web\bench\**" Link="Web\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Never" />
+    <EmbeddedResource Include="Board\Web\**" Exclude="Board\Web\bench\**" LogicalName="Web/$([System.String]::Copy('%(RecursiveDir)').Replace('\','/'))%(Filename)%(Extension)" />
   </ItemGroup>
 
   <!-- Release: replace the copied .NET showork.exe with the native one. Without VS Build Tools this only warns
