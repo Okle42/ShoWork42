@@ -146,6 +146,11 @@ public static class TermSend
         return int.TryParse(target.Trim(), out var pid) && pid > 0 ? new SessionRecord { Pid = pid, SessionId = "", Name = "(pid)" } : null;
     }
 
+    /// 行程名是不是 Claude Code：claude.exe；或是它跑到一半自己更新、正在跑的那支被改名成 claude.exe.old.<時間戳>
+    /// （11-02 Surface 實測：開著的 session 行程名變成「claude.exe.old.1793554277148」，回答送得進去、一分鐘後的退回被當成別的程式擋掉）
+    public static bool IsClaudeName(string name) =>
+        name.Equals("claude", StringComparison.OrdinalIgnoreCase) || name.StartsWith("claude.exe.old.", StringComparison.OrdinalIgnoreCase);
+
     /// pid 真的是 claude.exe、而且是 session 開始時那一個（沒有 session 檔的替身目標不驗）
     static bool IsClaude(SessionRecord r)
     {
@@ -153,7 +158,7 @@ public static class TermSend
         try
         {
             using var p = Process.GetProcessById(r.Pid);
-            if (!p.ProcessName.Equals("claude", StringComparison.OrdinalIgnoreCase)) return false;
+            if (!IsClaudeName(p.ProcessName)) return false;
             return r.SameOwner(p.StartTime.ToUniversalTime());
         }
         catch (System.ComponentModel.Win32Exception) { return true; }       // 提權的 claude.exe 查不到名字：交給 AttachConsole 判斷

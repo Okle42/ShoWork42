@@ -30,6 +30,16 @@ public class TermSendTests
     }
 
     [Fact]
+    public void ClaudeThatUpdatedItselfMidSessionIsStillClaude()
+    {
+        Assert.True(TermSend.IsClaudeName("claude"));
+        Assert.True(TermSend.IsClaudeName("Claude"));
+        Assert.True(TermSend.IsClaudeName("claude.exe.old.1793554277148"));      // 11-02 Surface：自動更新把跑著的那支改名
+        Assert.False(TermSend.IsClaudeName("claudette"));
+        Assert.False(TermSend.IsClaudeName("node"));
+    }
+
+    [Fact]
     public void EnterIsARealReturnKey()
     {
         Assert.All(TermSend.EnterKeys, x => { Assert.Equal(0x0D, x.Vk); Assert.Equal('\r', x.Ch); });
