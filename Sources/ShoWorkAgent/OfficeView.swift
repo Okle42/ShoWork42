@@ -107,7 +107,7 @@ struct OfficeView: View {
         // 示範資料：大樓、主題、閒晃在這裡用假卡片算（不碰你的樓層號名冊）；正式就是 BoardModel 算好的
         let (towerShown, decorShown, wanderShown) = OfficeDemo.mode == nil ? (tower, decor, wander) : demoTower.make(deps, cards: cards, real: decor)
         let guardShown = OfficeDemo.guardStatus(guardStatus)
-        let now = OfficeClock.now(), look = lighting.look(at: now).weathered(weather.look), night = look.isNight    // 10-21 日出日落：天色依太陽仰角連續混合
+        let now = OfficeClock.now(), site = weather.main.coord, look = lighting.look(at: now, site: site).weathered(weather.look), night = look.isNight    // 10-21 日出日落：天色依太陽仰角連續混合；11-01 起跟天氣設定的主地點
         // 點了等你回答的角色：開可互動卡（還在等你才顯示，回答完／換狀態就自己收掉）
         let answering = answeringId.flatMap { i in cards.first { $0.id == i && Mood.of($0) == .waiting } }
         let attention = AttentionSummary.make(cards)
@@ -128,7 +128,7 @@ struct OfficeView: View {
                              onWaiting: { if !wide { inboxOpen = true }; focusAttention(attention.waiting, answer: true) },
                              onStuck: { focusAttention(attention.stuck, answer: false) },
                              onFinished: { focusAttention(attention.finished, answer: false) }) {
-                    controls(towerShown: towerShown, decorShown: decorShown, night: night, lightLabel: lighting.label(at: now))
+                    controls(towerShown: towerShown, decorShown: decorShown, night: night, lightLabel: lighting.label(at: now, site: site))
                 }
                 scene(islands: islands, towerShown: towerShown, decorShown: decorShown, wanderShown: wanderShown,
                       guardShown: guardShown, night: night, look: look, answering: answering, cards: cards)
@@ -190,7 +190,7 @@ struct OfficeView: View {
         SwiftUI.Menu {
             Picker("燈光", selection: lightingBinding) {
                 ForEach(OfficeLighting.allCases, id: \.self) { l in
-                    Text(l == .auto ? "自動（跟著台北日出日落）" : l.title).tag(l)
+                    Text(l == .auto ? "自動（跟著\(weather.main.title)日出日落）" : l.title).tag(l)
                 }
             }
             .pickerStyle(.inline)
@@ -309,11 +309,11 @@ struct OfficeView: View {
                 }
                 print("attention click", k, "→", answeringId.map { "answer \($0)" } ?? "focus \(lastAttention ?? "nil")"); fflush(stdout)
             }
-            .task(id: "\(lighting.rawValue)|\(clockTick)") {
+            .task(id: "\(lighting.rawValue)|\(clockTick)|\(weather.main.title)") {
                 // 自動燈光：晨昏每 60 秒、白天每 5 分鐘、夜晚睡到天快亮再重算一次；白天／夜晚固定、測試假時間（凍結）就不排
                 guard OfficeClock.fixed == nil else { return }
                 let now = OfficeClock.now()
-                guard let next = lighting.nextChange(after: now) else { return }
+                guard let next = lighting.nextChange(after: now, site: weather.main.coord) else { return }
                 try? await Task.sleep(for: .seconds(max(1, next.timeIntervalSince(now) + 0.5)))
                 if !Task.isCancelled { clockTick += 1 }
             }

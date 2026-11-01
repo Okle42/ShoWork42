@@ -45,6 +45,14 @@ final class CityBuilder {
     static let mainGateX: Float = 2.0, trunkX: Float = -9.4
     static let powerX: Float = 11.5, powerZ: Float = -7.5
     static let shipDuration: TimeInterval = 4
+    /// 第 i 座堆場的中線 z（11-01：原本 z0＋3.5 起、每座 5.2 ⇒ 整排往馬路挪 2.1、間距縮成 4.8（圍籬之間留 0.4），後牆內側空出 3 公尺給飛艇停靠架；第 4 座前緣離前牆 0.5）
+    static func yardZ(_ i: Int) -> Float { z0 + 5.6 + Float(i) * 4.8 }
+    /// 第 i 艘飛艇停靠架的地面中心：前兩艘在後牆內側那條地（堆場後面），其餘在牆外後方
+    static func airshipDock(_ i: Int) -> SIMD3<Float> {
+        i < 2 ? SIMD3(i == 0 ? -22.4 : -14.2, 0, z0 + wallT / 2 + 1.55) : SIMD3(-1 + Float(i - 2) * 10, 0, -17)
+    }
+    /// 飛艇款式（11-01 Kang：原本那艘不喜歡，做幾款挑）：0 原版軟式飛艇、1 銀色硬式飛船、2 雲朵飛船、3 熱氣球、4 飛碟
+    static let airshipStyle: Int = ProcessInfo.processInfo.environment["SHOWORK_CITY_AIRSHIP"].flatMap(Int.init) ?? 0
     /// 城內地坪頂面、城內路面頂面
     static let gy: Float = 0.05, ry: Float = 0.09
 
@@ -156,7 +164,7 @@ final class CityBuilder {
         for s: Float in [-1, 1] { k.b(.identity, Self.mainGateX + s * 1.5, Self.gy, (mz0 + mz1) / 2, 0.6, 0.06, mz1 - mz0, Self.walk) }
         // 堆場那幾條路的匯流道：沿電梯井外側（x −9.4）接到大樓前廣場（10-21 稽核：原本每條路停在大樓左後方的空地上，哪裡都沒接到）
         if !s.disks.isEmpty {
-            let zTop = Self.z0 + 3.5 - 0.55, zEnd = TD.zF + 0.2
+            let zTop = Self.yardZ(0) - 0.55, zEnd = TD.zF + 0.2
             k.b(.identity, Self.trunkX, Self.gy, (zTop + zEnd) / 2, 1.1, 0.04, zEnd - zTop, road)
         }
         // 電廠的路：廣場右端 → 電廠正門（10-21 稽核：電廠原本沒有門也沒有路）
@@ -166,7 +174,7 @@ final class CityBuilder {
 
         // ── 貨櫃堆場（左邊，一個磁碟一個）──
         for (i, d) in s.disks.prefix(Self.maxYards).enumerated() {
-            let zc = Self.z0 + 3.5 + Float(i) * 5.2
+            let zc = Self.yardZ(i)
             buildYard(k, d, zc: zc, road: road, pad: pad, lamp: lamp)
         }
 
@@ -181,9 +189,9 @@ final class CityBuilder {
         // ── 港口（11-01：正門出去、馬路正對面）──
         buildPort(k, s)
 
-        // ── 飛艇（天上，後面）──
+        // ── 飛艇（11-01 Kang：搬進圍牆內——堆場往馬路挪，後牆內側空出一條地，前兩艘連停靠架停在這裡；第 3 艘起仍在牆外後方）──
         for (i, c) in s.clouds.prefix(4).enumerated() {
-            buildAirship(k, c, x: -21 + Float(i) * 10, y: 6.2, z: -17)
+            buildAirship(k, c, dock: Self.airshipDock(i))
         }
 
         // 路燈（夜晚的城市才看得到路）：10-21 稽核：原本固定每 6 公尺一支，剛好立在城門正前方擋住出入口 ⇒ 離任何開口 1 公尺內的往旁邊挪
@@ -276,7 +284,8 @@ final class CityBuilder {
         }
         // 後牆內側兩條草地帶，樹三棵一組（中間留空）；避開堆場、後牆的門、電廠
         let bz = Self.z0 + Self.wallT / 2 + 0.7
-        for (a, b, trees) in [(Float(-13), Float(-4.2), [Float(-12.2), -11.2, -10.2, -6.6, -5.6]), (Float(11.6), Float(20.3), [Float(12.4), 13.4, 19.4])] {
+        // 11-01：左段讓給飛艇停靠架（原本從 −13 起）
+        for (a, b, trees) in [(Float(-9.0), Float(-4.2), [Float(-8.2), -6.6, -5.6]), (Float(11.6), Float(20.3), [Float(12.4), 13.4, 19.4])] {
             k.b(.identity, (a + b) / 2, Self.gy, bz, b - a, gtop - Self.gy, 1.2, Self.grass)
             for x in trees { tree(k, x, bz, base: gtop, s: 0.9) }
         }
@@ -352,7 +361,7 @@ final class CityBuilder {
         shadow(k, Self.x1, (Self.z0 + Self.z1) / 2, t, Self.z1 - Self.z0, h, out: true, clip: (SIMD2(Self.x1 + t / 2, -far), SIMD2(far, far)))
         // 堆場：倉庫＋整堆貨櫃（一塊）
         for (i, d) in s.disks.prefix(Self.maxYards).enumerated() {
-            let zc = Self.z0 + 3.5 + Float(i) * 5.2
+            let zc = Self.yardZ(i)
             shadow(k, -22.6, zc, 2.8, 3.6, 2.78)
             let c = CityRules.containers(used: d.used)
             if c.count > 0 {
@@ -885,26 +894,137 @@ final class CityBuilder {
 
     // MARK: 飛艇
 
-    private func buildAirship(_ k: Kit, _ c: CityCloud, x: Float, y: Float, z: Float) {
-        let body = Self.m(TP.FN5), shade = Self.m(TP.POT)
-        k.b(.identity, x, y, z, 5.2, 1.6, 1.6, body)
-        k.b(.identity, x, y + 0.2, z, 4.0, 1.2, 2.0, body)
-        k.b(.identity, x + 3.0, y + 0.35, z, 0.8, 0.9, 1.0, shade)
-        k.b(.identity, x - 3.0, y + 0.35, z, 0.8, 0.9, 1.0, shade)
-        k.b(.identity, x - 3.3, y + 1.0, z, 0.9, 1.0, 0.08, Self.m(TP.ST2))       // 尾翼
-        k.b(.identity, x - 3.3, y + 0.55, z, 0.9, 0.08, 1.8, Self.m(TP.ST2))
-        k.b(.identity, x + 0.3, y - 0.45, z, 1.6, 0.45, 0.7, Self.m(TP.ST1))      // 吊艙
-        // 繫留塔（10-21 稽核：飛艇原本懸在半空、沒有任何支撐）：機頭頂在塔頂的繫留臂上，塔底一塊水泥停機坪
-        let mx = x + 3.75
-        k.b(.identity, mx, 0, z, 1.2, 0.1, 1.2, Self.m(TP.ST2))
-        for (dx, dz) in [(-0.3, -0.3), (0.3, -0.3), (-0.3, 0.3), (0.3, 0.3)] as [(Float, Float)] { k.b(.identity, mx + dx, 0.1, z + dz, 0.1, y + 0.25, 0.1, Self.m(TP.ST1)) }
-        for yy in stride(from: Float(1.4), to: y, by: 1.4) { k.b(.identity, mx, yy, z, 0.7, 0.06, 0.7, Self.m(TP.ST1)) }
-        k.b(.identity, mx, y + 0.35, z, 0.8, 0.2, 0.8, Self.m(TP.ST1))
-        k.b(.identity, mx - 0.35, y + 0.3, z, 0.3, 0.14, 0.14, Self.m(TP.ST1))           // 繫留臂：接到機頭
-        k.b(.identity, mx, y + 0.55, z, 0.16, 0.16, 0.16, Self.lamp)                    // 塔頂燈（跟路燈同一個材質，不多一個 draw call）
-        // 狀態燈：讀得到同步狀態＝綠、卡住／快滿＝紅；只知道連著＝灰（不假裝在同步）
-        k.b(.identity, x + 1.2, y - 0.3, z + 0.36, 0.16, 0.16, 0.04, c.alert ? Self.red : c.known ? TM.glow(0x22C55E, 0.6, 1.8) : TM.f(0x9CA3AF))
-        label(c.id, SIMD3(x, y + 2.0, z), CityText.cloud(c), alert: c.alert, hit: (SIMD3(x, y + 0.3, z), SIMD3(7, 2.4, 2.2)))
+    private func buildAirship(_ k: Kit, _ c: CityCloud, dock: SIMD3<Float>) {
+        // 座標都以停靠架地面中心為原點（船身沿 x）
+        let f = Xf(x: dock.x, y: 0, z: dock.z)
+        let st = c.alert ? Self.red : c.known ? TM.glow(0x22C55E, 0.6, 1.8) : TM.f(0x9CA3AF)   // 狀態燈：同步正常＝綠、卡住／快滿＝紅、只知道連著＝灰
+        let dark = Self.m(TP.ST1), conc = Self.m(TP.ST2)
+        var top: Float, hit: (SIMD3<Float>, SIMD3<Float>)
+        switch Self.airshipStyle {
+        case 1:
+            // 銀色硬式飛船：十字斷面疊出圓胖的船身、骨架環、四片尾翼、長吊艙＋兩側發動機；停在兩座 A 字托架上
+            let hull = Self.m(0xC9CED6), band = Self.m(0x8E949C), acc = Self.m(0x3B82F6)
+            let cy: Float = 4.4, hb = cy - 1.0
+            k.b(f, 0, cy - 0.8, 0, 6.0, 1.6, 1.6, hull)
+            k.b(f, 0, cy - 1.0, 0, 5.4, 2.0, 1.2, hull)
+            k.b(f, 0, cy - 0.6, 0, 5.4, 1.2, 2.0, hull)
+            k.b(f, 3.25, cy - 0.5, 0, 0.5, 1.0, 1.0, hull); k.b(f, 3.6, cy - 0.25, 0, 0.2, 0.5, 0.5, dark)
+            k.b(f, -3.25, cy - 0.5, 0, 0.5, 1.0, 1.0, hull)
+            for x: Float in [-1.6, 0.4, 2.0] {
+                k.b(f, x, cy - 1.03, 0, 0.1, 2.06, 1.26, band); k.b(f, x, cy - 0.63, 0, 0.1, 1.26, 2.06, band)
+            }
+            k.b(f, -2.9, cy + 0.5, 0, 1.2, 0.9, 0.08, acc); k.b(f, -2.9, cy - 1.4, 0, 1.2, 0.9, 0.08, acc)
+            for z: Float in [-1.0, 1.0] { k.b(f, -2.9, cy - 0.04, z, 1.2, 0.08, 0.9, acc) }
+            k.b(f, 0.4, hb - 0.45, 0, 2.2, 0.5, 0.7, dark)
+            k.b(f, 0.4, hb - 0.3, 0, 1.8, 0.14, 0.72, Self.lamp)
+            for z: Float in [-1, 1] {
+                k.b(f, -1.0, cy - 0.75, z * 0.95, 0.12, 0.1, 0.5, dark)
+                k.b(f, -1.0, cy - 0.95, z * 1.4, 0.7, 0.4, 0.4, dark)
+            }
+            k.b(f, 1.55, hb - 0.35, 0.2, 0.08, 0.14, 0.14, st)
+            for x: Float in [-2.0, 2.0] {
+                k.b(f, x, 0, 0, 0.8, 0.1, 2.0, conc)
+                for z: Float in [-0.7, 0.7] { k.b(f, x, 0.1, z, 0.12, hb - 0.35, 0.12, dark) }
+                for y: Float in [1.2, 2.4] { k.b(f, x, y, 0, 0.08, 0.08, 1.3, dark) }
+                k.b(f, x, hb - 0.25, 0, 0.5, 0.25, 1.6, conc)                   // 托座（頂到船底）
+            }
+            top = cy + 1.4; hit = (SIMD3(0, cy - 0.4, 0), SIMD3(7.4, 2.6, 2.4))
+        case 2:
+            // 雲朵飛船（iCloud）：白色雲團、底下吊一個藍色吊艙＋尾槳；停在一座架高的起降台上方
+            let cloud = Self.m(0xF6F7F9), under = Self.m(0xD4E4F4), blue = Self.m(0x3B82F6)
+            let cb: Float = 5.0
+            k.b(f, 0, cb, 0, 5.6, 1.0, 2.2, cloud)
+            for (x, y, w, h, d) in [(-1.7, 0.6, 1.8, 1.4, 1.9), (0.1, 0.7, 2.2, 1.9, 2.1), (1.9, 0.6, 1.6, 1.3, 1.8),
+                                    (-2.9, 0.3, 1.0, 0.9, 1.5), (2.9, 0.3, 0.9, 0.8, 1.4), (0.5, 2.6, 1.0, 0.5, 1.2)] as [(Float, Float, Float, Float, Float)] {
+                k.b(f, x, cb + y, 0, w, h, d, cloud)
+            }
+            k.b(f, 0, cb - 0.12, 0, 5.0, 0.12, 2.0, under)
+            k.b(f, 0, 3.4, 0, 1.6, 0.7, 0.9, blue)
+            k.b(f, 0, 3.75, 0, 1.2, 0.18, 0.92, Self.lamp)
+            k.b(f, 0, 4.1, 0, 1.8, 0.1, 1.0, dark)
+            for (x, z) in [(-0.7, -0.35), (0.7, -0.35), (-0.7, 0.35), (0.7, 0.35)] as [(Float, Float)] { k.b(f, x, 4.2, z, 0.04, cb - 0.12 - 4.2, 0.04, dark) }
+            k.b(f, -0.9, 3.65, 0, 0.2, 0.15, 0.15, dark)
+            k.b(f, -1.02, 3.3, 0, 0.04, 0.9, 0.12, dark); k.b(f, -1.02, 3.69, 0, 0.04, 0.12, 0.9, dark)
+            k.b(f, 0.81, 3.55, 0.2, 0.04, 0.14, 0.14, st)
+            // 起降台：四腳架高平台＋欄杆＋樓梯
+            let dy: Float = 2.6
+            k.b(f, 0, dy, 0, 3.0, 0.15, 2.6, conc)
+            for (x, z) in [(-1.3, -1.1), (1.3, -1.1), (-1.3, 1.1), (1.3, 1.1)] as [(Float, Float)] {
+                k.b(f, x, 0, z, 0.15, dy, 0.15, dark)
+                k.b(f, x, dy + 0.15, z, 0.08, 0.5, 0.08, dark)
+                k.b(f, x, dy + 0.65, z, 0.14, 0.1, 0.14, Self.lamp)
+            }
+            for z: Float in [-1.27, 1.27] { k.b(f, 0, dy + 0.55, z, 2.6, 0.05, 0.05, dark) }
+            k.b(f, 1.47, dy + 0.55, 0, 0.05, 0.05, 2.2, dark)
+            for i in 0..<6 { k.b(f, -1.7 - Float(5 - i) * 0.4, Float(i) * 0.43, 0.6, 0.4, 0.43, 0.9, conc) }     // 樓梯（一階一塊，往 −x 下去）
+            top = cb + 3.1; hit = (SIMD3(0, 4.6, 0), SIMD3(6.0, 4.0, 2.6))
+        case 3:
+            // 熱氣球：直條紋球皮（一層三片）、吊籃＋燃燒器；地上一座木平台、繫留繩、沙包、風向袋
+            let red = Self.m(0xE4572E), cream = Self.m(0xF3E9D2), basket = Self.m(TP.FN1)
+            var y: Float = 3.9
+            k.b(f, 0, 3.5, 0, 0.8, 0.4, 0.8, cream)
+            for (w, h) in ([(1.6, 0.5), (2.2, 0.5), (2.6, 0.6), (2.8, 0.6), (2.8, 0.5), (2.6, 0.5), (2.2, 0.4), (1.4, 0.3)] as [(Float, Float)]) {
+                for j in 0..<3 { k.b(f, (Float(j) - 1) * w / 3, y, 0, w / 3, h, w, j == 1 ? cream : red) }
+                y += h
+            }
+            for (x, z) in [(-0.38, -0.38), (0.38, -0.38), (-0.38, 0.38), (0.38, 0.38)] as [(Float, Float)] { k.b(f, x, 2.95, z, 0.04, 0.55, 0.04, dark) }
+            k.b(f, 0, 2.3, 0, 0.9, 0.6, 0.9, basket)
+            k.b(f, 0, 2.9, 0, 1.0, 0.08, 1.0, dark)
+            k.b(f, 0, 3.15, 0, 0.22, 0.22, 0.22, Self.lamp)
+            k.b(f, 0.46, 2.55, 0.2, 0.04, 0.14, 0.14, st)
+            k.b(f, 0, 0, 0, 2.6, 0.3, 2.4, Self.m(TP.FN2))
+            for x: Float in [-0.35, 0.35] { k.b(f, x, 0.3, 0, 0.04, 2.0, 0.04, dark) }
+            for (x, z) in [(-1.1, -1.0), (1.1, -1.0), (-1.1, 1.0), (1.1, 1.0)] as [(Float, Float)] { k.b(f, x, 0.3, z, 0.3, 0.22, 0.3, Self.m(0x8A7A5A)) }
+            k.b(f, 1.6, 0, 0.9, 0.08, 2.4, 0.08, dark)
+            k.b(f, 1.9, 2.1, 0.9, 0.5, 0.18, 0.18, Self.m(0xF28C28))
+            top = y + 0.4; hit = (SIMD3(0, 4.0, 0), SIMD3(3.0, 7.0, 3.0))
+        case 4:
+            // 飛碟：一圈一圈的圓盤（三個方塊疊出圓）、發光圓頂、邊緣燈；三支腳站在起降坪上
+            let silver = Self.m(0xC9CED6), light = Self.m(0xE4E7EC), glass = TM.glow(0x7DD3FC, 0.3, 1.2)
+            func disc(_ y: Float, _ h: Float, _ r: Float, _ m: SCNMaterial) {
+                k.b(f, 0, y, 0, 2 * r, h, 0.84 * r, m); k.b(f, 0, y, 0, 0.84 * r, h, 2 * r, m)
+                k.b(f, 0, y, 0, 1.72 * r, h, 1.44 * r, m); k.b(f, 0, y, 0, 1.44 * r, h, 1.72 * r, m)
+            }
+            disc(2.35, 0.25, 1.1, dark)
+            disc(2.6, 0.35, 1.8, silver)
+            disc(2.95, 0.2, 1.4, light)
+            disc(3.15, 0.55, 0.7, glass)
+            k.b(f, 0, 3.7, 0, 0.6, 0.2, 0.6, light)
+            for (x, z) in [(1.83, 0), (-1.83, 0), (0, 1.83), (0, -1.83), (1.56, 1.31), (-1.56, 1.31), (1.56, -1.31), (-1.56, -1.31)] as [(Float, Float)] {
+                k.b(f, x, 2.71, z, 0.14, 0.12, 0.14, Self.lamp)
+            }
+            k.b(f, 1.0, 2.36, 0.2, 0.14, 0.14, 0.14, st)
+            for (x, z) in [(0.85, 0.0), (-0.45, 0.75), (-0.45, -0.75)] as [(Float, Float)] {
+                k.b(f, x, 0.18, z, 0.1, 2.17, 0.1, dark)
+                k.b(f, x, 0.12, z, 0.4, 0.06, 0.4, dark)
+            }
+            k.b(f, 0, 0, 0, 3.4, 0.12, 3.0, Self.m(0x4A4F55))
+            let yel = Self.m(0xF2C94C)
+            for z: Float in [-1.2, 1.2] { k.b(f, 0, 0.12, z, 2.6, 0.01, 0.1, yel) }
+            for x: Float in [-1.3, 1.3] { k.b(f, x, 0.12, 0, 0.1, 0.01, 2.5, yel) }
+            k.b(f, 1.55, 0.12, -1.3, 0.08, 1.6, 0.08, dark); k.b(f, 1.45, 1.72, -1.2, 0.3, 0.12, 0.3, Self.lamp)
+            top = 4.1; hit = (SIMD3(0, 2.0, 0), SIMD3(3.8, 4.0, 3.8))
+        default:
+            // 原版：白色軟式飛艇，機頭頂在繫留塔頂的繫留臂上
+            let body = Self.m(TP.FN5), shade = Self.m(TP.POT), y: Float = 6.2
+            k.b(f, 0, y, 0, 5.2, 1.6, 1.6, body)
+            k.b(f, 0, y + 0.2, 0, 4.0, 1.2, 2.0, body)
+            k.b(f, 3.0, y + 0.35, 0, 0.8, 0.9, 1.0, shade)
+            k.b(f, -3.0, y + 0.35, 0, 0.8, 0.9, 1.0, shade)
+            k.b(f, -3.3, y + 1.0, 0, 0.9, 1.0, 0.08, conc)
+            k.b(f, -3.3, y + 0.55, 0, 0.9, 0.08, 1.8, conc)
+            k.b(f, 0.3, y - 0.45, 0, 1.6, 0.45, 0.7, dark)
+            let mx: Float = 3.75
+            k.b(f, mx, 0, 0, 1.2, 0.1, 1.2, conc)
+            for (dx, dz) in [(-0.3, -0.3), (0.3, -0.3), (-0.3, 0.3), (0.3, 0.3)] as [(Float, Float)] { k.b(f, mx + dx, 0.1, dz, 0.1, y + 0.25, 0.1, dark) }
+            for yy in stride(from: Float(1.4), to: y, by: 1.4) { k.b(f, mx, yy, 0, 0.7, 0.06, 0.7, dark) }
+            k.b(f, mx, y + 0.35, 0, 0.8, 0.2, 0.8, dark)
+            k.b(f, mx - 0.35, y + 0.3, 0, 0.3, 0.14, 0.14, dark)
+            k.b(f, mx, y + 0.55, 0, 0.16, 0.16, 0.16, Self.lamp)
+            k.b(f, 1.2, y - 0.3, 0.36, 0.16, 0.16, 0.04, st)
+            top = y + 2.0; hit = (SIMD3(0, y + 0.3, 0), SIMD3(7, 2.4, 2.2))
+        }
+        label(c.id, dock + SIMD3(0, top, 0), CityText.cloud(c), alert: c.alert, hit: (dock + hit.0, hit.1))
     }
 
     /// 俯瞰取景要框的範圍
