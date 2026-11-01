@@ -979,31 +979,40 @@ final class CityBuilder {
             k.b(f, 1.9, 2.1, 0.9, 0.5, 0.18, 0.18, Self.m(0xF28C28))
             top = y + 0.4; hit = (SIMD3(0, 4.0, 0), SIMD3(3.0, 7.0, 3.0))
         case 4:
-            // 飛碟：一圈一圈的圓盤（三個方塊疊出圓）、發光圓頂、邊緣燈；三支腳站在起降坪上
+            // 飛碟：一圈一圈的圓盤（三個方塊疊出圓）、發光圓頂、邊緣燈。11-01 Kang：浮在 2～3 層樓高之間（底面 6.0–7.6 公尺）緩緩上下飄、慢慢自轉；
+            // 機身是自己的節點（SCNAction 動），起降坪留在城市靜態 mesh
             let silver = Self.m(0xC9CED6), light = Self.m(0xE4E7EC), glass = TM.glow(0x7DD3FC, 0.3, 1.2)
+            let um = VoxelMesh(), uk = Kit(m: um)
             func disc(_ y: Float, _ h: Float, _ r: Float, _ m: SCNMaterial) {
-                k.b(f, 0, y, 0, 2 * r, h, 0.84 * r, m); k.b(f, 0, y, 0, 0.84 * r, h, 2 * r, m)
-                k.b(f, 0, y, 0, 1.72 * r, h, 1.44 * r, m); k.b(f, 0, y, 0, 1.44 * r, h, 1.72 * r, m)
+                uk.b(.identity, 0, y, 0, 2 * r, h, 0.84 * r, m); uk.b(.identity, 0, y, 0, 0.84 * r, h, 2 * r, m)
+                uk.b(.identity, 0, y, 0, 1.72 * r, h, 1.44 * r, m); uk.b(.identity, 0, y, 0, 1.44 * r, h, 1.72 * r, m)
             }
-            disc(2.35, 0.25, 1.1, dark)
-            disc(2.6, 0.35, 1.8, silver)
-            disc(2.95, 0.2, 1.4, light)
-            disc(3.15, 0.55, 0.7, glass)
-            k.b(f, 0, 3.7, 0, 0.6, 0.2, 0.6, light)
+            disc(0, 0.25, 1.1, dark)
+            disc(0.25, 0.35, 1.8, silver)
+            disc(0.6, 0.2, 1.4, light)
+            disc(0.8, 0.55, 0.7, glass)
+            uk.b(.identity, 0, 1.35, 0, 0.6, 0.2, 0.6, light)
             for (x, z) in [(1.83, 0), (-1.83, 0), (0, 1.83), (0, -1.83), (1.56, 1.31), (-1.56, 1.31), (1.56, -1.31), (-1.56, -1.31)] as [(Float, Float)] {
-                k.b(f, x, 2.71, z, 0.14, 0.12, 0.14, Self.lamp)
+                uk.b(.identity, x, 0.36, z, 0.14, 0.12, 0.14, Self.lamp)
             }
-            k.b(f, 1.0, 2.36, 0.2, 0.14, 0.14, 0.14, st)
-            for (x, z) in [(0.85, 0.0), (-0.45, 0.75), (-0.45, -0.75)] as [(Float, Float)] {
-                k.b(f, x, 0.18, z, 0.1, 2.17, 0.1, dark)
-                k.b(f, x, 0.12, z, 0.4, 0.06, 0.4, dark)
+            uk.b(.identity, 1.0, 0.01, 0.2, 0.14, 0.14, 0.14, st)
+            for (x, z) in [(0.85, 0.0), (-0.45, 0.75), (-0.45, -0.75)] as [(Float, Float)] {      // 收起來的短腳
+                uk.b(.identity, x, -0.3, z, 0.1, 0.32, 0.1, dark); uk.b(.identity, x, -0.34, z, 0.3, 0.05, 0.3, dark)
             }
+            let lo: Float = 6.0, swing: Float = 1.6
+            let body = um.node(name: "ufo-body"); body.categoryBitMask = OfficeBuilder.outdoorMask
+            let ufo = SCNNode(); ufo.name = "ufo"; ufo.simdPosition = SIMD3(dock.x, lo, dock.z); ufo.addChildNode(body)
+            let up = SCNAction.moveBy(x: 0, y: CGFloat(swing), z: 0, duration: 3.6); up.timingMode = .easeInEaseOut
+            let down = SCNAction.moveBy(x: 0, y: -CGFloat(swing), z: 0, duration: 3.6); down.timingMode = .easeInEaseOut
+            ufo.runAction(.repeatForever(.sequence([up, down])), forKey: "hover")
+            body.runAction(.repeatForever(.rotateBy(x: 0, y: .pi * 2, z: 0, duration: 30)), forKey: "spin")
+            root.addChildNode(ufo)
             k.b(f, 0, 0, 0, 3.4, 0.12, 3.0, Self.m(0x4A4F55))
             let yel = Self.m(0xF2C94C)
             for z: Float in [-1.2, 1.2] { k.b(f, 0, 0.12, z, 2.6, 0.01, 0.1, yel) }
             for x: Float in [-1.3, 1.3] { k.b(f, x, 0.12, 0, 0.1, 0.01, 2.5, yel) }
             k.b(f, 1.55, 0.12, -1.3, 0.08, 1.6, 0.08, dark); k.b(f, 1.45, 1.72, -1.2, 0.3, 0.12, 0.3, Self.lamp)
-            top = 4.1; hit = (SIMD3(0, 2.0, 0), SIMD3(3.8, 4.0, 3.8))
+            top = lo + swing + 1.9; hit = (SIMD3(0, (lo + 0.6 + swing) / 2, 0), SIMD3(3.8, lo + 1.6 + swing, 3.8))
         default:
             // 原版：白色軟式飛艇，機頭頂在繫留塔頂的繫留臂上
             let body = Self.m(TP.FN5), shade = Self.m(TP.POT), y: Float = 6.2
