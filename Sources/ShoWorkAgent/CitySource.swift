@@ -171,7 +171,7 @@ final class CityMonitor: @unchecked Sendable {
             // 測試視窗不寫回你的設定
             if !Self.testWindow { UserDefaults(suiteName: Self.suite)?.set(merged, forKey: Self.knownKey) }
         }
-        for n in known where !mounted.contains(n) { out.append(CityDisk(name: n, isInternal: false, mounted: false, lastSeen: seen[n])) }
+        // 拔掉的外接碟不再留一座拉下鐵捲門的堆場（11-01 Kang：拔掉了就該消失）；known／seen 照記，插回來時排回原本的順序
         return out
     }
 
@@ -324,8 +324,7 @@ final class CityMonitor: @unchecked Sendable {
         let g: Int64 = 1_000_000_000
         s.disks = [CityDisk(name: "Data", isInternal: true, total: 245 * g, available: 13 * g, availablePlain: 11 * g, format: "APFS", mountPath: "/"),
                    CityDisk(name: "DEMO-SD", isInternal: false, total: 128 * g, available: 35 * g, availablePlain: 35 * g, format: "APFS", mountPath: "/Volumes/DEMO-SD"),
-                   CityDisk(name: "DEMO-USB", isInternal: false, total: 64 * g, available: 3 * g, availablePlain: 3 * g, format: "MS-DOS (FAT32)", mountPath: "/Volumes/DEMO-USB"),
-                   CityDisk(name: "舊隨身碟", isInternal: false, mounted: false, lastSeen: demoShipAt.addingTimeInterval(-2 * 86400))]
+                   CityDisk(name: "DEMO-USB", isInternal: false, total: 64 * g, available: 3 * g, availablePlain: 3 * g, format: "MS-DOS (FAT32)", mountPath: "/Volumes/DEMO-USB")]
         s.clouds = [CityCloud(name: "iCloud Drive", isICloud: true,
                               sync: CloudSync(remaining: 92 * g, driveState: "idle", lastSync: demoShipAt.addingTimeInterval(-300), caughtUp: true,
                                               pending: 0, blocked: 0, desktopDocs: true), checkedAt: demoShipAt),
