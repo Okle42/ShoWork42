@@ -12,7 +12,7 @@
     <AssemblyName>ShoWorkAgent</AssemblyName>
     <RootNamespace>ShoWork</RootNamespace>
     <!-- shown in Settings → Apps and the file's properties; pack.ps1 can override Version -->
-    <Version>0.4.0</Version>
+    <Version>0.5.0</Version>
     <Product>ShoWork42</Product>
     <AssemblyTitle>ShoWork42</AssemblyTitle>
     <Description>ShoWork42：終端機裡的 AI 在工作、做完了、在等你回答時，視窗外圍發光</Description>
