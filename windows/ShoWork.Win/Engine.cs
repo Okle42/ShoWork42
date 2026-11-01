@@ -89,8 +89,12 @@ sealed class Engine
         foreach (var g in glows.Values) if (!g.IsDisposed) g.Sync();
     }
 
+    /// 正式 agent 的引擎（戰情中心跳到視窗、判斷「正式 agent 才自動動手」用；--board-window 測試視窗沒有＝null。Mac：Engine.current）
+    public static Engine? Current { get; private set; }
+
     public void Start(Action reload, Action quit)
     {
+        Current = this;
         tray = new Tray(this, reload, quit);
         Restore();
         Render();
@@ -98,6 +102,7 @@ sealed class Engine
 
     public void Stop()
     {
+        if (Current == this) Current = null;
         watchdog.Stop();
         clear.Enable(false);
         HookWinEvents(false);

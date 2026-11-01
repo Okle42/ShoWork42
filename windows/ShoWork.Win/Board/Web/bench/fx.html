@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<title>ShoWork42 3D 量尺：B1／雨（JS fx bench）</title>
+<!--
+  對 Mac `--office-bench rain`（OfficeBench.swift）的 JS 量尺頁（11-02 P8）。用 python3 -m http.server 開（windows/tools/fx_bench.mjs 會開），參數：
+    fx.html?w=typhoon&cam=16,25,60&t=4              ← 颱風天、鏡頭 方位,仰角,距離（同 SHOWORK_BENCH_WEATHER／SHOWORK_BENCH_CAM），第 t 秒
+    fx.html?w=clear&cam=16,8,13&target=0,-3.3,-1.5&t=2&dump=1   ← B1 機房（鏡頭在地下 ⇒ setUnderground）；dump＝basement 子樹
+  畫完設 window.__ready = true；dump=1 時 window.__dump 是 JSON 字串。
+-->
+<style>html,body{margin:0;background:#000;overflow:hidden}canvas{display:block}</style>
+<script type="importmap">
+{ "imports": { "three": "../vendor/three-r170/three.module.min.js" } }
+</script>
+</head>
+<body>
+<script type="module" src="./fx.js"></script>
+</body>
+</html>

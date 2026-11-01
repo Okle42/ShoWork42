@@ -9,6 +9,28 @@
 | W2 | 設定視窗（三種狀態同一頁）；六種光芒；動態島（系統匣）；全螢幕邊緣光 | ✅（見 W2W3-結果.md） |
 | W3 | 自動排版（每台螢幕各自排，Ctrl+Alt+L） | ✅（Windows 預設關） |
 | W4 | 打包單一 exe（ShoWork42.exe 內含 runtime／ShoWork42-small.exe），雙擊安裝、「設定 > 應用程式」解除安裝 | ✅（見 W2W3-結果.md 的 W4 一節） |
+| W5 | hook 端：卡片、閘門、放行（`showork brief／card／title／guard-push／preview-check／names／captain／release`，Mac 版移植，資料檔格式相同） | 🟡 macOS 上單元測試＋跟 Mac 版 preview-check 逐條比對一致；**Windows 真機都還沒跑過**（見下） |
+| W6 | 戰情中心 3D 辦公大樓（WebView2＋three.js r170，「卡片／大樓」切換）：大樓剖面、桌子＝AI 數、方塊角色狀態色、樓層主題、點角色看卡片 | 🟡 Mac 上 build／單元測試／瀏覽器示範截圖過；**還沒在 Windows 真機驗證**（WebView2 載入、點角色回傳、單一 exe 解出網頁、Surface 內顯效能都沒實測） |
+
+### W5：hook 端（卡片、閘門、放行）
+
+邏輯在 `showork\Core\`（不碰 WinForms、不呼叫 Win32），子指令在 `showork\HookCli.cs`；測試 `tests\ShoWork.Tests\HookTests.cs` 在 macOS 上跑。
+安裝器（`ShoWork.Win\InstallerHooks.cs`）多裝三組 hook：SessionStart → `brief`、UserPromptSubmit → `title`、PreToolUse(Bash) → `guard-push`（都不 async）；
+舊版裝過的升級時只換掉 ShoWork 自己的 hook 組，卸載照樣回到安裝前的位元組。
+資料都在 `%LOCALAPPDATA%\ShoWork42\board\`：`cards\`、`names\`、`captain-inbox\`、`captain.json`、`permits\releases.jsonl`、`permits\preapprovals.json`、`guard\preview.tsv`、`guard\pushes.jsonl`，
+欄位與時間格式跟 Mac 一樣。測試用的路徑變數同 Mac：`SHOWORK_CAPTAIN_INBOX`、`SHOWORK_RELEASE_LOG`、`SHOWORK_PREAPPROVAL_LOG`、`SHOWORK_PREVIEW_RULES`、`SHOWORK_LOCAL_CONFIG`、`SHOWORK_CLAUDE_DIR`，外加 `SHOWORK_HOME`。
+
+**沒在 Windows 真機驗證過的**（都只在 macOS 上用 `dotnet` 跑過）：
+- 整條 hook 流程（Git Bash 跑 showork.exe、stdin 的 hook JSON、stdout 的中文、`CLAUDE_CODE_SESSION_ID` 在 Bash 工具裡有沒有）。
+- 寄給隊長（`Peer`）：Windows 版 Claude Code 的 `messagingSocketPath` 長什麼樣子沒看過；`\\.\pipe\…` 當 named pipe、其他當 AF_UNIX socket。連不上就單子留在收件匣（delivered=false），新隊長跑 `showork captain` 會看到。
+- NativeAOT 版 showork.exe（Mac 上只做到 build 時 AOT 分析器 0 警告、trimmed publish 0 警告）。
+- git／gh 從 PATH 找 `git.exe`／`gh.exe`；`cd /c/Users/…` 這種 Git Bash 路徑換成 `C:/Users/…`。
+
+**跟 Mac 不同、刻意的**：`title` 不帶 `terminalSequence`、做完時也不補寫視窗標題（W1 的 WT 分頁判斷靠主控台標題）；只輸出 `sessionTitle`＋`additionalContext`。
+`brief` 沒有自動接手、`card --kind wrapup` 只存卡片（沒有自動 /clear）。`showork.exe` 也算 showork 自己的指令（不預告）。
+規則清單照 Mac：Windows 的暫存區（`%TEMP%`、`C:\Users\…\AppData\Local\Temp`）**不算**暫存區，rm 到那裡會被擋；要放寬改 `preview.tsv`。
+
+**還沒做**：permit（收件匣按允許）、事先放行的「回答」UI（Windows 看板還不寫 `preapprovals.json`，只會讀與用掉）、預告合併送隊長（`notice` 只進收件匣）、roster／task／b1、自動交接。
 
 ## 做法（對照 macOS 版）
 
@@ -45,6 +67,8 @@ bin\Release\net8.0-windows\ShoWorkAgent.exe --install    # 複製到 %LOCALAPPDA
 bin\Release\net8.0-windows\ShoWorkAgent.exe --status
 bin\Release\net8.0-windows\ShoWorkAgent.exe --board-dump | Out-String   # 戰情中心看板卡片 JSON（唯讀；WinExe 要接管線 PowerShell 才會等它）
 bin\Release\net8.0-windows\ShoWorkAgent.exe --board-window               # 只開戰情中心視窗（唯讀，不開 pipe、不發光）；agent 裡從系統匣「戰情中心…」開
+bin\Release\net8.0-windows\ShoWorkAgent.exe --city-dump --out city.json   # 城市資料來源跑一輪（磁碟、雲端、ssh 主機、防火牆、港口、額度、天氣），寫出真實的 CityState（唯讀）
+bin\Release\net8.0-windows\ShoWorkAgent.exe --office-dump [--board-demo] --out office.json   # 推給 3D 網頁的 office2 JSON（唯讀：不寫名冊、不呼叫 claude）
 bin\Release\net8.0-windows\ShoWorkAgent.exe --board-window --board-demo --size 820x700 --shot a.png --exit-after-shot   # 示範卡片截圖驗收
 bin\Release\net8.0-windows\ShoWorkAgent.exe --uninstall  # 停 agent、移除 hooks（settings.json 回到原本位元組）、移除開機啟動
 
@@ -64,6 +88,18 @@ powershell -ExecutionPolicy Bypass -File ..\tests\w1_e2e.ps1
 `--shot a.png` 存兩張：`a.png` 是螢幕實拍（先叫到最上層，拍得到「沒重畫」和系統捲軸的真樣子）、`a.pw.png` 是 PrintWindow 對照，log 記兩張的差異比例。
 `SHOWORK_BOARD_FAULT=paint`（畫島時丟例外，驗不跳對話框、只關戰情中心）、`SHOWORK_EXIT_AFTER=N`（測試 agent N 秒後正常結束，不在系統匣留殘影）。
 修正與驗收數字見 `戰情中心-結果.md`。
+
+3D 辦公大樓（W6，`ShoWork.Win\Board\Office.cs`＋`Board\View\OfficeHost.cs`＋`Board\Web\`）：戰情中心左上「卡片／大樓」切換（記在 `board\board-view.txt`）。
+- 資料：`Office.cs`（純邏輯、測試直接連）把卡片組成 JSON（樓層、AI、狀態、英文名、任務、主題、狀態色），`PostWebMessageAsJson` 推給頁面；頁面只畫、不讀檔。
+  樓層號固定（`board\tower.json`，第一次看到的順序發號）；全部 AI 離開 2 小時內樓層留著（燈暗），之後降到閒置薄層。點角色 → 頁面 `postMessage({type:"select"})` → 左下角浮出那個人的卡片（沿用 IslandCardView）。
+- 網頁：three.js r170（MIT，`Board\Web\vendor\three-r170\`，離線可用、不從 CDN 載）。`dotnet build` 複製到 exe 旁的 `Web\`；單一 exe 從內嵌資源解到 `%LOCALAPPDATA%\ShoWork42\office-web\`。
+  WebView2 用 `SetVirtualHostNameToFolderMapping`（`https://office.showork42.invalid/`），只准看自己的頁面。
+- 退路：WebView2 Runtime 不在（`SHOWORK_OFFICE_NO_WEBVIEW=1` 可模擬）、初始化或頁面載入失敗、瀏覽器行程掛掉 ⇒ 退回卡片、切換鈕變灰，不跳例外。
+- 省電：靜態東西合併成少數幾個 mesh、陰影只在重建／換燈光時算一次、沒動畫不渲染；有人在打字／等你時 12 fps；視窗看不到時把 WebView2 藏起來。
+- 不靠 Windows 看：`cd windows\ShoWork.Win\Board\Web && python3 -m http.server 8000`，開 `http://127.0.0.1:8000/office.html?demo=1`（`&light=day|night`）。
+- 測試用：`--board-window --board-tower`、`SHOWORK_BOARD_VIEW=tower|cards`、`SHOWORK_OFFICE_DEVTOOLS=1`（開 F12）。
+- 跟 Mac 比還沒做：角色閒晃（休息上頂樓、拜訪別層）、搬家動畫、真實天氣、城市細節（電廠、航班看板）、地下室 B1、保全 WiFi 面板、樓層索引列、收件匣、
+  重新裝潢（問 AI 挑主題；Windows 只用專案名關鍵字＋雜湊穩定挑）、WASD 走動。
 
 偵錯：環境變數 `SHOWORK_DEBUG=1` ⇒ `%LOCALAPPDATA%\ShoWork42\agent.log`；`SHOWORK_STATUS_FILE` ⇒ agent 狀態 JSON；
 `SHOWORK_PIPE`／`SHOWORK_HOME` ⇒ 測試用的獨立 pipe 名稱與資料夾；`SHOWORK_CLAUDE_DIR` ⇒ 看板讀哪一份 `.claude`（預設 `%USERPROFILE%\.claude`）。設了 `SHOWORK_PIPE` 的測試 agent 不會排版，

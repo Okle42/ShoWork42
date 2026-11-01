@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<title>ShoWork42 3D 量尺（JS bench）</title>
+<!--
+  Windows 版照搬 Mac 3D 的量尺頁（11-01 P0）。用 python3 -m http.server 開（不要 file://），參數：
+    bench.html?cam=default|overview|top|branch|airship|port&night=0|1&dump=1
+    bench.html?test=kit&night=0|1&dump=1          ← 地基本身的小測試場景（對 Mac --office-bench kit）
+  畫完設 window.__ready = true；dump=1 時 window.__dump 是 JSON 字串（windows/tools/js_bench.mjs 讀走）。
+-->
+<style>html,body{margin:0;background:#000;overflow:hidden}canvas{display:block}</style>
+<script type="importmap">
+{ "imports": { "three": "../vendor/three-r170/three.module.min.js" } }
+</script>
+</head>
+<body>
+<script type="module" src="./bench.js"></script>
+</body>
+</html>

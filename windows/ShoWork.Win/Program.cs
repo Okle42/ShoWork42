@@ -14,8 +14,13 @@ namespace ShoWork;
 ///   ShoWorkAgent.exe --install-autostart | --uninstall-autostart     HKCU Run
 ///   ShoWorkAgent.exe --status
 ///   ShoWorkAgent.exe --board-dump                戰情中心看板目前的卡片（JSON，唯讀，不開視窗；比照 Mac 的 --board-dump）
-///   ShoWorkAgent.exe --board-window [--board-demo] [--size 820x700] [--shot a.png [--exit-after-shot]] [--topmost]
-///                                                只開戰情中心視窗（不開 pipe、不發光，比照 Mac）；--board-demo 用固定的示範卡片（截圖驗收）
+///   ShoWorkAgent.exe --city-dump                 跑一輪城市資料來源，印出真實的 CityState（磁碟、雲端、主機、防火牆⋯；唯讀）
+///   ShoWorkAgent.exe --office-dump [--board-demo]   推給 3D 網頁的 office2 JSON（唯讀：不寫名冊、不呼叫 claude）
+///   ShoWorkAgent.exe --board-window [--board-demo] [--board-tower|--board-cards] [--size 820x700] [--shot a.png [--exit-after-shot]] [--topmost]
+///                                                只開戰情中心視窗（不開 pipe、不發光，比照 Mac）；--board-demo 用固定的示範卡片（截圖驗收）；
+///                                                --board-tower 一開就看 3D 大樓（W6，WebView2）
+///   ShoWorkAgent.exe --term-send <sessionId|pid> <字>|--b64 X|--text-file F [--no-enter]|--keys down,enter   把字打進那個 Claude Code（TermSend）
+///   ShoWorkAgent.exe --term-idle <sessionId|pid> [--key-idle 秒]   現在能不能送（結束碼 0＝能）
 /// W0 debugging:
 ///   ShoWorkAgent.exe --console-hwnd <pid> <outfile>   write the console window HWND of process <pid>
 ///   ShoWorkAgent.exe --glow <hwnd> [working|done|input] [seconds]   glow around that window
@@ -35,6 +40,7 @@ static class Program
         {
             // the downloaded ShoWork42.exe asks to install itself; the installed copy (and a dev build) is the agent
             case null when Package.IsPacked && !Package.RunningInstalled: return Package.FirstRun(settings);
+            case null or "--after" or "--agent" when HandoverClear.Start(): return RunAgent(args);   // 11-02：自動交接／名冊／showork tick 的背景迴圈（HandoverClear.cs），Start() 一定回 true
             case null or "--after" or "--agent": return RunAgent(args);
             case "--version": return Report(() => Package.Version, quiet: true);
             case "--install": return Report(() => Package.Install(settings), quiet);
@@ -44,6 +50,9 @@ static class Program
             case "--install-autostart": return Report(() => { Installer.SetAutostart(true, self); return "on"; });
             case "--uninstall-autostart": return Report(() => { Installer.SetAutostart(false, self); return "off"; });
             case "--board-dump": return BoardDump();
+            case "--city-dump" or "--office-dump": return OfficeCli.Run(args);
+            case "--term-inject": return TermSend.InjectMain(args);
+            case "--term-send" or "--term-idle": return TermCli(args);
             case "--board-window" or "--board-demo": return BoardWindow(args);
             case "--status":
                 return Report(() => $"hooks installed: {Installer.CountOurs(settings)}/{Installer.OurHooks("x").Sum(kv => kv.Value!.AsArray().Count)}   autostart: {Installer.Autostart() ?? "off"}   " +
@@ -102,6 +111,42 @@ static class Program
         catch (Exception e) { Console.Error.WriteLine($"error: {e.Message}"); return 1; }
     }
 
+    /// 測試入口（TermSend）：
+    ///   --term-send <sessionId|pid> <字> [--no-enter]          字也可以用 --text-file 檔案（UTF-8）或 --b64 <base64>（ssh 傳中文用）
+    ///   --term-send <sessionId|pid> --keys down,enter           送具名按鍵（選單用）
+    ///   --term-idle <sessionId|pid> [--key-idle 秒]             能不能送：印 idle／busy＋原因，結束碼 0＝能送
+    static int TermCli(string[] args)
+    {
+        AttachConsole(unchecked((uint)-1));
+        string? Arg(string k) => args.SkipWhile(a => a != k).Skip(1).FirstOrDefault();
+        void Say(string s)
+        {
+            using var o = Console.OpenStandardOutput();
+            var b = new System.Text.UTF8Encoding(false).GetBytes(s + "\n");
+            o.Write(b, 0, b.Length);
+        }
+        if (args.Length < 2) { Say("用法：--term-send <sessionId|pid> <字> [--no-enter]｜--term-idle <sessionId|pid>"); return 2; }
+        var target = args[1];
+        if (args[0] == "--term-idle")
+        {
+            var ok = TermSend.IsIdle(target, out var why, double.TryParse(Arg("--key-idle"), out var k) ? k : 0);
+            Say((ok ? "idle：" : "busy：") + why);
+            return ok ? 0 : 1;
+        }
+        if (Arg("--keys") is { } keys)
+        {
+            var kr = TermSend.SendKeys(target, keys.Split(','));
+            Say($"{kr.Outcome}：{kr.Message}");
+            return kr.Ok ? 0 : 1;
+        }
+        var text = Arg("--text-file") is { } f ? File.ReadAllText(f, System.Text.Encoding.UTF8)
+                 : Arg("--b64") is { } b64 ? TermSend.Decode(b64)
+                 : args.Length >= 3 && !args[2].StartsWith("--") ? args[2] : "";
+        var r = TermSend.Send(target, text, enter: !args.Contains("--no-enter"));
+        Say($"{r.Outcome}：{r.Message}");
+        return r.Ok ? 0 : 1;
+    }
+
     /// 只開戰情中心：唯讀，不碰 pipe、光暈、排版
     static int BoardWindow(string[] args)
     {
@@ -110,7 +155,8 @@ static class Program
         if (Arg("--size") is { } sz && sz.Split('x') is [var w, var h] && int.TryParse(w, out var wi) && int.TryParse(h, out var hi)) size = new Size(wi, hi);
         var opt = new BoardForm.Options(
             Demo: args.Contains("--board-demo") || Environment.GetEnvironmentVariable("SHOWORK_BOARD_DEMO") is "1",
-            Size: size, Shot: Arg("--shot"), ExitAfterShot: args.Contains("--exit-after-shot"), TopMost: args.Contains("--topmost"));
+            Size: size, Shot: Arg("--shot"), ExitAfterShot: args.Contains("--exit-after-shot"), TopMost: args.Contains("--topmost"),
+            Tower: args.Contains("--board-tower") ? true : args.Contains("--board-cards") ? false : null);
         CatchUiErrors(boardOnly: true);
         ApplicationConfiguration.Initialize();
         Application.Run(new BoardForm(opt));
@@ -125,7 +171,7 @@ static class Program
         Application.ThreadException += (_, e) =>
         {
             var st = e.Exception.StackTrace ?? "";
-            bool board = boardOnly || new[] { "BoardForm", "IslandCardView", "IslandArt", "KuboArt", "UsageBar" }.Any(st.Contains);
+            bool board = boardOnly || new[] { "BoardForm", "IslandCardView", "IslandArt", "KuboArt", "UsageBar", "ViewSwitch", "OfficeHost", "WebView2" }.Any(st.Contains);
             Log.Note($"UI exception board={board}: {e.Exception}");
             if (board) BoardForm.CloseAfterError();
         };

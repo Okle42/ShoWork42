@@ -1,14 +1,17 @@
 // showork.exe — the tiny command every adapter (Claude Code hook) calls.
 //   showork emit <working|done|input|clear> [--agent claude] [--pid N]
 //   showork console <pid> [<pid>…]      (for the agent) print "pid<TAB>console hwnd<TAB>console title" per pid
+//   showork brief|card|title|guard-push|preview-check|names|captain|release   戰情中心的 hook 端（W5，見 HookCli.cs）
+//   showork permit|ctx-wrapup|statusline|roster|task|tasks|b1|tick              11-02 補齊 Mac 的其餘子指令（見 HookCli.cs）
 //
 // Contract with the AI tools that call us (hooks): this must NEVER slow them down or fail them.
 //   • always exits 0, prints nothing on success
-//   • gives up after 200 ms if the agent isn't there (a missing pipe returns at once)
-//   • never reads stdin (hook JSON may be large; we don't need it)
+//   • emit gives up after 200 ms if the agent isn't there (a missing pipe returns at once)
+//   • emit never reads stdin (hook JSON may be large; we don't need it); brief／title／guard-push do (they need session_id, prompt, command)
 using System.Runtime.InteropServices;
 using System.Text;
 using ShoWork;
+using ShoWork.Hooks;
 
 static class Cli
 {
@@ -18,6 +21,7 @@ static class Cli
     {
         try
         {
+            if (args.Length >= 1 && HookCli.Handles(args[0])) { HookCli.ClaudePid = ClaudePid; return HookCli.Run(args); }
             if (args.Length >= 2 && args[0] == "emit") Emit(args);
             else if (args.Length >= 2 && args[0] == "console") return Consoles(args);
         }
@@ -79,11 +83,31 @@ static class Cli
             if (p <= 4 || !procs.TryGetValue(p, out var parent)) return (0, 0);
             // a dead parent's pid can be reused by a younger process: a real parent is older than its child
             if (!OlderThan(p, child)) return (0, 0);
-            if (parent.exe.Equals(exe, StringComparison.OrdinalIgnoreCase)) return (p, CreationTime(child));
+            // 11-02：Claude Code 跑到一半自己更新時，正在跑的那支會被改名成 claude.exe.old.<時間戳>（同 TermSend.IsClaudeName）
+            if (parent.exe.Equals(exe, StringComparison.OrdinalIgnoreCase) || parent.exe.StartsWith(exe + ".old.", StringComparison.OrdinalIgnoreCase))
+                return (p, CreationTime(child));
             child = p;
             cur = parent;
         }
         return (0, 0);
+    }
+
+    /// 叫這個 hook／CLI 的 claude 行程：往上找第一個有 ~/.claude/sessions/<pid>.json 的祖先（Mac 的 Handover.claudePID；
+    /// /clear 換 sid 但不換行程）。祖先比孩子老才算（pid 重用）
+    static int? ClaudePid()
+    {
+        var dir = Path.Combine(ShoWork.Hooks.HookPaths.ClaudeDir, "sessions");
+        var procs = Snapshot();
+        int child = Environment.ProcessId;
+        if (!procs.TryGetValue(child, out var cur)) return null;
+        for (int hop = 0; hop < 12; hop++)
+        {
+            int p = cur.ppid;
+            if (p <= 4 || !procs.TryGetValue(p, out var parent) || !OlderThan(p, child)) return null;
+            if (File.Exists(Path.Combine(dir, $"{p}.json"))) return p;
+            child = p; cur = parent;
+        }
+        return null;
     }
 
     static Dictionary<int, (int ppid, string exe)> Snapshot()

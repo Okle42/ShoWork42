@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<title>ShoWork42 tower.js 量尺</title>
+<!--
+  tower.js（OfficeTower.swift 照搬）的對照頁（11-02）：用 python3 -m http.server 開（不要 file://）。
+  headless Chrome：--headless=new --virtual-time-budget=20000 --dump-dom http://127.0.0.1:<port>/bench/tower-test.html
+  ⇒ id＝out 的 pre 裡是 dump JSON（格式同 scene_diff.py），跟 Mac 那邊的 Probe（直接呼叫 OfficeTower.swift）比。
+-->
+<script type="importmap">
+{ "imports": { "three": "../vendor/three-r170/three.module.min.js" } }
+</script>
+</head>
+<body>
+<pre id="out"></pre>
+<script type="module" src="./tower-test.js"></script>
+</body>
+</html>

@@ -77,7 +77,7 @@ foreach ($name in 'ShoWork42-small.exe', 'ShoWork42.exe') {
   Check "$name hooks 8 個都指向安裝目錄的 showork.exe，別的工具的 hook 還在" ((@($cmds | Where-Object { $_.StartsWith($want) }).Count -eq 8) -and ($cmds -contains 'echo other-tool')) "$($cmds.Count) 個"
   Check "$name 開機啟動（測試機碼）" ((Get-ItemProperty "$reg\Run").ShoWork42 -eq "`"$bin\ShoWorkAgent.exe`"")
   $u = Get-ItemProperty "$reg\Uninstall\ShoWork42" -ErrorAction SilentlyContinue
-  Check "$name 列在「應用程式」：名稱、版本、解除安裝指令" ($u -and $u.DisplayName -eq 'ShoWork42' -and $u.DisplayVersion -eq '0.4.0' -and $u.UninstallString -eq "`"$bin\ShoWorkAgent.exe`" --uninstall") "$($u.DisplayVersion) $($u.UninstallString)"
+  Check "$name 列在「應用程式」：名稱、版本、解除安裝指令" ($u -and $u.DisplayName -eq 'ShoWork42' -and $u.DisplayVersion -eq '0.5.0' -and $u.UninstallString -eq "`"$bin\ShoWorkAgent.exe`" --uninstall") "$($u.DisplayVersion) $($u.UninstallString)"
   $agentUp = WaitUntil { Test-Path $env:SHOWORK_STATUS_FILE } 15000
   $agent = Get-Process ShoWorkAgent -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq "$bin\ShoWorkAgent.exe" }
   Check "$name 裝好的 agent 在跑" ($agentUp -and $agent) "$($agent.Id)"
