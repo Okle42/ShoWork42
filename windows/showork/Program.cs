@@ -83,7 +83,9 @@ static class Cli
             if (p <= 4 || !procs.TryGetValue(p, out var parent)) return (0, 0);
             // a dead parent's pid can be reused by a younger process: a real parent is older than its child
             if (!OlderThan(p, child)) return (0, 0);
-            if (parent.exe.Equals(exe, StringComparison.OrdinalIgnoreCase)) return (p, CreationTime(child));
+            // 11-02：Claude Code 跑到一半自己更新時，正在跑的那支會被改名成 claude.exe.old.<時間戳>（同 TermSend.IsClaudeName）
+            if (parent.exe.Equals(exe, StringComparison.OrdinalIgnoreCase) || parent.exe.StartsWith(exe + ".old.", StringComparison.OrdinalIgnoreCase))
+                return (p, CreationTime(child));
             child = p;
             cur = parent;
         }
