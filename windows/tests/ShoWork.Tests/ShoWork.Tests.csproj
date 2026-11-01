@@ -18,6 +18,8 @@
     <Compile Include="..\..\showork\Core\*.cs" LinkBase="Hooks" />
     <Compile Include="..\..\showork\HookCli.cs" Link="Hooks\HookCli.cs" />
     <Compile Include="..\..\ShoWork.Win\InstallerHooks.cs" Link="InstallerHooks.cs" />
+    <!-- 打字進終端機：純邏輯部分（按鍵、找目標、能不能送）；Win32 呼叫只宣告不執行 -->
+    <Compile Include="..\..\ShoWork.Win\TermSend.cs" Link="TermSend.cs" />
   </ItemGroup>
 
   <ItemGroup>

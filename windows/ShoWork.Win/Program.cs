@@ -17,6 +17,8 @@ namespace ShoWork;
 ///   ShoWorkAgent.exe --board-window [--board-demo] [--board-tower|--board-cards] [--size 820x700] [--shot a.png [--exit-after-shot]] [--topmost]
 ///                                                只開戰情中心視窗（不開 pipe、不發光，比照 Mac）；--board-demo 用固定的示範卡片（截圖驗收）；
 ///                                                --board-tower 一開就看 3D 大樓（W6，WebView2）
+///   ShoWorkAgent.exe --term-send <sessionId|pid> <字>|--b64 X|--text-file F [--no-enter]|--keys down,enter   把字打進那個 Claude Code（TermSend）
+///   ShoWorkAgent.exe --term-idle <sessionId|pid> [--key-idle 秒]   現在能不能送（結束碼 0＝能）
 /// W0 debugging:
 ///   ShoWorkAgent.exe --console-hwnd <pid> <outfile>   write the console window HWND of process <pid>
 ///   ShoWorkAgent.exe --glow <hwnd> [working|done|input] [seconds]   glow around that window
@@ -45,6 +47,8 @@ static class Program
             case "--install-autostart": return Report(() => { Installer.SetAutostart(true, self); return "on"; });
             case "--uninstall-autostart": return Report(() => { Installer.SetAutostart(false, self); return "off"; });
             case "--board-dump": return BoardDump();
+            case "--term-inject": return TermSend.InjectMain(args);
+            case "--term-send" or "--term-idle": return TermCli(args);
             case "--board-window" or "--board-demo": return BoardWindow(args);
             case "--status":
                 return Report(() => $"hooks installed: {Installer.CountOurs(settings)}/{Installer.OurHooks("x").Sum(kv => kv.Value!.AsArray().Count)}   autostart: {Installer.Autostart() ?? "off"}   " +
@@ -101,6 +105,42 @@ static class Program
             return 0;
         }
         catch (Exception e) { Console.Error.WriteLine($"error: {e.Message}"); return 1; }
+    }
+
+    /// 測試入口（TermSend）：
+    ///   --term-send <sessionId|pid> <字> [--no-enter]          字也可以用 --text-file 檔案（UTF-8）或 --b64 <base64>（ssh 傳中文用）
+    ///   --term-send <sessionId|pid> --keys down,enter           送具名按鍵（選單用）
+    ///   --term-idle <sessionId|pid> [--key-idle 秒]             能不能送：印 idle／busy＋原因，結束碼 0＝能送
+    static int TermCli(string[] args)
+    {
+        AttachConsole(unchecked((uint)-1));
+        string? Arg(string k) => args.SkipWhile(a => a != k).Skip(1).FirstOrDefault();
+        void Say(string s)
+        {
+            using var o = Console.OpenStandardOutput();
+            var b = new System.Text.UTF8Encoding(false).GetBytes(s + "\n");
+            o.Write(b, 0, b.Length);
+        }
+        if (args.Length < 2) { Say("用法：--term-send <sessionId|pid> <字> [--no-enter]｜--term-idle <sessionId|pid>"); return 2; }
+        var target = args[1];
+        if (args[0] == "--term-idle")
+        {
+            var ok = TermSend.IsIdle(target, out var why, double.TryParse(Arg("--key-idle"), out var k) ? k : 0);
+            Say((ok ? "idle：" : "busy：") + why);
+            return ok ? 0 : 1;
+        }
+        if (Arg("--keys") is { } keys)
+        {
+            var kr = TermSend.SendKeys(target, keys.Split(','));
+            Say($"{kr.Outcome}：{kr.Message}");
+            return kr.Ok ? 0 : 1;
+        }
+        var text = Arg("--text-file") is { } f ? File.ReadAllText(f, System.Text.Encoding.UTF8)
+                 : Arg("--b64") is { } b64 ? TermSend.Decode(b64)
+                 : args.Length >= 3 && !args[2].StartsWith("--") ? args[2] : "";
+        var r = TermSend.Send(target, text, enter: !args.Contains("--no-enter"));
+        Say($"{r.Outcome}：{r.Message}");
+        return r.Ok ? 0 : 1;
     }
 
     /// 只開戰情中心：唯讀，不碰 pipe、光暈、排版
