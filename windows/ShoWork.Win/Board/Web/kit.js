@@ -890,7 +890,7 @@ export function walkScene(root, only = null) {
       if (n.userData.att) d.att = n.userData.att.map(x => R(x));
       out.lights.push(d);
     }
-    if (take && n.isMesh) {
+    if (take && (n.isMesh || n.isLine)) {        // isLine：THREE.LineSegments（B1 神經網路的 neural-edges＝Mac 的線段 SCNGeometry）
       const mats = Array.isArray(n.material) ? n.material : [n.material];
       const keys = mats.map(matKey);
       keys.forEach(k => out.mats.add(k));

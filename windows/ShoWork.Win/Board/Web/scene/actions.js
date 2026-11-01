@@ -11,7 +11,8 @@
 //      node.userData.isPaused = true ＝ SCNNode.isPaused（自己跟子孫的動作都停；setPaused(node, b) 也可以）。
 //   2. SCNTransaction 隱式動畫：JS 不能攔 `n.opacity = 0` 這種賦值，所以改成：
 //        SCNTransaction.begin(); SCNTransaction.animationDuration = 0.25;
-//        SCNTransaction.opacity(n, 0); SCNTransaction.position(n, [x, y, z]); SCNTransaction.euler(n, x, y, z); SCNTransaction.scale(n, s)
+//        SCNTransaction.opacity(n, 0); SCNTransaction.position(n, [x, y, z]); SCNTransaction.euler(n, x, y, z); SCNTransaction.scale(n, s);
+//        SCNTransaction.quaternion(n, q)（朝向）、SCNTransaction.value(obj, "intensity", v)（任一數值）
 //        SCNTransaction.completionBlock = () => {...}; SCNTransaction.commit();
 //      沒開 transaction（或 duration 0）時這些 setter 立刻生效。opacity 跟 SceneKit 一樣「model 值立刻變、畫面慢慢變」：
 //      userData.opacity＝model（dump、程式判斷用），userData.presOpacity＝畫面上的值（syncOpacity 用）。
@@ -285,6 +286,10 @@ export function syncOpacity(root) {
   };
   walk(root, 1);
 }
+/** 換回原材質（dump 前用：dump 要記原材質＋節點 opacity，跟 SceneKit 一樣） */
+export function restoreOpacity(root) {
+  root.traverse(n => { const u = n.userData; if (u._baseMat) { n.material = u._baseMat; u._baseMat = null; u._fadeMat = null; } });
+}
 function applyMat(n, eff) {
   const u = n.userData;
   if (eff >= OPAQUE) {
@@ -341,7 +346,12 @@ const props = {
     model: () => {}, pres: (n, v) => n.scale.set(v[0], v[1], v[2]), end: () => {},
     lerp: (a, b, p) => [a[0] + (b[0] - a[0]) * p, a[1] + (b[1] - a[1]) * p, a[2] + (b[2] - a[2]) * p],
   },
-  /** 任意數值（例：燈的 intensity）：SCNTransaction.value(obj, "intensity", v) */
+  /** 朝向（四元數 slerp；camera.look(at:) 的隱式動畫用） */
+  quaternion: {
+    read: n => n.quaternion.clone(),
+    model: () => {}, pres: (n, q) => n.quaternion.copy(q), end: () => {},
+    lerp: (a, b, p) => a.clone().slerp(b, p),
+  },
 };
 
 function txSet(n, prop, to, spec) {
@@ -386,6 +396,7 @@ export const SCNTransaction = {
   position(n, v) { txSet(n, "position", get3(v), props.position); },
   euler(n, x, y, z) { txSet(n, "euler", get3(x, y, z), props.euler); },
   scale(n, s) { txSet(n, "scale", typeof s === "number" ? [s, s, s] : get3(s), props.scale); },
+  quaternion(n, q) { txSet(n, "quaternion", q.clone(), props.quaternion); },
   /** 物件的任一數值屬性（燈的 intensity、材質的 opacity…） */
   value(obj, field, v) {
     if (!obj.uuid) obj.uuid = THREE.MathUtils.generateUUID();
