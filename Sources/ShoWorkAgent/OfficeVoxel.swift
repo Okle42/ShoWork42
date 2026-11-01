@@ -242,6 +242,8 @@ final class VoxelMesh {
     private(set) var boxes = 0
     /// 穿插稽核（SHOWORK_CITY_AUDIT）：非 nil 時記下每個方塊的世界位置、大小、角度
     var log: [CityBox]?
+    /// 場景 dump（11-01 Windows 版量尺，SceneDump.swift）：只有開 dump 時才記每個方塊（中心、大小、角度、三面的材質序號），node() 時登記
+    private var dump: [SceneDump.Box]? = SceneDump.registry != nil ? [] : nil
 
     var isEmpty: Bool { boxes == 0 }
 
@@ -262,6 +264,7 @@ final class VoxelMesh {
         boxes += 1
         log?.append(CityBox(center: xf.apply(c), size: s, yaw: xf.a))
         let h = s / 2
+        var slots = (0, 0, 0)
         for (k, f) in Self.faces.enumerated() {
             let mat = k == 4 ? (top ?? m) : k == 5 ? (bottom ?? m) : m
             let hu = abs(simd_dot(f.u, h)), hv = abs(simd_dot(f.v, h))
@@ -285,7 +288,9 @@ final class VoxelMesh {
             }
             let i = slot(mat)
             parts[i].1 += [base, base + 2, base + 1, base, base + 3, base + 2]
+            if k == 0 { slots.0 = i } else if k == 4 { slots.1 = i } else if k == 5 { slots.2 = i }
         }
+        dump?.append(SceneDump.Box(c: xf.apply(c), s: s, yaw: xf.a, side: slots.0, top: slots.1, bottom: slots.2, uv: "\(uv)"))
     }
 
     private func slot(_ m: SCNMaterial) -> Int {
@@ -318,6 +323,7 @@ final class VoxelMesh {
         let g = SCNGeometry(sources: srcs, elements: els)
         g.materials = parts.map(\.0)
         n.geometry = g
+        if let d = dump { SceneDump.register(g, d, ao: aoBase) }
         return n
     }
 }
