@@ -44,15 +44,17 @@ sealed class BoardForm : Form
     readonly ViewSwitch switcher;
     OfficeHost? office;
     bool tower;                                     // 現在看大樓
-    TowerRegistry? registry;                        // 樓層號名冊（board\tower.json；示範資料只放記憶體）
+    // 11-02 P8：大樓照搬 Mac（Board\Core＋Board\Source）：OfficeSource 組 office2 JSON（樓層號名冊、主題、閒晃、保全、城市、天氣、圖譜）
+    OfficeSource? officeSource;
+    OfficeWeather? weather;
+    readonly GraphSource graph = new();
     List<BoardCard> lastCards = new();
     string officeJson = "";
-    DateTime officeAt;                              // 上次組大樓的時間（資料沒變也每分鐘重組一次：2 小時降樓要看時間）
+    DateTime officeAt;                              // 上次組大樓的時間（資料沒變也每 15 秒重組一次：閒晃的時段、2 小時降樓要看時間）
     Panel? detail;                                  // 點角色後浮在大樓上的那張卡（沿用 IslandCardView）
     IslandCardView? detailView;
     string? detailId;
     static string ViewPrefPath => Path.Combine(Wire.SupportDir, "board", "board-view.txt");
-    static string RegistryPath => Path.Combine(Wire.SupportDir, "board", "tower.json");
 
     public BoardTheme Theme { get; private set; } = BoardTheme.Current();
     public BoardFonts Fonts { get; private set; } = new();
@@ -334,33 +336,39 @@ sealed class BoardForm : Form
         if (office != null) { Controls.Remove(office.View); office.Dispose(); }
     }
 
-    /// 卡片 → 大樓 JSON，內容變了才推；資料沒變時每分鐘重組一次（2 小時降樓要看時間）
+    /// 卡片 → 大樓 JSON（office2），內容變了才推；資料沒變時每 15 秒重組一次（Mac 看板的 15 秒保底刷新：閒晃的時段、2 小時降樓要看時間）
     void UpdateOffice(bool force)
     {
-        if (!force && DateTime.UtcNow - officeAt < TimeSpan.FromMinutes(1)) return;
+        if (!force && DateTime.UtcNow - officeAt < TimeSpan.FromSeconds(WanderPlanner.bucket)) return;
         officeAt = DateTime.UtcNow;
-        registry ??= opt.Demo ? new TowerRegistry() : TowerRegistry.Decode(ReadText(RegistryPath));
+        if (officeSource == null)
+        {
+            // 正式 agent（系統匣開的戰情中心）才寫名冊、主題快取、呼叫 claude；--board-window 測試視窗只讀（同 Mac）
+            officeSource = new OfficeSource(opt.Demo, official: !BoardWindowTestMode);
+            officeSource.Decor.Changed += () => { try { BeginInvoke(() => UpdateOffice(force: true)); } catch { } };
+            weather = new OfficeWeather(testMode: BoardWindowTestMode);
+            weather.Changed += () => { try { BeginInvoke(() => UpdateOffice(force: true)); } catch { } };
+            CityMonitor.testWindow = BoardWindowTestMode;
+            CityMonitor.shared.Changed += _ => { try { BeginInvoke(() => UpdateOffice(force: true)); } catch { } };
+        }
+        // 城市、天氣掛在同一個刷新上（各自比時間決定要不要真的去讀；Mac：看板 15 秒 timer 叫 CityMonitor.tick）
+        CityMonitor.shared.tick();
+        weather!.tick();
+        officeSource.visible = tower && visibleOnScreen;
         var colors = new Dictionary<string, string>
         {
             ["working"] = Hex(GlowWindow.ColorOf(WorkState.Working)), ["waiting"] = Hex(GlowWindow.ColorOf(WorkState.Input)),
             ["finished"] = Hex(GlowWindow.ColorOf(WorkState.Done)),
         };
-        var (snap, dirty) = OfficeScene.Build(lastCards, registry, DateTime.UtcNow, colors: colors, reduceMotion: ReduceMotion);
-        if (dirty && !opt.Demo)
-        {
-            try
-            {
-                Directory.CreateDirectory(Path.GetDirectoryName(RegistryPath)!);
-                var tmp = RegistryPath + $".{Environment.ProcessId}.tmp";
-                File.WriteAllText(tmp, registry.Encode());
-                File.Move(tmp, RegistryPath, overwrite: true);
-            }
-            catch (Exception x) { Log.Note($"OFFICE registry save failed {x.Message}"); }
-        }
+        var city = CityMonitor.off ? null : CityMonitor.shared.current;
+        var now = DateTime.UtcNow;
+        officeJson = officeSource.Build(lastCards, now, city, weather.main, weather.current, graph.consider(officeSource.Tower, now), colors, ReduceMotion);
         if (detailId != null) ShowDetail(detailId);             // 細節卡跟著資料更新（人走了就收掉）
-        officeJson = OfficeScene.Json(snap);
         office?.Push(officeJson);                               // OfficeHost 自己比對，沒變就不推
     }
+
+    /// --board-window（不開 pipe、不發光的測試視窗）：不寫名冊、不呼叫 claude、天氣不連網
+    static bool BoardWindowTestMode => Environment.GetCommandLineArgs().Contains("--board-window") || Environment.GetCommandLineArgs().Contains("--board-demo");
 
     /// 光暈顏色 → #RRGGBB（關掉的狀態是透明，給頁面預設灰）
     static string Hex(Color c) => c.A == 0 ? "#8E8E93" : $"#{c.R:X2}{c.G:X2}{c.B:X2}";
@@ -370,7 +378,9 @@ sealed class BoardForm : Form
     void ShowDetail(string? id)
     {
         if (IsDisposed) return;
-        var who = id == null ? default : islands.SelectMany(i => i.People.Select(p => (Island: i, Person: p))).FirstOrDefault(x => x.Person.Id == id);
+        // 示範模式的大樓用 OfficeDemo 的示範卡片（demo-00…），跟卡片畫面的不是同一批 ⇒ 兩邊都找
+        var all = islands.Concat(officeSource?.Islands ?? new()).SelectMany(i => i.People.Select(p => (Island: i, Person: p)));
+        var who = id == null ? default : all.FirstOrDefault(x => x.Person.Id == id);
         if (who.Person == null || !tower)
         {
             if (detail != null) { Controls.Remove(detail); detail.Dispose(); detail = null; detailView = null; }

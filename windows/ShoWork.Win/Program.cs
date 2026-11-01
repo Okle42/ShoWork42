@@ -14,6 +14,8 @@ namespace ShoWork;
 ///   ShoWorkAgent.exe --install-autostart | --uninstall-autostart     HKCU Run
 ///   ShoWorkAgent.exe --status
 ///   ShoWorkAgent.exe --board-dump                戰情中心看板目前的卡片（JSON，唯讀，不開視窗；比照 Mac 的 --board-dump）
+///   ShoWorkAgent.exe --city-dump                 跑一輪城市資料來源，印出真實的 CityState（磁碟、雲端、主機、防火牆⋯；唯讀）
+///   ShoWorkAgent.exe --office-dump [--board-demo]   推給 3D 網頁的 office2 JSON（唯讀：不寫名冊、不呼叫 claude）
 ///   ShoWorkAgent.exe --board-window [--board-demo] [--board-tower|--board-cards] [--size 820x700] [--shot a.png [--exit-after-shot]] [--topmost]
 ///                                                只開戰情中心視窗（不開 pipe、不發光，比照 Mac）；--board-demo 用固定的示範卡片（截圖驗收）；
 ///                                                --board-tower 一開就看 3D 大樓（W6，WebView2）
@@ -47,6 +49,7 @@ static class Program
             case "--install-autostart": return Report(() => { Installer.SetAutostart(true, self); return "on"; });
             case "--uninstall-autostart": return Report(() => { Installer.SetAutostart(false, self); return "off"; });
             case "--board-dump": return BoardDump();
+            case "--city-dump" or "--office-dump": return OfficeCli.Run(args);
             case "--term-inject": return TermSend.InjectMain(args);
             case "--term-send" or "--term-idle": return TermCli(args);
             case "--board-window" or "--board-demo": return BoardWindow(args);

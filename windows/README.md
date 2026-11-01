@@ -67,6 +67,8 @@ bin\Release\net8.0-windows\ShoWorkAgent.exe --install    # 複製到 %LOCALAPPDA
 bin\Release\net8.0-windows\ShoWorkAgent.exe --status
 bin\Release\net8.0-windows\ShoWorkAgent.exe --board-dump | Out-String   # 戰情中心看板卡片 JSON（唯讀；WinExe 要接管線 PowerShell 才會等它）
 bin\Release\net8.0-windows\ShoWorkAgent.exe --board-window               # 只開戰情中心視窗（唯讀，不開 pipe、不發光）；agent 裡從系統匣「戰情中心…」開
+bin\Release\net8.0-windows\ShoWorkAgent.exe --city-dump --out city.json   # 城市資料來源跑一輪（磁碟、雲端、ssh 主機、防火牆、港口、額度、天氣），寫出真實的 CityState（唯讀）
+bin\Release\net8.0-windows\ShoWorkAgent.exe --office-dump [--board-demo] --out office.json   # 推給 3D 網頁的 office2 JSON（唯讀：不寫名冊、不呼叫 claude）
 bin\Release\net8.0-windows\ShoWorkAgent.exe --board-window --board-demo --size 820x700 --shot a.png --exit-after-shot   # 示範卡片截圖驗收
 bin\Release\net8.0-windows\ShoWorkAgent.exe --uninstall  # 停 agent、移除 hooks（settings.json 回到原本位元組）、移除開機啟動
 

@@ -5,7 +5,7 @@ using Microsoft.Web.WebView2.WinForms;
 namespace ShoWork;
 
 /// 戰情中心的「大樓」檢視（W6）：WebView2 ＋ Board\Web\office.html（three.js，vendor 在 repo 裡，離線可用）。
-/// 資料：BoardForm 把卡片組成 OfficeSnapshot JSON（Board\Office.cs），這裡用 PostWebMessageAsJson 推過去；頁面只畫、不讀檔。
+/// 資料：BoardForm 用 OfficeSource（Board\Source\OfficeSource.cs）組成 office2 JSON（形狀同 Mac bench 的 Web/bench/mac-input.json），這裡用 PostWebMessageAsJson 推過去；頁面只畫、不讀檔。
 /// 頁面 → 這裡：{type:"ready"}（載好了，補推最新資料）、{type:"select", id}（點了角色；id null＝點空白）。
 /// 網頁檔：開發 build 在 exe 旁邊的 Web\；單一 exe／安裝版沒有那個資料夾 ⇒ 從內嵌資源解到 %LOCALAPPDATA%\ShoWork42\office-web\<組件版本>\。
 /// WebView2 Runtime 不在（Win10 沒裝、被移除）、或初始化失敗、或瀏覽器行程掛掉：Failed 事件 ⇒ BoardForm 退回卡片畫面，不丟例外。

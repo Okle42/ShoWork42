@@ -12,6 +12,10 @@
     <Compile Include="..\..\ShoWork.Win\LayoutPlan.cs" Link="LayoutPlan.cs" />
     <!-- 戰情中心的規則與讀檔也都不碰 WinForms：直接連原始檔 -->
     <Compile Include="..\..\ShoWork.Win\Board\*.cs" LinkBase="Board" />
+    <!-- 11-02 P8：Mac ShoWorkCore 的大樓／城市核心轉寫（Core）與 Windows 的資料來源（Source）：都不碰 WinForms -->
+    <Compile Include="..\..\ShoWork.Win\Board\Core\*.cs" LinkBase="Board\Core" />
+    <Compile Include="..\..\ShoWork.Win\Board\Source\*.cs" LinkBase="Board\Source" />
+    <Compile Include="..\..\ShoWork.Win\Log.cs" Link="Log.cs" />
     <Compile Include="..\..\ShoWork.Win\WorkState.cs" Link="WorkState.cs" />
     <Compile Include="..\..\Shared\Wire.cs" Link="Wire.cs" />
     <!-- W5 hook 端（showork card／title／guard-push）：純邏輯都在 showork\Core，HookCli 只讀寫 stdin／stdout -->

@@ -319,6 +319,14 @@ public sealed record BoardCard
     public List<string> SameProject { get; set; } = new();   // 同專案的其他 session（重工警告）
     public string? Visiting { get; set; }          // 人還住在 project，但最近 cd 去逛的另一個專案（島上畫影分身）
     public bool Unused { get; set; }               // 開了 claude 但從來沒交代過事（島上畫睡覺）
+    // 11-02 P8：Mac BoardCard 10-20 之後的欄位（office2 的 card 跟 Mac 同形狀）。Windows 的 BoardReader 還沒算，一律預設值；示範卡片才有值
+    public List<CaptainTaskInfo> Tasks { get; set; } = new();   // 隊長：派出去的單；其他人：交給它、還沒結束的單
+    public AIActivity Activity { get; set; }                    // 現在在做哪一類動作（只有進行中有值，其餘 none）
+    public BlockedReason? BlockedReason { get; set; }           // 卡住／等你回答的原因（判不出就 null）
+    public List<SubagentInfo> Subagents { get; set; } = new();  // 進行中的子 agent
+    public TokenUsage? Tokens { get; set; }                     // 這個 session 累計 token
+    public PermitRequest? Permit { get; set; }                  // 終端機開著的權限對話框
+    public string? Handover { get; set; }                       // 自動交接狀態
 
     [JsonIgnore] public bool IsQueued => Id.Contains('#');
 }
