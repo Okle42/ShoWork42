@@ -24,7 +24,9 @@ TOL, YTOL = 0.011, 0.002
 def canon(b):
     """方塊的正規形：yaw 正規化到 [0, π/2)；轉 90°（或 270°）時長寬互換"""
     s = list(b["s"])
-    y = b.get("yaw", 0.0) % math.pi
+    y = b.get("yaw", 0.0)
+    if abs(abs(y) - math.pi) < YTOL: y = 0.0
+    y = y % math.pi
     if y >= math.pi / 2 - YTOL / 2:
         y -= math.pi / 2
         s[0], s[2] = s[2], s[0]
@@ -168,7 +170,9 @@ def main():
         else:
             used[hit] = True
             h = GB[hit]
-            diffs = [k for k in ("params", "m", "h", "yaw", "scale") if not close(g.get(k), h.get(k), 2e-3)]
+            wy = lambda y: (y + math.pi) % (2 * math.pi) - math.pi if isinstance(y, (int, float)) else y
+            diffs = [k for k in ("params", "m", "h", "scale") if not close(g.get(k), h.get(k), 2e-3)]
+            if abs(wy(g.get("yaw", 0) - h.get("yaw", 0) + 0.0)) > 2e-3: diffs.append("yaw")
             if diffs:
                 gpar.append((g, h, diffs))
     gextra = [GB[j] for j in range(len(GB)) if not used[j]]
