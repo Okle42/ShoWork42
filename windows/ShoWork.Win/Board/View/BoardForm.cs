@@ -778,7 +778,7 @@ sealed class BoardForm : Form
     static string Hex(Color c) => c.A == 0 ? "#8E8E93" : $"#{c.R:X2}{c.G:X2}{c.B:X2}";
     static string? ReadText(string p) { try { return File.Exists(p) ? File.ReadAllText(p) : null; } catch { return null; } }
 
-    /// 點了角色：大樓左下角浮一張卡（同一個 IslandCardView，只放這個人）；null＝收掉
+    /// 點了角色：大樓右下角浮一張卡（同一個 IslandCardView，只放這個人）；null＝收掉
     void ShowDetail(string? id)
     {
         if (IsDisposed) return;
@@ -814,8 +814,11 @@ sealed class BoardForm : Form
         if (detail == null) return;
         float s = S;
         int dw = (int)Math.Min(480 * s, scroller.Width - 24 * s), dh = (int)(200 * s);
-        detail.Bounds = new Rectangle(scroller.Left + (int)(12 * s), scroller.Bottom - dh - (int)(12 * s), Math.Max(0, dw), dh);
-        if (detail.Controls.OfType<Label>().FirstOrDefault() is { } x) x.Bounds = new Rectangle(detail.Width - (int)(30 * s), (int)(6 * s), (int)(22 * s), (int)(22 * s));
+        // 右下角：點角色時網頁左邊會開這個人的對話（Mac 的 talk），放左下會蓋住對話（P8 Surface 實測）
+        detail.Bounds = new Rectangle(scroller.Right - Math.Max(0, dw) - (int)(12 * s), scroller.Bottom - dh - (int)(12 * s), Math.Max(0, dw), dh);
+        // 關閉鈕自己一欄：卡片不要伸到它底下（右上的狀態數字原本被 ✕ 蓋住）
+        detail.Padding = new Padding(0, 0, (int)(30 * s), 0);
+        if (detail.Controls.OfType<Label>().FirstOrDefault() is { } x) x.Bounds = new Rectangle(detail.Width - (int)(28 * s), (int)(6 * s), (int)(22 * s), (int)(22 * s));
     }
 
     // MARK: 動畫
