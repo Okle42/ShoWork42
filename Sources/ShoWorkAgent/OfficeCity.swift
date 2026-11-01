@@ -51,8 +51,8 @@ final class CityBuilder {
     static func airshipDock(_ i: Int) -> SIMD3<Float> {
         i < 2 ? SIMD3(i == 0 ? -22.4 : -14.2, 0, z0 + wallT / 2 + 1.55) : SIMD3(-1 + Float(i - 2) * 10, 0, -17)
     }
-    /// 飛艇款式（11-01 Kang：原本那艘不喜歡，做幾款挑）：0 原版軟式飛艇、1 銀色硬式飛船、2 雲朵飛船、3 熱氣球、4 飛碟
-    static let airshipStyle: Int = ProcessInfo.processInfo.environment["SHOWORK_CITY_AIRSHIP"].flatMap(Int.init) ?? 0
+    /// 飛艇款式（11-01 Kang：原本那艘不喜歡，做幾款挑 ⇒ 選了 4 飛碟）：0 原版軟式飛艇、1 銀色硬式飛船、2 雲朵飛船、3 熱氣球、4 飛碟
+    static let airshipStyle: Int = ProcessInfo.processInfo.environment["SHOWORK_CITY_AIRSHIP"].flatMap(Int.init) ?? 4
     /// 城內地坪頂面、城內路面頂面
     static let gy: Float = 0.05, ry: Float = 0.09
 
@@ -1086,7 +1086,7 @@ struct CityDetail: View {
 
     static func title(_ id: String, _ city: CityState) -> String {
         if let d = city.disks.first(where: { $0.id == id }) { return "📦 貨櫃堆場・\(CityText.diskName(d))" }
-        if let c = city.clouds.first(where: { $0.id == id }) { return "🎈 飛艇・\(c.name)" }
+        if let c = city.clouds.first(where: { $0.id == id }) { return (CityBuilder.airshipStyle == 4 ? "🛸 飛碟・" : "🎈 飛艇・") + c.name }
         if let s = city.servers.first(where: { $0.id == id }) { return "🏢 分公司・\(s.alias)" }
         if id == "city:wall" || id.hasPrefix("city:gate:") { return "🧱 城牆・防火牆" }
         if id == "city:power" { return "🏭 電廠・AI 額度（5 小時）" }
