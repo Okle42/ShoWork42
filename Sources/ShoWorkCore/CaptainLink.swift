@@ -468,7 +468,7 @@ extension CaptainInbox {
     /// 擋規則 → 答案裡要出現的字（點名這個動作）
     static let preapprovalWords: [(rule: String, words: [String])] = [
         ("GitHub 公開發言", ["PR", "pull request", "issue", "留言", "GitHub", "發 release", "發布"]),
-        ("LINE 對外傳訊", ["LINE", "傳訊", "私訊", "通知"]),
+        ("LINE 對外傳訊", ["LINE", "傳訊", "私訊", "通知", "傳給", "發給", "傳到", "發到", "發訊息", "傳訊息"]),
         ("firebase 部署", ["部署", "deploy", "firebase", "上線"]),
         ("App 上傳", ["上傳", "送審", "TestFlight", "上架"]),
     ]

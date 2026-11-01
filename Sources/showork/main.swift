@@ -104,6 +104,21 @@ if args.first == "title" {
     //   距上一道使用者指令超過 10 分鐘＝完整提醒；10 分鐘內＝只在換了任務時才發
     //   使用者打「放行」／「放行 <單號>」＝放行這個 session 被擋下的指令（寫 board/permits/releases.jsonl）
     // 收尾後只有使用者本人又下指令才不自動 /clear；其他 session／看板的訊息回一段「交接中」提醒（T1026230337）
+    // 11-01 使用者：「我叫你傳 LINE 還要再打放行」⇒ 使用者在 session 直接打的指令也算事先放行（同戰情中心回答：點名的動作、30 分鐘、每種一次、否定句不算）。
+    //   已經擋著的單，這則指令點名了就直接放行。其他 session／系統訊息（needsStart 擋掉的 <…> 標籤）不算。
+    let typedRelease: String? = {
+        guard event == "UserPromptSubmit", let sid, CaptainLink.needsStart(prompt: prompt) else { return nil }
+        let p = (prompt ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !p.hasPrefix("放行") else { return nil }
+        let now = Date()
+        CaptainInbox.recordAnswer(sid: sid, answer: p, question: nil, now: now)
+        let waiting = CaptainInbox.all().filter { $0.kind == .block && $0.sid == sid && $0.released == nil && now.timeIntervalSince($0.at) < CaptainInbox.releaseTTL }
+        guard let item = waiting.last(where: { i in !i.kinds.isEmpty && i.kinds.allSatisfy { CaptainInbox.authorizes(p, rule: $0) } }),
+              let pre = CaptainInbox.usePreapproval(sid: sid, rules: item.kinds, now: now) else { return nil }
+        let who = NicknameStore.get(sid)?.name ?? "使用者"
+        _ = CaptainInbox.release(id: item.id, target: sid, by: sid, byName: "使用者（在 \(who) 的終端機下指令：\(pre.answer.prefix(40))）", source: "使用者輸入", now: now)
+        return "使用者這則指令已點名放行單號 \(item.id)（\(item.text)）。現在可以再跑一次剛才被擋下的同一個指令（30 分鐘內有效、只能用一次）。"
+    }()
     let handoverNote = event == "UserPromptSubmit" ? sid.flatMap { Handover.noteNewPrompt(sid: $0, prompt: prompt) } : nil
     let startNag: String? = {
         guard event == "UserPromptSubmit", let sid, CaptainLink.needsStart(prompt: prompt) else { return nil }
@@ -128,7 +143,7 @@ if args.first == "title" {
         }
         return CaptainLink.startContext(showork: showork)
     }()
-    let context = [startNag, handoverNote].compactMap { $0 }.joined(separator: "\n")
+    let context = [typedRelease, startNag, handoverNote].compactMap { $0 }.joined(separator: "\n")
     let ctx: String? = context.isEmpty ? nil : context
     if let sid, NicknameStore.get(sid) == nil, let ctx {
         print(Nicknames.hookOutput(nil, done: done, event: event, context: ctx))
