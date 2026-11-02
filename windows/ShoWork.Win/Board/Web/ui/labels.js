@@ -9,7 +9,7 @@
 //   所以標籤框的大小跟 Mac 一樣「字寬＋留白」，只是字型本身寬度不同。
 
 import * as THREE from "three";
-import { TD, TP } from "../kit.js";
+import { TD, TP, TowerSpec } from "../kit.js";
 import { KuboArt } from "../scene/builder.js";
 import { LabelKind, LabelBox, PlacedLabel, LabelLayout, Board, overlapsP } from "./core.js";
 
@@ -128,7 +128,12 @@ export class OfficeLabels {
       const s = LabelSpec({ id: `floor:${f.id}`, kind: LabelKind.floor, text: f.title, bg: 0x14161A, bgAlpha: 0.86, dot: f.accent, floor: f.id });
       const t = this.texture(s);
       const x = Math.max(2, g.tl.x + 8);
-      const y = f.kind === "idle" ? (g.tl.y + g.bl.y) / 2 - t.h / 2 : Math.min(g.tl.y - t.h - 8, H - t.h - 4);
+      // 11-03（Windows 補）：沒有閒置薄層時 Okle42 招牌改掛在大廳正面頂端（TowerModules.lobby(sign)，招牌底邊＝大廳高 −0.55），
+      //   樓層名照原本的「頂端往下 8 點」會整塊壓在招牌上。Mac 規則是「招牌那層的名字不擋招牌」（閒置薄層的名字不畫）；
+      //   有閒置薄層時大廳名字就在招牌正下方 ⇒ 這裡同樣改從招牌底邊往下排。Mac 的 Kang 一直有閒置層，所以 Mac 上沒出現過
+      let top = g.tl.y;
+      if (f.kind === "lobby" && !floors.some(x => x.kind === "idle")) top = this.signBottom(P, g, face, this.wp(f.node).y + TowerSpec.lobbyHeight - 0.55);
+      const y = f.kind === "idle" ? (g.tl.y + g.bl.y) / 2 - t.h / 2 : Math.min(top - t.h - 8, H - t.h - 4);
       if (!((y >= g.bl.y + 2 || f.kind === "idle") && y >= 2 && y + t.h <= H && x + t.w <= W)) continue;
       text.set(s.id, [s, t]);
       fixed.push(PlacedLabel({ id: s.id, kind: LabelKind.floor, x, y, w: t.w, h: t.h, leader: false, ax: 0, ay: 0 }));
@@ -258,6 +263,14 @@ export class OfficeLabels {
       + `minH=${minH.toFixed(0)}pt maxDist=${maxDist.toFixed(0)}pt outOfFloor=${outOfFloor} kinds=` + Object.entries(kinds).map(([k, v]) => `${k}:${v}`).sort().join(",")
       + " floorNames=" + fixed.map(p => p.id.replace("floor:", "")).join(",");
     this.placedNow = { placed, cityPlaced, more, fixed, anchorAt };
+  }
+
+  /** 看得到那面左緣在高度 yS（世界）的畫面 y：同樓層幾何的取法（左角在畫面外 ⇒ 沿那條線取畫面左緣 x＝4 那點） */
+  signBottom(P, g, face, yS) {
+    const q0 = P([face[0][0], yS, face[0][1]]), q1 = P([face[1][0], yS, face[1][1]]);
+    const [a, b] = q0.x <= q1.x ? [q0, q1] : [q1, q0];
+    if (a.x < 4 && b.x > a.x) return a.y + (b.y - a.y) * (4 - a.x) / (b.x - a.x);
+    return a.y;
   }
 
   // MARK: 「貼圖」：Mac 畫成 2× 點陣圖；這裡量字寬、定框的大小與樣式（同字串只量一次；超過 64 個整批清掉）
