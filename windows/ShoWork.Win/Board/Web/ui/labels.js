@@ -285,18 +285,22 @@ export class OfficeLabels {
     return n;
   }
 
-  /** NSFont.systemFont(ofSize:weight:) */
+  /** NSFont.systemFont(ofSize:weight:)。
+   *  .medium（500）在 Windows 換成 400（11-03）：Mac 的 SF／蘋方都有 Medium，整行粗細一樣；
+   *  Windows 的微軟正黑體只有 Regular／Bold，500 會落到 Regular，但 Segoe UI 的英數字會被配成 Semibold
+   *  ⇒ 城市名牌「15G」「31%」變粗、中文是細的。兩個字型都用 Regular，整行才一樣粗 */
   static font(k) {
     switch (k) {
       case LabelKind.waiting: return [16, 800];
       case LabelKind.stuck: return [14, 700];
       case LabelKind.finished: case LabelKind.working: return [14, 600];
-      case LabelKind.rest: case LabelKind.idleName: case LabelKind.more: return [13, 500];
+      case LabelKind.rest: case LabelKind.idleName: case LabelKind.more: return [13, OfficeLabels.medium];
       case LabelKind.floor: case LabelKind.guardian: return [13, 600];
       case LabelKind.cityAlert: return [14, 700];
-      default: return [12, 500];        // city
+      default: return [12, OfficeLabels.medium];        // city
     }
   }
+  static medium = 400;
   measure(text, size, weight) {
     this.ctx.font = `${weight} ${size}px ${FONT_STACK}`;
     return { w: this.ctx.measureText(text).width, h: Math.ceil(size * 1.2) };     // NSString.size 的高度≈字級 ×1.19（SF）
