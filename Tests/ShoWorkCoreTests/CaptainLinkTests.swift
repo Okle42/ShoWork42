@@ -203,6 +203,22 @@ struct CaptainLinkTests {
         #expect(!CaptainInbox.authorizes("好，現在做", rule: gh))                  // 沒點名
         #expect(!CaptainInbox.authorizes("刪掉吧", rule: rm))                     // rm 不給事先放行
         #expect(CaptainInbox.authorizes("好，上傳 TestFlight", rule: "App 上傳 App Store Connect"))
+        // 11-02：要有動作詞＋對象才算；光提到名詞、對 AI 說「通知我」、延後或問句都不算
+        let dep = "firebase 部署"
+        for (a, r) in [("開 PR", gh), ("幫我開個 PR", gh), ("好，發布吧", gh), ("傳 LINE 給同事", line), ("把報價單傳給同事", line),
+                       ("請助理用 LINE 通知同事", line), ("幫我部署", dep), ("好，上線", dep),
+                       ("傳 LINE 給別人", line), ("建立 PR", gh), ("開一個新的 PR", gh), ("PR 開起來", gh), ("回覆那個 issue", gh), ("開 PR！", gh)] {
+            #expect(CaptainInbox.authorizes(a, rule: r), "應放行：\(a)")
+        }
+        for (a, r) in [("做完通知我", line), ("改好發給我看", line), ("做完通知一下", line), ("LINE 那邊我自己處理", line),
+                       ("PR 的事明天再說", gh), ("看完 PR 再決定", gh), ("等 PR 審完再看", gh), ("要開 PR 嗎", gh),
+                       ("上線前先給我看", dep), ("部署的事我還沒想好", dep), ("已經部署了", dep),
+                       // 英文字界：prompt、preview、deadline、pipeline、online 裡的 pr／line 不算
+                       ("幫我開 prompt 檔", gh), ("開 preview 給我", gh), ("deadline 跟客戶確認一下", line), ("pipeline 給它跑", line), ("online 發一下", line),
+                       // 問號留在小句裡：問句不算
+                       ("開 PR？", gh), ("要部署?", dep), ("開完會看 PR", gh)] {
+            #expect(!CaptainInbox.authorizes(a, rule: r), "不該放行：\(a)")
+        }
         #expect(CaptainInbox.usePreapproval(sid: "a", rules: [gh], now: t0) == nil)  // 沒回答過
         CaptainInbox.recordAnswer(sid: "a", answer: "開 PR，用 LINE 通知對方", question: "要開 PR 嗎？", now: t0)
         #expect(CaptainInbox.usePreapproval(sid: "b", rules: [gh], now: t0 + 10) == nil)       // 別的 session 不算

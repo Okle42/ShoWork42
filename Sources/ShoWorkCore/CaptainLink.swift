@@ -465,22 +465,43 @@ extension CaptainInbox {
         return Captain.dir.appendingPathComponent("permits/preapprovals.json")
     }
 
-    /// 擋規則 → 答案裡要出現的字（點名這個動作）
-    static let preapprovalWords: [(rule: String, words: [String])] = [
-        ("GitHub 公開發言", ["PR", "pull request", "issue", "留言", "GitHub", "發 release", "發布"]),
-        ("LINE 對外傳訊", ["LINE", "傳訊", "私訊", "通知"]),
-        ("firebase 部署", ["部署", "deploy", "firebase", "上線"]),
-        ("App 上傳", ["上傳", "送審", "TestFlight", "上架"]),
+    /// 擋規則 → 答案裡要出現的「動作」（regex，比對小寫後的小句）。
+    /// 11-02：原本只看關鍵字，「做完通知我」「PR 的事明天再說」「上線前先給我看」都被當成放行 ⇒ 改成要有動作詞＋對象才算
+    /// 英文字要有字界（prompt、preview、deadline、online 裡的 pr／line 不算）；動詞和對象中間只容許量詞、指示詞（開一個新的 PR、回覆那個 issue）
+    static let preapprovalActions: [(rule: String, patterns: [String])] = [
+        ("GitHub 公開發言", [#"(開|發|送|提|建立?|(?<![a-z])(create|open)(?![a-z]))\s*(一|個|則|支|條|新|的|那|這|\s){0,6}(?<![a-z])(pr|pull request|issue|release)(?![a-z])"#,
+                          #"(?<![a-z])(pr|issue)(?![a-z])\s*(開|發|送)"#,
+                          #"發布(?!的|前|之前|時|後)"#,
+                          #"(?<![a-z])(pr|issue|github)(?![a-z])\s*(上|裡)?\s*(留言|回覆)"#,
+                          #"(留言|回覆)\s*(一|個|則|支|條|那|這|\s){0,6}(?<![a-z])(pr|issue)(?![a-z])"#]),
+        ("LINE 對外傳訊", [#"(用|傳|發|丟|貼)\s*(?<![a-z])line(?![a-z])"#,
+                         #"(?<![a-z])line(?![a-z])\s*(傳|發|通知|私訊|告訴|跟|給)"#,
+                         // 通知／傳給「別人」才算；通知我、發給我看、通知一下都是對 AI 說的，不是要它對外傳
+                         #"(通知|告訴|私訊|傳給|發給|傳訊息給|發訊息給)\s*(?!我|你|一下)[^\s]"#,
+                         #"(傳到|發到)\s*\S*群"#]),
+        ("firebase 部署", [#"(部署|上線|(?<![a-z])deploy(?![a-z]))(?!的|前|之前|時|後)"#]),
+        ("App 上傳", [#"(上傳|送審|上架|(?<![a-z])testflight(?![a-z]))(?!的|前|之前|時|後)"#]),
     ]
-    static let negations = ["不要", "先不", "別", "不用", "暫緩", "取消", "不准", "禁止", "等一下", "等等", "先等"]
+    /// 否定（regex）：「別」後面接人／的／組／家／處是名詞（別人、別的），不算否定
+    static let negations = ["不要", "先不", #"別(?!人|的|組|家|處)"#, "不用", "暫緩", "取消", "不准", "禁止", "等一下", "等等", "先等"]
+    /// 有這些字的小句是在延後、問句或陳述，不是叫 AI 現在去做（切小句時保留句尾標點，所以「開 PR？」也算問句）
+    static let deferrals = ["再說", "再決定", "再看", "再談", "再議", "明天", "晚點", "之後", "以後", "給我看", "還沒", "了沒", "考慮", "想想",
+                            "嗎", "？", "?", "等", "之前", "已經", "如果", "要不要", "是否"]
 
-    /// 這則答案有沒有點名放行這條擋規則：按逗號、分號、句號切成小句，
-    /// 有小句點名、而且點名它的小句都沒有否定字才算（「先開 PR，不通知」＝PR 算、LINE 不算）
+    /// 這則答案有沒有點名放行這條擋規則：按逗號、分號、句號、問號切成小句（標點留在小句尾），
+    /// 有小句帶這個動作、而且帶動作的小句都沒有否定／延後字才算（「先開 PR，不通知」＝PR 算、LINE 不算）
     public static func authorizes(_ answer: String, rule: String) -> Bool {
-        guard let ws = preapprovalWords.first(where: { rule.hasPrefix($0.rule) })?.words else { return false }
-        let clauses = answer.lowercased().split(whereSeparator: { "，,、；;。！!？?\n".contains($0) }).map(String.init)
-        let named = clauses.filter { c in ws.contains { c.contains($0.lowercased()) } }
-        return !named.isEmpty && named.allSatisfy { c in !negations.contains { c.contains($0) } && !c.contains("不") }
+        guard let ps = preapprovalActions.first(where: { rule.hasPrefix($0.rule) })?.patterns else { return false }
+        var clauses: [String] = [], cur = ""
+        for ch in answer.lowercased() {
+            cur.append(ch)
+            if "，,、；;。！!？?\n".contains(ch) { clauses.append(cur); cur = "" }
+        }
+        if !cur.isEmpty { clauses.append(cur) }
+        let named = clauses.filter { c in ps.contains { c.range(of: $0, options: .regularExpression) != nil } }
+        return !named.isEmpty && named.allSatisfy { c in
+            !negations.contains { c.range(of: $0, options: .regularExpression) != nil } && !deferrals.contains { c.contains($0) } && !c.contains("不")
+        }
     }
 
     static func loadPreapprovals() -> [Preapproval] {
