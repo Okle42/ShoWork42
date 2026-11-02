@@ -29,7 +29,7 @@ nonisolated(unsafe) var permitReqPath: UnsafePointer<CChar>?   // SIGTERM 時刪
 
 // 戰情中心：`showork brief`（SessionStart hook 印給 AI 的說明）、`showork card …`（AI 每輪的自報）
 // 審核員自己（SHOWORK_REVIEWER=1）不參與，免得審核也上看板、也被要求自報。
-// `claude -p` 這類無頭呼叫（審核員、熬夜秘書的自動回覆⋯）CLAUDE_CODE_ENTRYPOINT 是 sdk-*，不上看板也不用自報
+// `claude -p` 這類無頭呼叫（審核員、其他自動化腳本叫的無頭 Claude⋯）CLAUDE_CODE_ENTRYPOINT 是 sdk-*，不上看板也不用自報
 let isReviewer = ProcessInfo.processInfo.environment["SHOWORK_REVIEWER"] != nil
     || (ProcessInfo.processInfo.environment["CLAUDE_CODE_ENTRYPOINT"] ?? "").hasPrefix("sdk")
 if args.first == "brief" {

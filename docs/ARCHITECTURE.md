@@ -131,7 +131,7 @@ AX 視窗 → CGWindowID 用私有 `_AXUIElementGetWindow`。
 
 ## 戰情中心 P2（10-08）：自報、AI 審核、你的決定、帳號流量
 
-- **自報**：安裝時加 SessionStart hook `showork brief`，把一段說明注入每個新 session；AI 每輪結束跑 `showork card --status review|done|blocked|working --progress --confidence --summary [--ask] [--report]`，存 `board/cards/<sessionId>.json`（sessionId 取 `CLAUDE_CODE_SESSION_ID`）。早於你最後一次送出訊息的自報不算。`claude -p` 無頭呼叫（`CLAUDE_CODE_ENTRYPOINT=sdk-*`，例如熬夜秘書、審核員自己）不注入、不上看板。
+- **自報**：安裝時加 SessionStart hook `showork brief`，把一段說明注入每個新 session；AI 每輪結束跑 `showork card --status review|done|blocked|working --progress --confidence --summary [--ask] [--report]`，存 `board/cards/<sessionId>.json`（sessionId 取 `CLAUDE_CODE_SESSION_ID`）。早於你最後一次送出訊息的自報不算。`claude -p` 無頭呼叫（`CLAUDE_CODE_ENTRYPOINT=sdk-*`，例如自動化腳本、審核員自己）不注入、不上看板。
 - **審核**：卡片進「待審」（等你回答的除外）就請 `claude -p --model sonnet` 唯讀查證（Read／Grep／Glob／git status·diff·log·show），輸出完成度、信心度、pass／concern／fail、最多 3 條疑點，存 `board/reviews/`。同時最多 2 個；保險絲：同一 session 一小時最多自動審 3 次。實測一次約 20 秒、US$0.02。看板上有「AI 審核」開關。
 - **決定**：放行 → 完成；丟待辦（可加備註）→ 待辦；存 `board/decisions/`，該 session 一有新動靜就失效。退回＋補一句 → 用 tmux `send-keys` 打進那個 pane 並按 Enter（不在 tmux：拷貝到剪貼簿並跳到視窗）。新任務 → `claude --bg`（資料夾要先信任過）。
 - **帳號流量**：Claude Code 只把 `rate_limits` 交給 statusLine，所以由狀態列腳本存 `~/.claude/cache/rate_limits.json`，看板右上角顯示 5 小時／7 天用量與重置倒數（≥70% 橘、≥90% 紅）。**給別人用時要附一個會存這個檔的 statusLine**，不然右上角顯示「尚無資料」。

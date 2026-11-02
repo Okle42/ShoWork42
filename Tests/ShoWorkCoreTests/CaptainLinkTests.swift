@@ -216,7 +216,8 @@ struct CaptainLinkTests {
                        // 英文字界：prompt、preview、deadline、pipeline、online 裡的 pr／line 不算
                        ("幫我開 prompt 檔", gh), ("開 preview 給我", gh), ("deadline 跟客戶確認一下", line), ("pipeline 給它跑", line), ("online 發一下", line),
                        // 問號留在小句裡：問句不算
-                       ("開 PR？", gh), ("要部署?", dep), ("開完會看 PR", gh)] {
+                       ("開 PR？", gh), ("要部署?", dep), ("開完會看 PR", gh),
+                       ("下週再部署", dep), ("下次再上線", dep), ("改天再開 PR", gh), ("晚一點再部署", dep)] {
             #expect(!CaptainInbox.authorizes(a, rule: r), "不該放行：\(a)")
         }
         #expect(CaptainInbox.usePreapproval(sid: "a", rules: [gh], now: t0) == nil)  // 沒回答過
