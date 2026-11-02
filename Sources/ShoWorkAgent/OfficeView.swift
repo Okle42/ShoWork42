@@ -903,7 +903,7 @@ private struct GuardBadge: View {
 /// 保全面板裡的 push 守門：最近 24 小時檢查／擋下幾次＋最近幾筆（PushGuard，10-22）
 private struct PushGuardSection: View {
     let status: GuardStatus
-    @State private var allowed: Set<String> = []     // 這次開面板按過放行的（dir+head）
+    @State private var allowed: Set<String> = []     // 這次開面板按過放行的（dir+head+被擋時間）
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
@@ -926,7 +926,8 @@ private struct PushGuardSection: View {
                     }
                     Spacer(minLength: 4)
                     if e.verdict == .block, let h = e.head, !h.isEmpty, Date().timeIntervalSince(e.at) < 3600 {
-                        let k = e.dir + h
+                        // 記號要帶被擋的時間：同一個 HEAD 放行用掉後又被擋（例如 git 自己拒推、重推），新的那筆要能再按（11-03）
+                        let k = e.dir + h + "\(e.at.timeIntervalSince1970)"
                         Button(allowed.contains(k) ? "已放行" : "放行一次") {
                             guard OfficeDemo.mode == nil, OfficeDemo.guardMode == nil else { allowed.insert(k); return }   // 示範資料不寫檔
                             PushGuard.allow(e); allowed.insert(k)

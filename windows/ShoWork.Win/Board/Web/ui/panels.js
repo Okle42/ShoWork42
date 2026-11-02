@@ -319,7 +319,7 @@ export function GuardHover({ status, scanning }) {
 /** 保全面板裡的 push 守門：最近 24 小時檢查／擋下幾次＋最近幾筆 */
 function PushGuardSection({ status, allowed, onAllow }) {
   const rows = (status.pushRecent ?? []).map(e => {
-    const k = e.dir + (e.head ?? "");
+    const k = e.dir + (e.head ?? "") + e.at;   // 帶被擋時間：同一個 HEAD 用掉放行後又被擋，新的那筆要能再按（Mac OfficeView 同步）
     const canAllow = e.verdict === "block" && e.head && nowSec() - sec(e.at) < 3600;
     return h("div.pg-row",
       h("span.caption.semibold", { style: { color: e.verdict === "block" ? "#ff453a" : e.verdict === "warn" ? "#ff9f0a" : "#32d74b" } },
