@@ -3,7 +3,7 @@
 #   ShoWork42-small.exe  約 1.5 MB，需要先裝 .NET 8 Desktop Runtime（沒裝時 Windows 會跳出官方下載連結）
 # 兩個都內含原生版 showork.exe（hook 用），雙擊後會先問要不要安裝。
 # 需要：.NET 8 SDK、Visual Studio Build Tools（C++，NativeAOT 用）。
-# 用法：powershell -ExecutionPolicy Bypass -File pack.ps1 [-Version 0.5.0]
+# 用法：powershell -ExecutionPolicy Bypass -File pack.ps1 [-Version 0.5.1]
 param([string]$Version = '')
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
