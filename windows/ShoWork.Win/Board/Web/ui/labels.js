@@ -170,7 +170,9 @@ export class OfficeLabels {
         floorPx = g.px;
       }
       if (!LabelKind.mustShow(s.kind) && floorPx < OfficeLabels.detailPx) { hiddenSmall[fid] = (hiddenSmall[fid] ?? 0) + 1; continue; }
-      if (floorPx < OfficeLabels.detailPx && s.short) s = { ...s, text: s.short, fg: s.fg, glass: s.glass };
+      // Swift 這裡是重新 LabelSpec(id:kind:text:bg:bgAlpha:dot:anchor:floor:)：沒帶 fg、glass ⇒ 回到預設（nil、false）。
+      // 所以樓層變小（遠景、俯瞰城市）時，等你／卡住的短名牌是「實心紅／橘底＋白色粗字」，不是玻璃（11-03 對照 Mac 實機 mac01.png）
+      if (floorPx < OfficeLabels.detailPx && s.short) s = LabelSpec({ id: s.id, kind: s.kind, text: s.short, bg: s.bg, bgAlpha: s.bgAlpha, dot: s.dot, anchor: s.anchor, floor: s.floor });
       const t = this.texture(s);
       text.set(s.id, [s, t]);
       anchorAt.set(s.id, p);
