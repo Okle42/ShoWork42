@@ -1205,12 +1205,16 @@ sealed class UsageBar : Control
     }
 }
 
-/// 左上角的「卡片／大樓」切換（兩格的分段按鈕）。不能用時整個變灰、點了沒反應
+/// 左上角的「大樓／卡片」切換（兩格的分段按鈕）。不能用時整個變灰、點了沒反應。
+/// 照 Mac BoardWindow.controls 的 Picker（.segmented）：左格 SF Symbol「cube」＝3D 辦公室、右格「square.grid.2x2」＝部門島（卡片），
+/// 只有圖示、說明放在滑鼠提示（11-03：原本是「卡片」「大樓」文字、順序也跟 Mac 相反）
 sealed class ViewSwitch : Control
 {
     readonly BoardForm owner;
     bool towerOn;
-    static readonly string[] Labels = { "卡片", "大樓" };
+    int tipSeg = -1;
+    /// Mac 的 .help(…)：左格、右格
+    static readonly string[] Help = { "3D 辦公室", "部門島" };
     public event Action<bool>? Changed;
 
     public ViewSwitch(BoardForm owner)
@@ -1219,27 +1223,40 @@ sealed class ViewSwitch : Control
         SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
         SetStyle(ControlStyles.Selectable, false);
         Cursor = Cursors.Hand;
+        AccessibleName = "檢視：3D 辦公室／部門島";
     }
 
     float S => DeviceDpi / 96f;
-    Font F => owner.Fonts.Get(12 * S);
 
     public bool Tower { get => towerOn; set { if (towerOn == value) return; towerOn = value; Invalidate(); } }
 
-    int SegW => (int)(TextRenderer.MeasureText("大樓", F).Width + 22 * S);
+    /// 一格寬：圖示 14 點＋左右留白（Mac 分段按鈕的圖示格）
+    int SegW => (int)(36 * S);
     public override Size GetPreferredSize(Size proposedSize) => new(SegW * 2 + (int)(4 * S), (int)(26 * S));
 
-    protected override void OnEnabledChanged(EventArgs e) { base.OnEnabledChanged(e); Cursor = Enabled ? Cursors.Hand : Cursors.Default; Invalidate(); }
+    protected override void OnEnabledChanged(EventArgs e) { base.OnEnabledChanged(e); Cursor = Enabled ? Cursors.Hand : Cursors.Default; tipSeg = -1; Invalidate(); }
 
     protected override void OnMouseClick(MouseEventArgs e)
     {
         base.OnMouseClick(e);
         if (!Enabled || e.Button != MouseButtons.Left) return;
-        bool t = e.X >= Width / 2;
+        bool t = e.X < Width / 2;           // 左格＝大樓
         if (t == towerOn) return;
         Tower = t;
         Changed?.Invoke(t);
     }
+
+    /// 滑鼠提示跟著停在哪一格換（不能用時保留 BoardForm 設的「為什麼不能用」）
+    protected override void OnMouseMove(MouseEventArgs e)
+    {
+        base.OnMouseMove(e);
+        if (!Enabled) return;
+        int seg = e.X < Width / 2 ? 0 : 1;
+        if (seg == tipSeg) return;
+        tipSeg = seg;
+        owner.Tips.SetToolTip(this, Help[seg]);
+    }
+    protected override void OnMouseLeave(EventArgs e) { base.OnMouseLeave(e); if (Enabled) tipSeg = -1; }
 
     protected override void OnPaint(PaintEventArgs e)
     {
@@ -1251,13 +1268,45 @@ sealed class ViewSwitch : Control
         using (var p = IslandCardView.Rounded(new RectangleF(0.5f, 0.5f, Width - 1, Height - 1), 7 * s))
         using (var b = new SolidBrush(th.Card)) g.FillPath(b, p);
         float pad = 2 * s, half = (Width - pad * 2) / 2f;
-        using (var p = IslandCardView.Rounded(new RectangleF(pad + (towerOn ? half : 0), pad, half, Height - pad * 2), 5 * s))
+        using (var p = IslandCardView.Rounded(new RectangleF(pad + (towerOn ? 0 : half), pad, half, Height - pad * 2), 5 * s))
         using (var b = new SolidBrush(th.Dark ? Color.FromArgb(0x55, 0x55, 0x58) : Color.White)) g.FillPath(b, p);
+        float k = 14 * s;
         for (int i = 0; i < 2; i++)
         {
-            var r = Rectangle.Round(new RectangleF(pad + i * half, 0, half, Height));
-            var c = !Enabled ? th.Tertiary : (i == 1) == towerOn ? th.Text : th.Secondary;
-            TextRenderer.DrawText(g, Labels[i], F, r, c, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+            var c = !Enabled ? th.Tertiary : (i == 0) == towerOn ? th.Text : th.Secondary;
+            var r = new RectangleF(pad + i * half + (half - k) / 2, (Height - k) / 2, k, k);
+            if (i == 0) Cube(g, r, c, s); else Grid(g, r, c, s);
         }
+    }
+
+    /// SF Symbols 的 cube：等角立方體外框（上面一個菱形、正面兩片），線寬同 plus 圖示
+    static void Cube(Graphics g, RectangleF r, Color c, float s)
+    {
+        float x = r.X, y = r.Y, w = r.Width, h = r.Height, cx = x + w / 2;
+        var top = new PointF(cx, y + h * 0.04f);
+        var left = new PointF(x + w * 0.08f, y + h * 0.27f);
+        var right = new PointF(x + w * 0.92f, y + h * 0.27f);
+        var mid = new PointF(cx, y + h * 0.50f);
+        var bl = new PointF(x + w * 0.08f, y + h * 0.73f);
+        var br = new PointF(x + w * 0.92f, y + h * 0.73f);
+        var bot = new PointF(cx, y + h * 0.96f);
+        using var pen = new Pen(c, 1.4f * s) { LineJoin = LineJoin.Round, StartCap = LineCap.Round, EndCap = LineCap.Round };
+        g.DrawPolygon(pen, new[] { top, right, br, bot, bl, left });
+        g.DrawLines(pen, new[] { left, mid, right });
+        g.DrawLine(pen, mid, bot);
+    }
+
+    /// SF Symbols 的 square.grid.2x2：四個圓角小方塊外框
+    static void Grid(Graphics g, RectangleF r, Color c, float s)
+    {
+        float gap = r.Width * 0.16f, q = (r.Width - gap) / 2 - 0.7f * s;
+        using var pen = new Pen(c, 1.4f * s);
+        for (int i = 0; i < 2; i++)
+            for (int j = 0; j < 2; j++)
+            {
+                var b = new RectangleF(r.X + 0.7f * s + i * (q + gap), r.Y + 0.7f * s + j * (q + gap), q, q);
+                using var p = IslandCardView.Rounded(b, q * 0.28f);
+                g.DrawPath(pen, p);
+            }
     }
 }
