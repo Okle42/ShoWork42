@@ -276,6 +276,11 @@ static partial class CaptainLink
     public static string Label(string name, string? project) => name + (string.IsNullOrEmpty(project) ? "" : $"（{project}）");
 
     /// 擋下時給 AI 的理由
+    /// 使用者打了「放行」卻沒有單可放（單號不對、別的 session 的單、超過一天）：明講，不要讓 AI 以為放行了
+    public static string ReleaseMissText(string? id) =>
+        $"使用者打了「放行」{(id != null ? $"（單號 {id}）" : "")}，但這個 session 沒有找到一天內等放行的單，所以這次沒有放行任何東西。"
+        + "如果要跑的是之前被擋的指令，直接再跑一次：會開一張新單，請使用者再打一次「放行」。";
+
     public static string DenyReason(InboxItem item)
     {
         var owner = LocalConfig.Current.OwnerName;

@@ -163,7 +163,7 @@ struct CaptainLinkTests {
         let fp = CaptainLink.fingerprint("rm -rf build")
         CaptainInbox.save(item("BAAAA", .block, sid: "a", at: t0, fp: fp))
         #expect(!CaptainInbox.consume(sid: "a", fingerprint: fp, now: t0 + 10))                     // 還沒放行
-        #expect(CaptainInbox.waiting(sid: "a", fingerprint: fp)?.id == "BAAAA")
+        #expect(CaptainInbox.waiting(sid: "a", fingerprint: fp, now: t0 + 10)?.id == "BAAAA")
         #expect(CaptainInbox.pending(now: t0 + 10).map(\.id) == ["BAAAA"])
         #expect(CaptainInbox.release(id: "bzzzz", target: nil, by: "cap", byName: "隊長", source: "release 指令", now: t0 + 20) == nil)
         #expect(CaptainInbox.release(id: nil, target: "b", by: "b", byName: "使用者", source: "使用者輸入", now: t0 + 20) == nil)   // 別人的單不能放
@@ -183,6 +183,26 @@ struct CaptainLinkTests {
         CaptainInbox.save(item("BDDDD", .block, sid: "a", at: t0 + 60, fp: "y"))
         #expect(CaptainInbox.ack("all", now: t0 + 80) >= 1 && CaptainInbox.pending(now: t0 + 80).isEmpty)
         #expect(CaptainLink.denyReason(r).contains("隊長轉述小明的決定") && CaptainLink.blockText(r).contains("showork release BAAAA"))
+    }
+
+    @Test("④c 超過一天沒放行的舊單不沿用：重試開新單，打「放行」放得到新單（11-07 Surface 的 BCU9J）")
+    func staleBlock() throws {
+        LocalFixture.use()
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("capinbox-\(UUID().uuidString)")
+        setenv("SHOWORK_CAPTAIN_INBOX", dir.appendingPathComponent("inbox").path, 1)
+        setenv("SHOWORK_RELEASE_LOG", dir.appendingPathComponent("releases.jsonl").path, 1)
+        defer { unsetenv("SHOWORK_CAPTAIN_INBOX"); unsetenv("SHOWORK_RELEASE_LOG"); try? FileManager.default.removeItem(at: dir) }
+        let fp = CaptainLink.fingerprint("gh pr create --title test --body test")
+        CaptainInbox.save(item("BOLD1", .block, sid: "a", at: t0, fp: fp))
+        let later = t0 + 6 * 86400
+        #expect(CaptainInbox.waiting(sid: "a", fingerprint: fp, now: t0 + 86399)?.id == "BOLD1")   // 一天內照舊沿用
+        #expect(CaptainInbox.waiting(sid: "a", fingerprint: fp, now: later) == nil)                // 過期不沿用 ⇒ 呼叫端開新單
+        #expect(CaptainInbox.release(id: nil, target: "a", by: "a", byName: "使用者", source: "使用者輸入", now: later) == nil)
+        CaptainInbox.save(item("BNEW1", .block, sid: "a", at: later, fp: fp))
+        #expect(CaptainInbox.waiting(sid: "a", fingerprint: fp, now: later + 5)?.id == "BNEW1")
+        #expect(CaptainInbox.release(id: nil, target: "a", by: "a", byName: "使用者", source: "使用者輸入", now: later + 10)?.id == "BNEW1")
+        #expect(CaptainInbox.consume(sid: "a", fingerprint: fp, now: later + 20))
+        #expect(CaptainLink.releaseMissText(id: nil).contains("沒有放行任何東西"))
     }
 
     @Test("④b 戰情中心回答＝事先放行：點名的動作、30 分鐘、每種一次、否定小句不算、rm 不算")
@@ -229,7 +249,7 @@ struct CaptainLinkTests {
         #expect(CaptainInbox.usePreapproval(sid: "a", rules: [gh], now: t0 + 20) == nil)       // 每種一次
         #expect(CaptainInbox.usePreapproval(sid: "a", rules: [line], now: t0 + 1801) == nil)   // 30 分鐘過期
         let i = CaptainInbox.releaseByAnswer(item("BPREA", .block, sid: "a", at: t0 + 10, fp: "f"), answer: p, now: t0 + 10)
-        #expect(i.released == t0 + 10 && i.used == t0 + 10 && CaptainInbox.waiting(sid: "a", fingerprint: "f") == nil)
+        #expect(i.released == t0 + 10 && i.used == t0 + 10 && CaptainInbox.waiting(sid: "a", fingerprint: "f", now: t0 + 10) == nil)
         #expect(CaptainInbox.releases().last.map { $0.id == "BPREA" && $0.source == "戰情中心回答" } == true)
     }
 

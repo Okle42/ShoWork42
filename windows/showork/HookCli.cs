@@ -198,6 +198,7 @@ static class HookCli
                         Peer.Send(to, $"【已放行 {i.Id}】使用者在 {who} 的終端機放行：{i.Text}", "AI工作戰情中心（動作預告）");
                     nag = $"使用者剛放行了單號 {i.Id}（{i.Text}）。現在可以再跑一次剛才被擋下的同一個指令（30 分鐘內有效、只能用一次）。";
                 }
+                else nag = CaptainLink.ReleaseMissText(id);
             }
             else if (CaptainStore.Captain() != sid && !LocalConfig.Current.SkipsKickoff(cwd ?? ""))
             {
@@ -261,7 +262,7 @@ static class HookCli
                 if (pre != null)
                 {
                     // 戰情中心回答已點名這個動作＝事先放行：記成已放行＋已用、通知隊長，照常往下跑
-                    var item = CaptainInbox.ReleaseByAnswer(CaptainInbox.Waiting(sid, fp) ?? NewBlock(CaptainLink.HitSummary(cmd, hs)), pre, now);
+                    var item = CaptainInbox.ReleaseByAnswer(CaptainInbox.Waiting(sid, fp, now) ?? NewBlock(CaptainLink.HitSummary(cmd, hs)), pre, now);
                     if (captain != null && Peer.Find(captain) is { } to
                         && Peer.Send(to, $"【已放行 {item.Id}】{CaptainLink.Label(name, project)}：使用者在戰情中心回答「{pre.Answer}」已點名這個動作・{item.Text}", "AI工作戰情中心（動作預告）").Id != null)
                     { item.Delivered = true; CaptainInbox.Save(item); }
@@ -269,7 +270,7 @@ static class HookCli
                 else if (blocks.Count > 0 && !released)
                 {
                     // 擋下等放行：同一個指令重試不再開新單；第一次立即送隊長（不在線就留在收件匣）
-                    var item = CaptainInbox.Waiting(sid, fp) ?? NewBlock(CaptainLink.HitSummary(cmd, hs) + (ghWhy != null ? $"（{ghWhy}）" : ""));
+                    var item = CaptainInbox.Waiting(sid, fp, now) ?? NewBlock(CaptainLink.HitSummary(cmd, hs) + (ghWhy != null ? $"（{ghWhy}）" : ""));
                     if (!item.Delivered && captain != null && Peer.Find(captain) is { } to
                         && Peer.Send(to, CaptainLink.BlockText(item), "AI工作戰情中心（動作預告）").Id != null) item.Delivered = true;
                     CaptainInbox.Save(item);

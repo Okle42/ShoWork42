@@ -254,7 +254,7 @@ public sealed class HookTests : IDisposable
         InboxItem It(string id, string fp2) => new() { Id = id, Kind = "block", At = T0, Sid = "a", Name = "對方", Project = "專案A", Kinds = new() { "rm 刪除（暫存區以外）" }, Text = "rm -rf build", Fingerprint = fp2 };
         CaptainInbox.Save(It("BAAAA", fp));
         Assert.False(CaptainInbox.Consume("a", fp, T0.AddSeconds(10)));
-        Assert.Equal("BAAAA", CaptainInbox.Waiting("a", fp)!.Id);
+        Assert.Equal("BAAAA", CaptainInbox.Waiting("a", fp, T0.AddSeconds(10))!.Id);
         Assert.Null(CaptainInbox.Release(null, "b", "b", "使用者", "使用者輸入", T0.AddSeconds(20)));
         Assert.NotNull(CaptainInbox.Release("baaaa", null, "cap", "隊長", "release 指令", T0.AddSeconds(20)));
         Assert.False(CaptainInbox.Consume("a", CaptainLink.Fingerprint("rm -rf src"), T0.AddSeconds(30)));
@@ -265,6 +265,22 @@ public sealed class HookTests : IDisposable
         Assert.DoesNotContain(CaptainInbox.Pending(T0.AddSeconds(70)), i => i.Id == "BCCCC");
         Assert.Contains("隊長轉述Demo User的決定", CaptainLink.DenyReason(CaptainInbox.Item("BAAAA")!));
         Assert.Contains("showork release BAAAA", CaptainLink.BlockText(CaptainInbox.Item("BAAAA")!));
+    }
+
+    [Fact] // 同 Mac 的 ④c：超過一天沒放行的舊單不沿用；重試開新單，打「放行」放得到新單（11-07 Surface 的 BCU9J）
+    public void StaleBlockNotReused()
+    {
+        var fp = CaptainLink.Fingerprint("gh pr create --title test --body test");
+        CaptainInbox.Save(new InboxItem { Id = "BOLD1", Kind = "block", At = T0, Sid = "a", Name = "對方", Kinds = new() { "GitHub 公開發言（gh）" }, Text = "gh pr create", Fingerprint = fp });
+        var later = T0.AddDays(6);
+        Assert.Equal("BOLD1", CaptainInbox.Waiting("a", fp, T0.AddSeconds(86399))!.Id);
+        Assert.Null(CaptainInbox.Waiting("a", fp, later));
+        Assert.Null(CaptainInbox.Release(null, "a", "a", "使用者", "使用者輸入", later));
+        CaptainInbox.Save(new InboxItem { Id = "BNEW1", Kind = "block", At = later, Sid = "a", Name = "對方", Kinds = new() { "GitHub 公開發言（gh）" }, Text = "gh pr create", Fingerprint = fp });
+        Assert.Equal("BNEW1", CaptainInbox.Waiting("a", fp, later.AddSeconds(5))!.Id);
+        Assert.Equal("BNEW1", CaptainInbox.Release(null, "a", "a", "使用者", "使用者輸入", later.AddSeconds(10))!.Id);
+        Assert.True(CaptainInbox.Consume("a", fp, later.AddSeconds(20)));
+        Assert.Contains("沒有放行任何東西", CaptainLink.ReleaseMissText(null));
     }
 
     // MARK: 事先放行

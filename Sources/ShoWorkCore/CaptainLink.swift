@@ -253,6 +253,12 @@ public enum CaptainLink {
     public static func label(_ name: String, _ project: String?) -> String { name + ((project ?? "").isEmpty ? "" : "（\(project!)）") }
 
     /// 擋下時給 AI 的理由
+    /// 使用者打了「放行」卻沒有單可放（單號不對、別的 session 的單、超過一天）：明講，不要讓 AI 以為放行了
+    public static func releaseMissText(id: String?) -> String {
+        "使用者打了「放行」\(id.map { "（單號 \($0)）" } ?? "")，但這個 session 沒有找到一天內等放行的單，所以這次沒有放行任何東西。"
+            + "如果要跑的是之前被擋的指令，直接再跑一次：會開一張新單，請使用者再打一次「放行」。"
+    }
+
     public static func denyReason(_ item: CaptainInboxItem) -> String {
         let owner = LocalConfig.current.ownerName
         return "⛔️ 這個指令需要放行才能跑（\(item.kinds.joined(separator: "、"))，單號 \(item.id)）。已通知隊長，不要重試、不要換寫法繞過，也不要自己跑 showork release。\n"
@@ -425,6 +431,9 @@ public enum CaptainInbox {
     }
     /// 放行有效時間
     public static let releaseTTL: TimeInterval = 30 * 60
+    /// 擋單能被放行的期限（release 只找這段時間內的單）。重試沿用舊單也要同一個期限，
+    /// 不然過期的單會一直被沿用、卻永遠放行不了（11-07 Surface：10-31 的 BCU9J 一週後還在被沿用，打「放行」都找不到）
+    public static let blockWindow: TimeInterval = 86400
 
     public static func newID(_ kind: CaptainInboxItem.Kind) -> String {
         let a = Array("ABCDEFGHJKLMNPQRSTUVWXYZ23456789")
@@ -475,14 +484,14 @@ public enum CaptainInbox {
         return true
     }
 
-    /// 還在等放行的同一個指令（重試時不再開新單）
-    public static func waiting(sid: String, fingerprint fp: String) -> CaptainInboxItem? {
-        all().last { $0.kind == .block && $0.sid == sid && $0.fingerprint == fp && $0.released == nil }
+    /// 還在等放行的同一個指令（重試時不再開新單）；超過 blockWindow 的舊單不沿用，開新單
+    public static func waiting(sid: String, fingerprint fp: String, now: Date) -> CaptainInboxItem? {
+        all().last { $0.kind == .block && $0.sid == sid && $0.fingerprint == fp && $0.released == nil && now.timeIntervalSince($0.at) < blockWindow }
     }
 
     /// 放行：寫紀錄（releases.jsonl）。id＝nil ⇒ 這個 session 最近一張等放行的
     public static func release(id: String?, target sid: String?, by: String, byName: String, source: String, now: Date) -> CaptainInboxItem? {
-        let waiting = all().filter { $0.kind == .block && $0.released == nil && now.timeIntervalSince($0.at) < 86400 }
+        let waiting = all().filter { $0.kind == .block && $0.released == nil && now.timeIntervalSince($0.at) < blockWindow }
         guard var i = id.map({ x in waiting.first { $0.id == x.uppercased() } }) ?? waiting.last(where: { $0.sid == sid }) else { return nil }
         if let sid, i.sid != sid { return nil }
         i.released = now; save(i)

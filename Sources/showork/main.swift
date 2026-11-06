@@ -140,7 +140,7 @@ if args.first == "title" {
                 }
                 return "使用者剛放行了單號 \(i.id)（\(i.text)）。現在可以再跑一次剛才被擋下的同一個指令（30 分鐘內有效、只能用一次）。"
             }
-            return nil
+            return CaptainLink.releaseMissText(id: id)
         }
         guard CaptainStore.captain()?.sessionId != sid, !LocalConfig.current.skipsKickoff(cwd: cwdPath ?? "") else { return nil }
         let last = CaptainLink.lastPrompt(sid)
@@ -220,7 +220,7 @@ if args.first == "guard-push" {
             if !blocks.isEmpty, !released,
                let pre = CaptainInbox.usePreapproval(sid: sid, rules: blocks.map(\.name), now: now) {
                 // 戰情中心回答已點名這個動作＝事先放行：記成已放行＋已用、通知隊長，照常往下跑
-                let base = CaptainInbox.waiting(sid: sid, fingerprint: fp) ?? CaptainInboxItem(id: CaptainInbox.newID(.block), kind: .block, at: now, sid: sid, name: name,
+                let base = CaptainInbox.waiting(sid: sid, fingerprint: fp, now: now) ?? CaptainInboxItem(id: CaptainInbox.newID(.block), kind: .block, at: now, sid: sid, name: name,
                                                                                                project: project, kinds: hits.map(\.name), text: CaptainLink.hitSummary(cmd, hs), fingerprint: fp)
                 var item = CaptainInbox.releaseByAnswer(base, answer: pre, now: now)
                 if let cap = CaptainStore.captain(), let to = Peer.find(cap.sessionId),
@@ -229,7 +229,7 @@ if args.first == "guard-push" {
                 }
             } else if !blocks.isEmpty, !released {
                 // 擋下等放行：同一個指令重試不再開新單；第一次立即送隊長（不在線就留在收件匣）
-                var item = CaptainInbox.waiting(sid: sid, fingerprint: fp) ?? CaptainInboxItem(id: CaptainInbox.newID(.block), kind: .block, at: now, sid: sid, name: name,
+                var item = CaptainInbox.waiting(sid: sid, fingerprint: fp, now: now) ?? CaptainInboxItem(id: CaptainInbox.newID(.block), kind: .block, at: now, sid: sid, name: name,
                                                                                                project: project, kinds: hits.map(\.name), text: CaptainLink.hitSummary(cmd, hs) + (ghWhy.map { "（\($0)）" } ?? ""), fingerprint: fp)
                 if !item.delivered, let cap = CaptainStore.captain(), let to = Peer.find(cap.sessionId),
                    case .success = Peer.send(to: to, text: CaptainLink.blockText(item), fromName: "AI工作戰情中心（動作預告）") { item.delivered = true }

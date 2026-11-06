@@ -89,6 +89,8 @@ static class CaptainInbox
     public static string PreapprovalLog => HookPaths.Env("SHOWORK_PREAPPROVAL_LOG") ?? Path.Combine(HookPaths.Board, "permits", "preapprovals.json");
     /// 放行有效時間
     public static readonly TimeSpan ReleaseTTL = TimeSpan.FromMinutes(30);
+    /// 擋單能被放行的期限（Release 只找這段時間內的單；Waiting 沿用舊單也用同一個期限）
+    public static readonly TimeSpan BlockWindow = TimeSpan.FromDays(1);
 
     const string Alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     public static string NewID(string kind) =>
@@ -131,13 +133,15 @@ static class CaptainInbox
     }
 
     /// 還在等放行的同一個指令（重試時不再開新單）
-    public static InboxItem? Waiting(string sid, string fp) =>
-        All().LastOrDefault(i => i.Kind == "block" && i.Sid == sid && i.Fingerprint == fp && i.Released == null);
+    /// 超過 BlockWindow 的舊單不沿用、開新單：release 只找 BlockWindow 內的單，沿用過期的單會永遠放行不了
+    ///（11-07 Surface：10-31 的 BCU9J 一週後還在被沿用，打「放行」都找不到）
+    public static InboxItem? Waiting(string sid, string fp, DateTime now) =>
+        All().LastOrDefault(i => i.Kind == "block" && i.Sid == sid && i.Fingerprint == fp && i.Released == null && now - i.At < BlockWindow);
 
     /// 放行：寫紀錄（releases.jsonl）。id＝null ⇒ 這個 session 最近一張等放行的
     public static InboxItem? Release(string? id, string? target, string by, string byName, string source, DateTime now)
     {
-        var waiting = All().Where(i => i.Kind == "block" && i.Released == null && now - i.At < TimeSpan.FromDays(1)).ToList();
+        var waiting = All().Where(i => i.Kind == "block" && i.Released == null && now - i.At < BlockWindow).ToList();
         var it = id != null ? waiting.FirstOrDefault(i => i.Id == id.ToUpperInvariant()) : waiting.LastOrDefault(i => i.Sid == target);
         if (it == null) return null;
         if (target != null && it.Sid != target) return null;
