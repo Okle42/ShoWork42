@@ -204,6 +204,7 @@ enum BoardActions {
     static func sendBack(_ c: BoardCard, text: String) -> SendResult {
         let line = text.replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespaces)
         BoardModel.shared.append(["ev": "sendback", "id": c.sessionId, "project": c.project, "text": line])
+        if let h = SessionHost.shared.handle(for: c.sessionId), let s = try? SessionHost.shared.ensure(h), s.send(line) { return .typed }
         if let (sock, pane) = tmuxPane(of: c.pid) {
             let t = Tmux.binary()
             Tools.run(t, ["-S", sock, "send-keys", "-t", pane, "-l", line], timeout: 5)
@@ -225,6 +226,9 @@ enum BoardActions {
             _ = CaptainInbox.release(id: nil, target: c.sessionId, by: "戰情中心", byName: "使用者（戰情中心回答）", source: "戰情中心回答", now: Date())
         } else {
             CaptainInbox.recordAnswer(sid: c.sessionId, answer: line, question: c.report?.ask, now: Date())
+        }
+        if let h = SessionHost.shared.handle(for: c.sessionId), let s = try? SessionHost.shared.ensure(h), s.send(line) {
+            return "已送進「\(c.title)」"
         }
         if tmuxPane(of: c.pid) != nil {
             if case .typed = sendBack(c, text: line) { return "已送進「\(c.title)」" }
@@ -457,8 +461,12 @@ extension BoardActions {
 
     /// 把一件事交給隊長，由它決定給誰
     nonisolated static func toCaptain(_ sid: String, text: String) -> Result<String, CardError> {
-        guard let cap = Peer.find(sid) else { return .failure(CardError("隊長的 session 沒開著")) }
         let body = "【使用者從看板交辦】\(text)\n請照隊長守則處理：先看名冊（showork roster），選人後用 showork task add 派工；小事自己做。"
+        // 11-08 H4：戰情中心持有的隊長（串流模式沒有跨 session 信箱）⇒ 直接當一句話送進去；終端機接手中就走下面的 Peer
+        if let h = SessionHost.shared.handle(for: sid), let s = try? SessionHost.shared.ensure(h) {
+            return s.send(body) ? .success("board") : .failure(CardError("隊長的程序已經結束"))
+        }
+        guard let cap = Peer.find(sid) else { return .failure(CardError("隊長的 session 沒開著")) }
         return Peer.send(to: cap, text: body, fromName: "AI工作戰情中心（使用者）")
     }
 }
@@ -483,6 +491,11 @@ extension BoardActions {
     nonisolated static func askCaptain(_ text: String) -> String {
         let line = Inbox.message(text)
         guard !line.isEmpty else { return "沒有內容" }
+        // 戰情中心持有的隊長：程序關著也會自動接回（toCaptain → SessionHost.ensure）
+        if let cap = CaptainStore.captain(), SessionHost.shared.handle(for: cap.sessionId) != nil,
+           case .success = toCaptain(cap.sessionId, text: line) {
+            return "已交給隊長「\(cap.name ?? "隊長")」"
+        }
         if let cap = liveCaptain() {
             switch toCaptain(cap.sessionId, text: line) {
             case .success: return "已交給隊長「\(cap.name ?? "隊長")」"
@@ -500,8 +513,16 @@ extension BoardActions {
         }
         launching = (id: "", at: Date())
         launchLock.unlock()
-        guard let claude = Tools.claude() else { launching = nil; return "找不到 claude 指令，開不了隊長" }
         let prompt = CaptainLaunch.bootstrap(showork: TaskRouter.showork, task: line)
+        // 11-08 H4：隊長由戰情中心自己持有（SessionHost，串流模式）；點隊長就是它的工作視窗。開不起來才退回 claude --bg
+        if let s = try? SessionHost.shared.start(cwd: BoardPaths.home, model: captainModel, name: "隊長", permissionMode: "bypassPermissions"),
+           s.send(prompt) {
+            CaptainStore.setCaptain(CaptainRecord(sessionId: s.sessionId, name: "隊長"))
+            launching = nil
+            Log.note("CAPTAIN owned \(s.sessionId) model=\(captainModel)")
+            return "已開新隊長（\(modelTitle(captainModel))），這件事是它的第一個任務"
+        }
+        guard let claude = Tools.claude() else { launching = nil; return "找不到 claude 指令，開不了隊長" }
         let r = Tools.run(claude, ["--bg", "--model", captainModel, "-n", "隊長", "--permission-mode", "bypassPermissions", prompt],
                           cwd: BoardPaths.home, timeout: 60)
         let all = r.out + r.err
