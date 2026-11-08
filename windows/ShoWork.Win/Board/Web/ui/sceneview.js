@@ -182,9 +182,15 @@ export class OfficeSCNView {
     this.lastGuard = [guardStatus, scanning];
     const { people: ps, floors: fs } = this.builder.labelTargets();
     const specs = [];
+    // 11-08 H5：人多（超過 8 個）時名牌只寫名字；滑鼠停上去、點選的那個才顯示「・狀態」那串（使用者：名牌不能疊在一起）
+    const crowded = ps.length > 8;
     for (const p of ps.slice().sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0)) {
       if (p.id === "guard") specs.push(OfficeLabels.guardSpec(guardStatus, scanning, p.anchor));
-      else if (p.card) specs.push(OfficeLabels.spec(p.card, p.mood, p.anchor, p.floor));
+      else if (p.card) {
+        const sp = OfficeLabels.spec(p.card, p.mood, p.anchor, p.floor);
+        if (crowded && p.id !== this.hoverId && p.id !== this.selectedId) sp.text = OfficeLabels.shortName(p.card);
+        specs.push(sp);
+      }
     }
     for (const c of this.builder.cityLabelTargets()) specs.push(OfficeLabels.citySpec(c.id, c.text, c.alert, c.anchor));
     const floors = fs.map(f => ({ id: f.id, node: f.node, height: f.height, title: f.title, accent: f.accent ?? null, kind: f.kind, names: f.names }));
@@ -402,6 +408,8 @@ export class OfficeSCNView {
   setMode(m) {
     this.mode = m;
     this.stopSpin();
+    this.cam.fov = m === "walk" ? 64 : 34;          // 走進去用廣角（34° 在室內像望遠鏡，人都貼在臉上）
+    this.cam.updateProjectionMatrix();
     if (m === "walk") {
       const w = this.builder.walkStart?.();
       if (!w) { this.mode = "overview"; return; }
@@ -453,6 +461,7 @@ export class OfficeSCNView {
 
   goZone(id) {
     this.zoneOn = id;
+    if (this.mode === "walk") { this.cam.fov = 34; this.cam.updateProjectionMatrix(); }
     this.mode = "overview";
     if (this.builder.frameZone?.(id, this.aspect)) { this.userMoved = true; this.camMoved(0.9); }
     this.renderTabs();
@@ -631,6 +640,7 @@ export class OfficeSCNView {
     const id = this.pick(p);
     if (id !== this.hoverId) {
       this.hoverId = id; this.builder.highlight(id);
+      if (this.lastGuard) this.refreshLabels(...this.lastGuard);      // 人多時：停上去的那個名牌展開成完整狀態
       if (id !== null) this.onHoverPoint?.({ x: p.x, y: p.top });     // 「3D 區域左上角為原點」
       this.onHover?.(id);
       this.requestRender();
@@ -684,6 +694,8 @@ export class OfficeSCNView {
         if (!d.moved) {
           const p = this.viewPoint(e);
           const id = this.pick(p);
+          this.selectedId = id && !id.startsWith("city:") ? id : null;
+          if (this.lastGuard) this.refreshLabels(...this.lastGuard);
           if (id) this.onClick?.(id);
           else {
             const proj = this.neuralProject(p);

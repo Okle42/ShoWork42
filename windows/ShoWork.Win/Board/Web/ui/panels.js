@@ -36,7 +36,7 @@ export function AttentionBar({ summary, alerts = 0, onAlerts, onWaiting, onStuck
       chip(summary.stuck.length, "卡住", ORANGE, onStuck, "依時間先後輪流：鏡頭飛過去"),
       chip(alerts, st === "full" ? "設備警示" : "警示", RED, onAlerts, "設備警示（外部空間城市）：滿了的碟、離線的伺服器、防火牆、敞開的埠、電廠過熱；點一下輪流飛過去並打開細節"),
       chip(summary.finished.length, "做完", GREEN, onFinished, "依時間先後輪流：鏡頭飛過去、細節卡停 6 秒"),
-      st === "full" ? h("span.attn-count", `${summary.people} 人在 ${summary.floors} 層`) : null,
+      st === "full" ? h("span.attn-count", `${summary.people} 人在 ${summary.floors} 區`) : null,
     ].filter(Boolean));
     r.append(h("span.spacer"));
     r.append(controls());
@@ -57,7 +57,7 @@ export function AttentionBar({ summary, alerts = 0, onAlerts, onWaiting, onStuck
 // MARK: - 樓層索引列（FloorRail）
 
 /** 左側樓層索引列（寬 196）：由上往下＝大樓由上往下；點樓層＝鏡頭對準，再點一次回預設；閒置那行可展開；大廳行點了開保全卡 */
-export function FloorRail({ rows, selected, guardLevel, cityAlerts = 0, idleOpen, onIdleToggle, onFloor, onHover, onGuard }) {
+export function FloorRail({ rows, selected, head = "樓層", guardLevel, cityAlerts = 0, idleOpen, onIdleToggle, onFloor, onHover, onGuard }) {
   const list = h("div.rail-list");
   const badges = r => h("span.badges",
     r.kind === "lobby" ? [h("i.dot", { style: { background: GuardLevel.color[guardLevel] } }), h("span", { style: { color: GuardLevel.color[guardLevel] } }, GuardLevel.title[guardLevel])] : null,
@@ -94,7 +94,7 @@ export function FloorRail({ rows, selected, guardLevel, cityAlerts = 0, idleOpen
     h("span.rail-text",
       h("span.rail-title", Icon("building.2", 14, "sec"), h("span.t", "城市")),
       h("span.rail-sub", h("span.s", "硬碟・雲端・伺服器・城牆"), cityAlerts > 0 ? h("span.badges", h("span", { style: { color: RED } }, `!${cityAlerts}`)) : null))));
-  return h("div#rail.material", h("div.rail-head", "樓層"), list);
+  return h("div#rail.material", h("div.rail-head", head), list);
 }
 
 // MARK: - 下拉選單（SwiftUI.Menu）與右鍵選單（NSMenu）

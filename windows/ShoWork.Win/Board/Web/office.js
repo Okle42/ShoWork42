@@ -6,7 +6,7 @@
 // 不靠 Windows 單獨看：python3 -m http.server 後開 office.html?demo=1（載入 bench/mac-input.json 當示範資料；示範資料不送任何動作）。
 // 舊的 W6 簡化版留在 office-w6.js。
 
-import { OfficeBuilder, KuboArt } from "./scene/builder.js";
+import { OfficeBuilder, KuboArt, projectId } from "./scene/builder.js";
 import { TowerTheme } from "./scene/tower.js";
 import { CityState } from "./scene/city-model.js";
 import { WeatherLook, WeatherKind, weathered } from "./scene/weather.js";
@@ -316,15 +316,41 @@ function renderLeft() {
   const d = S.data ?? {};
   const moods = {};
   for (const i of d.islands ?? []) for (const p of i.people) (moods[String(i.project).toLowerCase()] ??= []).push(p.mood);
-  const rows = TowerIndex.rows(d.tower ?? OfficeBuilder.fallback, d.decor ?? {}, moods, t => TowerTheme.accent[t] ?? null);
+  const rows = view.builder.zones ? zoneRows(d) : TowerIndex.rows(d.tower ?? OfficeBuilder.fallback, d.decor ?? {}, moods, t => TowerTheme.accent[t] ?? null);
   const city = cityState();
   replace(left, FloorRail({
-    rows, selected: S.selectedFloor, guardLevel: d.guardStatus?.level ?? "normal", cityAlerts: cityAlerts(city).length, idleOpen: S.idleOpen,
+    rows, selected: S.selectedFloor, head: view.builder.zones ? "區域" : "樓層", guardLevel: d.guardStatus?.level ?? "normal", cityAlerts: cityAlerts(city).length, idleOpen: S.idleOpen,
     onIdleToggle: id => { S.idleOpen = !S.idleOpen; if (S.idleOpen) focusFloor(id); else render(); },
     onFloor: focusFloor,
     onHover: id => { S.railHover = id; if (view.builder.highlightFloor(id)) view.playFor(0.15); },
     onGuard: () => { focusFloor("lobby"); S.answeringId = null; S.guardOpen = true; render(); },
   }));
+}
+
+/** 11-08 H5 單層開放式辦公室：左側索引列改成區域（會議室、各專案、休息區、茶水間、前台；城市、B1 在最後） */
+function zoneRows(d) {
+  const all = (d.islands ?? []).flatMap(i => i.people.map(p => ({ ...p, project: i.project })));
+  const count = ps => ({ waiting: ps.filter(p => p.mood === "waiting").length, stuck: ps.filter(p => p.mood === "stuck").length,
+                         finished: ps.filter(p => p.mood === "finished").length, working: ps.filter(p => p.mood === "working").length });
+  const hex = c => c == null ? null : "#" + c.toString(16).padStart(6, "0");
+  const rows = [];
+  for (const z of view.builder.zones()) {
+    let ps, sub;
+    switch (z.id) {
+      case "meeting": ps = all.filter(p => p.card.captain); sub = ps.length ? "隊長在這裡" : "隊長不在"; break;
+      case "lounge": ps = all.filter(p => !p.card.captain && (p.mood === "idle" || p.mood === "asleep")); sub = `閒著 ${ps.length} 個`; break;
+      case "pantry": ps = all.filter(p => !p.card.captain && p.mood === "finished"); sub = `做完 ${ps.length} 個`; break;
+      case "lobby": rows.push({ id: "lobby", kind: "lobby", title: "前台", subtitle: "保全", accent: "#1E3A8A", active: true }); continue;
+      default: {
+        const proj = all.filter(p => projectId(p.project) === z.id);
+        ps = proj.filter(p => p.mood === "working" || p.mood === "waiting" || p.mood === "stuck");
+        sub = `工位 ${ps.length} 張`;
+      }
+    }
+    rows.push({ id: z.id, kind: z.kind === "room" ? "room" : "project", title: z.title, subtitle: sub, accent: hex(z.accent) ?? "rgba(142,142,147,.5)", active: true, ...count(ps) });
+  }
+  rows.push({ id: "b1", kind: "room", title: "B1 機房", subtitle: "神經網路", accent: "#38BDF8", active: true });
+  return rows;
 }
 
 function renderBar() {

@@ -14,8 +14,10 @@
 import * as THREE from "three";
 import { GLTFLoader } from "../vendor/three-r170/loaders/GLTFLoader.js";
 import { mergeGeometries } from "../vendor/three-r170/utils/BufferGeometryUtils.js";
+import { clone as cloneSkinned } from "../vendor/three-r170/utils/SkeletonUtils.js";
 import { VoxMat, TP, TD, TowerSpec, scnNode, setCategory, VoxelMesh, Kit, Xf, TM, setEuler, scnLight, scnIntensity } from "../kit.js";
-import { OfficeBuilder, projectId } from "./builder.js";
+import { OfficeBuilder, projectId, KuboArt } from "./builder.js";
+import { OfficeBasement } from "./basement.js";
 import { CityBuilder } from "./city.js";
 import * as Tower from "./tower.js";
 import { runAction, Act } from "./actions.js";
@@ -68,7 +70,7 @@ export function placeKind(p) {
 
 /** 每種家具的縮放（Kenney 1 單位約 2 公尺；桌面要在 0.76、椅面約 0.56，跟 Kubo 的坐姿對齊） */
 const SCALE = {
-  desk: [1.75, 2.0, 1.75], chairDesk: [1.9, 2.6, 1.9], computerScreen: [1.6, 1.6, 1.6], computerKeyboard: [1.6, 1.6, 1.6],
+  desk: [1.75, 2.0, 1.75], chairDesk: [1.9, 1.9, 1.9], computerScreen: [1.6, 1.6, 1.6], computerKeyboard: [1.6, 1.6, 1.6],
   table: [2.4, 2.25, 2.6], chair: [2.0, 2.35, 2.0], loungeSofa: [2.1, 2.0, 2.1], loungeSofaLong: [2.0, 2.0, 2.0],
   loungeChair: [2.0, 2.0, 2.0], loungeDesignSofa: [2.0, 2.0, 2.0], tableCoffee: [2.0, 2.0, 2.0], rugRectangle: [2.2, 1, 2.0], rugRound: [2.2, 1, 2.2],
   kitchenBar: [2.0, 2.2, 2.2], kitchenBarEnd: [2.0, 2.2, 2.2], kitchenCabinet: [2.0, 2.0, 2.0], kitchenCabinetUpper: [2.0, 2.0, 2.0],
@@ -110,8 +112,6 @@ export const Kenney = {
       const keep = ["position", "normal"];
       for (const k of Object.keys(geo.attributes)) if (!keep.includes(k)) geo.deleteAttribute(k);
       if (!geo.attributes.normal) geo.computeVertexNormals();
-      // VoxMat 的 lambert 吃頂點色（方塊的假 AO）：沒有頂點色會整個變黑 ⇒ 補一份全白
-      geo.setAttribute("color", new THREE.Float32BufferAttribute(new Float32Array(geo.attributes.position.count * 3).fill(1), 3));
       if (mats.length === 1 || !geo.groups.length) { out.push({ geometry: geo, material: Kenney.mat(mats[0]) }); return; }
       for (const g of geo.groups) {          // 多材質：照 group 拆開
         const sub = geo.clone(); const idx = geo.index;
@@ -122,10 +122,65 @@ export const Kenney = {
     });
     return out;
   },
-  /** Kenney 的材質（PBR）→ VoxMat.flat：跟方塊場景同一套 lambert＋光照遮罩 */
+  /** 保留模型原本的材質（11-08 使用者：壓成 VoxMat 純色還是方塊風）；同一個來源材質共用一份 */
+  mats: new Map(),
   mat(m) {
-    const hex = m?.color ? m.color.getHex(THREE.SRGBColorSpace) : 0xCCCCCC;
-    return VoxMat.flat(hex);
+    const key = m ? `${m.name}|${m.color?.getHexString?.() ?? ""}` : "none";
+    if (!this.mats.has(key)) {
+      const c = m ? m.clone() : new THREE.MeshStandardMaterial({ color: 0xCCCCCC });
+      c.roughness = Math.max(c.roughness ?? 1, 0.75); c.metalness = Math.min(c.metalness ?? 0, 0.1);   // 沒有環境貼圖：金屬會黑掉
+      this.mats.set(key, c);
+    }
+    return this.mats.get(key);
+  },
+};
+
+// MARK: - 人物（Kenney Mini Characters，CC0；有 idle／walk／sit 等動畫）
+
+const CHAR_K = 1.45;                       // 模型 0.67 高 ⇒ 約 0.97 公尺（Q 版比例，跟縮小後的桌椅搭）
+const SEAT_Y = 0.17;                       // 坐姿時模型原點離地（腳底在原點下 0.094×K）
+export const People = {
+  base: new URL("../assets/kenney-characters/", import.meta.url).href,
+  names: ["male-a", "female-a", "male-b", "female-b", "male-c", "female-c", "male-d", "female-d", "male-e", "female-e", "male-f", "female-f"],
+  models: new Map(),         // 名字 → { scene, clips: Map }
+  ready: null,
+  load() {
+    if (this.ready) return this.ready;
+    const loader = new GLTFLoader();
+    this.ready = Promise.all([...this.names, "worker"].map(n => new Promise(res => {
+      loader.load(`${this.base}character-${n}.glb`, g => {
+        g.scene.traverse(o => { if (o.isMesh) { o.frustumCulled = false; const m = o.material; if (m) { m.roughness = 0.85; m.metalness = 0; } } });
+        this.models.set(n, { scene: g.scene, clips: new Map(g.animations.map(a => [a.name, a])) });
+        res();
+      }, undefined, () => res());
+    })));
+    return this.ready;
+  },
+  /** 同一個人每次都是同一個造型（卡片 id 雜湊） */
+  pick(id) {
+    let h = 0;
+    for (const ch of String(id)) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+    return this.names[h % this.names.length];
+  },
+  /** 一隻人物：模型＋動畫（坐著＝sit 定格；站著＝idle 循環；做完＝點頭一次再 idle） */
+  make(name, { seated, mood }) {
+    const e = this.models.get(name) ?? this.models.get(this.names[0]);
+    if (!e) return null;
+    const model = cloneSkinned(e.scene);
+    model.scale.setScalar(CHAR_K);
+    model.position.y = seated ? SEAT_Y : 0;
+    const mixer = new THREE.AnimationMixer(model);
+    const play = (n, loop = true) => { const c = e.clips.get(n); if (!c) return null; const a = mixer.clipAction(c); a.setLoop(loop ? THREE.LoopRepeat : THREE.LoopOnce, Infinity); a.clampWhenFinished = !loop; a.play(); return a; };
+    let animated = false;
+    if (seated) { play("sit"); mixer.update(0.1); }
+    else if (mood === "finished") {
+      const a = play("emote-yes", false);
+      if (a) mixer.addEventListener("finished", () => { a.fadeOut(0.3); play("idle").fadeIn(0.3); });
+      else play("idle");
+      animated = true;
+    } else { const a = play("idle"); if (a) a.time = Math.random() * 1.3; animated = true; }
+    mixer.update(0);
+    return { model, mixer, animated };
   },
 };
 
@@ -217,6 +272,16 @@ export class OpenOfficeBuilder extends OfficeBuilder {
     this.onAssets = null;       // 家具載好了（sceneview 補畫一張）
     this.onLayout = null;       // 區域變了（sceneview 重畫上方分頁）
     Kenney.load().then(() => { this.furnitureSig = ""; this.buildFurniture(); this.onAssets?.(); });
+    this.mixers = new Set();      // 播動畫的人（tick 時推進）
+    this.lastIslands = [];
+    People.load().then(() => {        // 人物載好：方塊 Kubo 換成人物（重建一次）
+      for (const p of this.persons.values()) p.look = "";
+      this.guardKey = "";
+      this.updatePeople(this.lastIslands, null, false, Date.now() / 1000);
+      this.updateGuard(this.lastGuard ?? { level: "normal" }, false);
+      this.looping = this.looping || (this.animating && !OfficeBuilder.reduceMotion);
+      this.onAssets?.(); this.onLayout?.();
+    });
   }
 
   // MARK: 資料 → 格局
@@ -231,12 +296,14 @@ export class OpenOfficeBuilder extends OfficeBuilder {
     this.layout(islands);
     if (!this.office || this.officeSig !== this.layoutSig) { this.buildShell(); this.onLayout?.(); }
     this.buildFurniture();
+    this.lastIslands = islands; this.lastGuard = guardStatus;
     this.updatePeople(islands, null, animate, now);
     this.updateGuard(guardStatus, scanning);
     this.updateEmergency();
     this.highlight(this.lit);
     if (!this.fidgetStarted) { this.fidgetStarted = true; this.scheduleFidget(); }
-    this.looping = !OfficeBuilder.reduceMotion && (scanning || this.weatherFX.raining || [...this.persons.values()].some(p => p.mood === "working" && p.islander.card.activity === "editing"));
+    this.looping = !OfficeBuilder.reduceMotion && (scanning || this.weatherFX.raining || this.animating
+      || [...this.persons.values()].some(p => p.mood === "working" && p.islander.card.activity === "editing"));
     this.omniDirty = true; this.assignOmni();
     return first ? "layout" : "none";
   }
@@ -449,9 +516,51 @@ export class OpenOfficeBuilder extends OfficeBuilder {
         this.placeOpen(p, fid, a, animate);
       }
     }
-    for (const [id, old] of [...this.persons]) if (!seen.has(id)) { this.persons.delete(id); old.node.removeFromParent(); }
+    for (const [id, old] of [...this.persons]) if (!seen.has(id)) { this.persons.delete(id); old.node.removeFromParent(); this.mixers.delete(old.node.userData.mixer); }
     this.peopleSeeded = this.peopleSeeded || islands.length > 0;
   }
+
+  /** 一個人：Kenney 人物（載好前先用方塊 Kubo）＋腳下狀態光圈＋頭上寶石＋桌上亮的螢幕＋名牌錨點＋點擊盒 */
+  makePerson(p, seated, atDesk, noCup = false, intro = true) {
+    if (!People.models.size) { const k = super.makePerson(p, seated, atDesk, noCup, intro); k.userData.kubo = true; return k; }
+    const root = scnNode(`p:${p.card.id}`);
+    const ch = People.make(People.pick(p.card.id), { seated, mood: p.mood });
+    root.add(ch.model);
+    const tint = KuboArt.tint(p.mood);
+    const lit = p.mood !== "idle" && p.mood !== "asleep";
+    // 狀態色（11-08 使用者：不要整隻變色）：腳下光圈＋頭上寶石；閒著的只有淡灰圈、沒有寶石
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.36, 0.025, 8, 40).rotateX(-Math.PI / 2), VoxMat.flat(tint, { emit: lit ? [0.8, 1.8] : null }));
+    ring.position.y = 0.03; ring.name = "status-ring";
+    root.add(ring);
+    const top = (seated ? 0.521 * CHAR_K + SEAT_Y : 0.68 * CHAR_K);
+    if (lit) {
+      const gem = new THREE.Mesh(new THREE.OctahedronGeometry(0.09), VoxMat.flat(tint, { emit: [0.9, 2.0] }));
+      gem.position.y = top + 0.16; gem.name = "gem";
+      root.add(gem);
+    }
+    if (atDesk && seated && lit && !p.card.captain) {          // 桌上螢幕亮狀態色（背對你的人也看得到在忙什麼）
+      const scr = new THREE.Mesh(new THREE.PlaneGeometry(0.26, 0.15), VoxMat.flat(tint, { emit: [0.7, 2.6] }));
+      scr.position.set(0, TOP - R + 0.19, 0.735); scr.rotation.y = Math.PI;
+      root.add(scr);
+    }
+    const anchor = scnNode("anchor"); anchor.position.y = top + 0.3; root.add(anchor);
+    this.addHaloAndHitbox(root, 0.85);
+    OfficeBuilder.pickable(root);
+    root.userData.mixer = ch.mixer;
+    if (ch.animated && !OfficeBuilder.reduceMotion) this.mixers.add(ch.mixer);
+    return root;
+  }
+
+  get animating() { return this.mixers.size > 0 && !OfficeBuilder.heatPaused; }
+
+  tick(dt) {
+    super.tick(dt);
+    if (!(dt > 0) || OfficeBuilder.heatPaused) return;
+    for (const m of this.mixers) m.update(dt);
+  }
+
+  // 方塊 Kubo 的小動作（點頭、轉頭）：人物有自己的待機動畫，不用
+  scheduleFidget() {}
 
   slot(a) {
     switch (a.kind) {
@@ -475,14 +584,14 @@ export class OpenOfficeBuilder extends OfficeBuilder {
       if (person.place === place && person.node.parent === parent) { person.islander = p; return; }
     } else {
       const intro = person ? person.mood !== p.mood : true;
-      person?.node.removeFromParent();
+      if (person) { person.node.removeFromParent(); this.mixers.delete(person.node.userData.mixer); }
       const node = this.makePerson(p, seated, atDesk, false, intro);
       person = { node, look, place: "", mood: p.mood, islander: p, floor: fid, seat: a.slot, seats: 1 };
     }
     person.place = place; person.mood = p.mood; person.islander = p; person.floor = a.kind === "desk" ? fid : a.kind;
     this.persons.set(id, person);
     const node = person.node;
-    node.scale.setScalar(S);
+    node.scale.setScalar(node.userData.kubo ? S : 1);
     if (node.parent !== parent) { node.removeFromParent(); parent.add(node); }
     const s = this.slot(a);
     node.position.set(s.x, R, s.z); node.rotation.y = s.a;
@@ -505,7 +614,7 @@ export class OpenOfficeBuilder extends OfficeBuilder {
     const key = `${level}|${hasData}|${scanning}`;
     if (key === this.guardKey && this.guardNode?.parent === this.office) return;
     this.guardKey = key;
-    this.guardNode?.removeFromParent();
+    if (this.guardNode) { this.guardNode.removeFromParent(); this.guardNode.traverse(o => { if (o.userData?.gm) this.mixers.delete(o.userData.gm); }); }
     const r = scnNode("guard");
     const lv = OfficeBuilder.guardColor(level), wifi = VoxMat.color(0x38bdf8), gray = VoxMat.color(0x6b7280);
     const cols = !hasData ? [gray, wifi, gray] : level === "alert" ? [lv, lv, lv] : [lv, wifi, lv];
@@ -518,12 +627,16 @@ export class OpenOfficeBuilder extends OfficeBuilder {
     ant.position.set(5.35, R + 0.9, 1.3); setEuler(ant, 0.6, 0.78, 0);
     if (scanning && !OfficeBuilder.reduceMotion) runAction(ant, Act.repeatForever(Act.rotateBy(0, Math.PI, 0, 1.2)));
     r.add(ant);
-    const man = scnNode("guard-man"); man.scale.setScalar(S);
+    const man = scnNode("guard-man"); if (!People.models.size) man.scale.setScalar(S);
     const gp = OpenPlan.guard;
     man.position.set(gp.x, R, gp.z); man.rotation.y = gp.a;
-    man.add(this.makeKubo("idle", null, { seated: false, gemColor: lv, cap: true, intro: false }));
+    const gm = People.models.size ? People.make("worker", { seated: false, mood: "idle" }) : null;
+    if (gm) { man.add(gm.model); man.userData.gm = gm.mixer; if (!OfficeBuilder.reduceMotion) this.mixers.add(gm.mixer); }
+    else man.add(this.makeKubo("idle", null, { seated: false, gemColor: lv, cap: true, intro: false }));
+    const gr = new THREE.Mesh(new THREE.TorusGeometry(0.36, 0.025, 8, 40).rotateX(-Math.PI / 2), VoxMat.flat(lv, { emit: [0.8, 1.8] }));
+    gr.position.y = 0.03; man.add(gr);
     this.addHaloAndHitbox(man, 1.2);
-    const anchor = scnNode("anchor"); anchor.position.set(0, 1.25 * KUBO + 0.1, 0);     // 會跟著 man 一起縮
+    const anchor = scnNode("anchor"); anchor.position.set(0, gm ? 0.68 * CHAR_K + 0.3 : 1.25 * KUBO + 0.1, 0);
     man.add(anchor);
     r.add(man);
     OfficeBuilder.pickable(r);
@@ -602,6 +715,11 @@ export class OpenOfficeBuilder extends OfficeBuilder {
   frameRange() { return [0, R + WALL]; }
   /** 一區：框那一區（略俯視） */
   frameZone(id, aspect = this.aspect) {
+    if (id === "b1") {                 // 地下室 B1：鏡頭移到地面以下（sceneview 會切地下室模式）
+      const y = OfficeBasement.baseY + R + 1.2;
+      this.place([0, y, -2.1], 13, 20, 14);
+      return true;
+    }
     const r = this.zoneRect(id);
     if (!r) return false;
     aspect = Math.max(0.4, aspect);
@@ -620,7 +738,7 @@ export class OpenOfficeBuilder extends OfficeBuilder {
   projectFloors() { return []; }
 
   /** 走進去：從前台旁的入口、眼睛高度，看向工位區 */
-  walkStart() { return { pos: [1.2, R + 1.7, 2.65], target: [-3.2, R + 0.55, -3.6] }; }
+  walkStart() { return { pos: [2.3, R + 1.85, 2.7], target: [-2.6, R + 0.5, -3.4] }; }
   get walkBounds() { return { lo: [X0 + 0.4, Z0 + 0.4], hi: [X1 - 0.3, Z1 + 1.5] }; }
 }
 
