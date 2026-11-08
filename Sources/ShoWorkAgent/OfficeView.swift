@@ -418,7 +418,8 @@ struct OfficeView: View {
     /// 工作視窗（11-08 H3）：測試視窗只回報、不開
     private func openWork(_ c: BoardCard) {
         if OfficeDemo.mode != nil || BoardWindow.testMode { onToast("測試：不開工作視窗（\(c.title)）"); return }
-        WorkWindow.show(c.sessionId, cwd: c.cwd)
+        // 卡片上是 Claude 那邊的 id（/clear 之後會換），工作視窗用戰情中心的把手
+        WorkWindow.show(SessionHost.shared.handle(for: c.sessionId) ?? c.sessionId, cwd: c.cwd)
     }
 
     /// 搬進戰情中心：終端機那邊要先結束；搬成功就打開工作視窗

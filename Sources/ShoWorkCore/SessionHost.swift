@@ -32,6 +32,10 @@ public struct OwnedRecord: Codable, Sendable, Equatable {
     public var name: String?
     public var permissionMode: String?
     public var updatedAt: Date
+    /// Claude 那邊現在的 session id：`/clear` 會換一個新的（11-08 實測，串流裡送 conversation_reset 再送新 init）。
+    /// sessionId 是戰情中心這邊固定的把手（owners 的鍵、log 檔名、工作視窗都用它），接回／權限／看板要用 liveId
+    public var currentId: String?
+    public var liveId: String { currentId ?? sessionId }
     public init(sessionId: String, cwd: String, owner: Owner, model: String? = nil, name: String? = nil,
                 permissionMode: String? = nil, updatedAt: Date = Date()) {
         self.sessionId = sessionId; self.cwd = cwd; self.owner = owner; self.model = model; self.name = name
@@ -58,6 +62,10 @@ public final class OwnedSession: @unchecked Sendable {
 
     public let sessionId: String
     public let cwd: String
+    /// Claude 那邊現在的 id（`/clear` 之後會變）
+    public private(set) var liveId: String
+    /// liveId 變了（舊、新）
+    var onRekey: (@Sendable (String, String) -> Void)?
     public private(set) var state: State = .starting
     public private(set) var pid: Int32 = 0
     /// 事件回呼（背景執行緒）；UI 自己切回主執行緒
@@ -72,8 +80,8 @@ public final class OwnedSession: @unchecked Sendable {
     private let log: URL
     private var stderrTail = Data()
 
-    init(sessionId: String, cwd: String, executable: String, args: [String], env: [String: String], log: URL) {
-        self.sessionId = sessionId; self.cwd = cwd; self.log = log
+    init(sessionId: String, liveId: String, cwd: String, executable: String, args: [String], env: [String: String], log: URL) {
+        self.sessionId = sessionId; self.liveId = liveId; self.cwd = cwd; self.log = log
         proc.executableURL = URL(fileURLWithPath: executable)
         proc.arguments = args
         proc.currentDirectoryURL = URL(fileURLWithPath: cwd)
@@ -120,12 +128,16 @@ public final class OwnedSession: @unchecked Sendable {
             append(l)
             guard let e = StreamEvent.parse(l) else { continue }
             lock.lock()
+            var rekey: (String, String)?
             switch e.type {
-            case "system" where e.subtype == "init": if state == .starting { state = .idle }
+            case "system" where e.subtype == "init":
+                if state == .starting { state = .idle }
+                if let id = e.json["session_id"] as? String, !id.isEmpty, id != liveId { rekey = (liveId, id); liveId = id }
             case "result": state = .idle
             default: break
             }
             lock.unlock()
+            if let (a, b) = rekey { onRekey?(a, b) }
             onEvent?(e)
         }
     }
@@ -258,6 +270,18 @@ public final class SessionHost: @unchecked Sendable {
         return nil
     }
 
+    /// 看板卡片上的 id（Claude 那邊的，可能是 /clear 之後的新 id）→ 戰情中心的把手；不是戰情中心持有的就 nil
+    public func handle(for claudeId: String) -> String? {
+        let m = owners()
+        if m[claudeId] != nil { return claudeId }
+        return m.values.first { $0.currentId == claudeId }?.sessionId
+    }
+
+    /// 戰情中心持有（擁有者＝board）的 session 在 Claude 那邊現在的 id（看板放行用）
+    public func boardLiveIds() -> Set<String> { Set(owners().values.filter { $0.owner == .board }.map(\.liveId)) }
+
+    public func liveId(_ sid: String) -> String { session(sid)?.liveId ?? owners()[sid]?.liveId ?? sid }
+
     public func session(_ sid: String) -> OwnedSession? { lock.lock(); defer { lock.unlock() }; return open[sid] }
     public var openSessions: [OwnedSession] { lock.lock(); defer { lock.unlock() }; return Array(open.values) }
 
@@ -271,7 +295,7 @@ public final class SessionHost: @unchecked Sendable {
 
     /// 接回既有的 session（終端機那邊結束後搬進來、agent 重啟後接回）
     public func resume(_ sid: String, cwd: String, model: String? = nil, name: String? = nil, permissionMode: String? = nil) throws -> OwnedSession {
-        if let p = runningElsewhere(sid) { throw SessionHostError.inUse(pid: p) }
+        if let p = runningElsewhere(owners()[sid]?.liveId ?? sid) { throw SessionHostError.inUse(pid: p) }
         return try launch(sid: sid, cwd: cwd, model: model, name: name, permissionMode: permissionMode, resume: true)
     }
 
@@ -290,10 +314,12 @@ public final class SessionHost: @unchecked Sendable {
         if open[sid] != nil { lock.unlock(); throw SessionHostError.alreadyOwned }
         lock.unlock()
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let s = OwnedSession(sessionId: sid, cwd: cwd, executable: executable,
-                             args: args(sid: sid, model: model, name: name, permissionMode: permissionMode, resume: resume),
+        let live = resume ? (owners()[sid]?.liveId ?? sid) : sid
+        let s = OwnedSession(sessionId: sid, liveId: live, cwd: cwd, executable: executable,
+                             args: args(sid: live, model: model, name: name, permissionMode: permissionMode, resume: resume),
                              env: extraEnv, log: logFile(sid))
         s.onExit = { [weak self] _ in self?.exited(sid) }
+        s.onRekey = { [weak self] _, new in self?.rekey(sid, to: new) }
         try s.launch()
         lock.lock()
         open[sid] = s
@@ -306,6 +332,14 @@ public final class SessionHost: @unchecked Sendable {
         m[sid] = r; saveOwners(m)
         lock.unlock()
         return s
+    }
+
+    private func rekey(_ sid: String, to new: String) {
+        lock.lock(); defer { lock.unlock() }
+        var m = owners()
+        guard var r = m[sid] else { return }
+        r.currentId = new == sid ? nil : new; r.updatedAt = Date(); m[sid] = r
+        saveOwners(m)
     }
 
     private func exited(_ sid: String) {
@@ -334,7 +368,7 @@ public final class SessionHost: @unchecked Sendable {
     /// 在終端機接手要打的指令（交棒用；終端機那邊照這行跑）
     public func terminalCommand(_ sid: String) -> String {
         let r = owners()[sid]
-        var c = "cd \(shellQuote(r?.cwd ?? FileManager.default.homeDirectoryForCurrentUser.path)) && claude --resume \(sid)"
+        var c = "cd \(shellQuote(r?.cwd ?? FileManager.default.homeDirectoryForCurrentUser.path)) && claude --resume \(r?.liveId ?? sid)"
         if let m = r?.model { c += " --model \(shellQuote(m))" }
         return c
     }

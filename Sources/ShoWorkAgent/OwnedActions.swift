@@ -45,7 +45,7 @@ enum OwnedActions {
         guard host.release(sid) else { return "戰情中心的程序關不掉，沒有交棒" }
         let r = host.owners()[sid]
         let cwd = r?.cwd ?? FileManager.default.homeDirectoryForCurrentUser.path
-        var cmd = "claude --resume \(sid)"
+        var cmd = "claude --resume \(r?.liveId ?? sid)"
         if let m = r?.model { cmd += " --model \(m)" }
         BoardModel.shared.append(["ev": "own-to-terminal", "id": sid])
         if Script.run(ghosttyScript(cwd: cwd, input: cmd))?.stringValue == "ok" {

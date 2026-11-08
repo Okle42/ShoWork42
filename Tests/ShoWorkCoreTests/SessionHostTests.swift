@@ -13,7 +13,12 @@ def out(o):
 out({"type": "system", "subtype": "init", "session_id": sid, "args": args})
 for line in sys.stdin:
     o = json.loads(line)
-    if o["type"] == "user":
+    if o["type"] == "user" and o["message"]["content"] == "/clear":
+        sid = "cleared-" + sid[:8]
+        out({"type": "conversation_reset"})
+        out({"type": "system", "subtype": "init", "session_id": sid, "args": args})
+        out({"type": "result", "subtype": "success", "session_id": sid, "result": ""})
+    elif o["type"] == "user":
         c = o["message"]["content"]
         out({"type": "assistant", "session_id": sid, "message": {"content": [{"type": "text", "text": "收到：" + (c if isinstance(c, str) else "區塊")}]}})
         out({"type": "result", "subtype": "success", "session_id": sid, "result": "收到"})
@@ -179,5 +184,31 @@ extension SessionHostTests {
         #expect(a.contains("--resume") && a.contains("haiku") && a.contains("acceptEdits"))
         host.release(s2.sessionId)
         #expect(throws: SessionHostError.self) { _ = try host.ensure("no-such") }
+    }
+}
+
+extension SessionHostTests {
+    @Test("/clear 換 id：把手不變；看板、接回、終端機指令改用新 id")
+    func clearRekey() throws {
+        let s = try host.start(cwd: root.path, model: "haiku")
+        let sid = s.sessionId
+        let b = collect(s)
+        #expect(wait(b) { $0.contains { $0.subtype == "init" } })
+        s.send("/clear")
+        let new = "cleared-" + sid.prefix(8)
+        #expect(wait(b) { $0.filter { $0.subtype == "init" }.count == 2 })
+        #expect(s.liveId == new)
+        #expect(host.owners()[sid]?.currentId == new)
+        #expect(host.handle(for: new) == sid && host.handle(for: sid) == sid && host.handle(for: "x") == nil)
+        #expect(host.boardLiveIds() == [new])
+        #expect(host.release(sid))
+        #expect(host.terminalCommand(sid).contains("--resume \(new)"))
+        let s2 = try host.ensure(sid)
+        let b2 = collect(s2)
+        #expect(wait(b2) { $0.contains { $0.subtype == "init" } })
+        let a = b2.xs.first { $0.subtype == "init" }!.json["args"] as! [String]
+        #expect(a.contains(new))
+        #expect(host.logFile(sid).path.hasSuffix(sid + ".jsonl"))
+        host.release(sid)
     }
 }

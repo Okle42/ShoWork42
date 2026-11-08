@@ -146,7 +146,7 @@ final class WorkWindow: NSObject, NSWindowDelegate, WKScriptMessageHandler {
     }
 
     private func permit(_ m: [String: Any]) {
-        guard let id = m["permitId"] as? String, let req = Permit.pending()[sid], req.id == id else { toast("這個對話框已經關了"); return }
+        guard let id = m["permitId"] as? String, let req = Permit.pending()[host.liveId(sid)], req.id == id else { toast("這個對話框已經關了"); return }
         let decision = PermitAnswer.Decision(rawValue: m["decision"] as? String ?? "") ?? .deny
         let answers = (m["answers"] as? [String: [String]])
         let a = PermitAnswer(decision, message: m["message"] as? String, answers: answers)
@@ -166,7 +166,7 @@ final class WorkWindow: NSObject, NSWindowDelegate, WKScriptMessageHandler {
         if st != lastState { lastState = st; push(["type": "state", "state": st]) }
         ticks += 1
         if ticks % 3 == 1 {                                   // 權限請求約每秒看一次（要掃資料夾）
-            let p = Permit.pending()[sid]
+            let p = Permit.pending()[host.liveId(sid)]
             if p?.id != lastPermit { lastPermit = p?.id; push(["type": "permit", "req": p.map(permitJSON) ?? NSNull()]) }
         }
     }

@@ -484,7 +484,7 @@ final class BoardModel: ObservableObject {
         var cards = Board.build(sessions: s.sessions, transcripts: s.transcripts, glows: s.glows, teams: s.teams,
                                 inbox: s.inbox, reports: s.reports, reviews: s.reviews, decisions: s.decisions,
                                 contexts: s.contexts, nicknames: s.nicknames,
-                                owned: Set(SessionHost.shared.owners().filter { $0.value.owner == .board }.keys),
+                                owned: SessionHost.shared.boardLiveIds(),
                                 now: Date(), home: BoardPaths.home,
                                 isRepo: { fm.fileExists(atPath: $0 + "/.git") })
         for i in cards.indices where !cards[i].id.contains("#") {
