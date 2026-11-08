@@ -437,15 +437,15 @@ export class OpenOfficeBuilder extends OfficeBuilder {
       n.position.set(-HW + 0.12, ELEV.doorH + 0.15, (ELEV.zs[0] + ELEV.zs[1]) / 2); n.rotation.y = Math.PI / 2;
       signs.add(n);
     }
-    // 電梯玻璃滑門（每座兩片，沿 z 滑開；開幾成照 this.elevs[c].k）
-    const doorGlass = mat(0xBFE6F2, { opacity: 0.35, rough: 0.05 });
+    // 電梯滑門（每座兩片，沿 z 滑開；開幾成照 this.elevs[c].k）
+    // 11-09 使用者：玻璃門透出車廂發光柱＋門邊燈條，一堆青線疊在一起很亂 → 改成不鏽鋼門片，中縫一條暗線
+    const doorSteel = mat(0xB9C0C7, { metal: 0.55, rough: 0.3 }), seamM = mat(0x2E3136, { rough: 0.6 });
     this.elevDoorNodes = ELEV.zs.map(z => {
       const pair = [1, -1].map(side => {
         const g = scnNode("edoor"), w = ELEV.halfGap;
-        const glass = new THREE.Mesh(new THREE.BoxGeometry(0.04, ELEV.doorH - 0.04, w - 0.02), doorGlass); glass.position.y = ELEV.doorH / 2; glass.renderOrder = 10;
-        const edge = new THREE.Mesh(new THREE.BoxGeometry(0.05, ELEV.doorH - 0.04, 0.03), ledM); edge.position.set(0, ELEV.doorH / 2, -side * (w / 2 - 0.02));
-        const top = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.05, w), steelM); top.position.y = ELEV.doorH - 0.05;
-        g.add(glass, edge, top);
+        const panel = new THREE.Mesh(new THREE.BoxGeometry(0.04, ELEV.doorH - 0.02, w - 0.01), doorSteel); panel.position.y = (ELEV.doorH - 0.02) / 2; panel.castShadow = true;
+        const seam = new THREE.Mesh(new THREE.BoxGeometry(0.046, ELEV.doorH - 0.02, 0.012), seamM); seam.position.set(0, (ELEV.doorH - 0.02) / 2, -side * (w / 2 - 0.006));
+        g.add(panel, seam);
         root.add(g);
         return { g, side };
       });
