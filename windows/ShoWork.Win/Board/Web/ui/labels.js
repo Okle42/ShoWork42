@@ -120,6 +120,7 @@ export class OfficeLabels {
     const text = new Map();
     let fixed = [];
     for (const f of floors) {
+      if (f.kind === "open") continue;          // 11-08 H5 單層開放式辦公室：沒有樓層名（區域名稱貼在地上）
       // 10-21 稽核：整棟在畫面左邊外面時，「沿樓板前緣取畫面左緣那一點」會外插出一個假的點 ⇒ 右角也要在畫面裡
       const g = geo.get(f.id);
       if (!(g && g.front && g.tl.z > 0 && g.tl.z < 1 && g.tr.x > 60 && g.tl.x < W - 40)) continue;
@@ -161,7 +162,9 @@ export class OfficeLabels {
       const fid = wp.y < -0.5 ? "b1" : floors.find(f => { const g = geo.get(f.id); return g ? wp.y >= g.y0 && wp.y < g.y1 : false; })?.id ?? s.floor;
       let ceil = Infinity, bottom = -Infinity, floorPx = 999;
       const g = geo.get(fid);
-      if (g) {
+      if (g && floors.find(f => f.id === fid)?.kind === "open") {
+        floorPx = 999;                           // 單層開放式辦公室：名牌不受天花／地坪限制（走進去時樓板角落會在鏡頭後面）
+      } else if (g) {
         const [ex, ez] = edge(wp);
         const c = P([ex, g.y1, ez]), b = P([ex, g.y0 + TD.room, ez]);
         ceil = c.y + 3; bottom = b.y + 2;      // 評審上限：天花 +4 pt

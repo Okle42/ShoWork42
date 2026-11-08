@@ -224,3 +224,12 @@ label.switch input:checked + i::after { left: 12.5px; }
 .chat-handle { height: 9px; display: flex; align-items: center; justify-content: center; cursor: ns-resize; }
 .chat-handle i { width: 36px; height: 4px; border-radius: 2px; background: rgba(142, 142, 147, .35); }
 textarea.chat { display: block; width: 100%; font-size: 13px; line-height: 16px; padding: 4px 6px; background: rgba(30, 30, 30, .9); border-color: rgba(255, 255, 255, .15); }
+
+/* 11-08 H5 單層開放式辦公室：3D 區域左上的分頁（總覽／走進去＋各區） */
+#zoneTabs { position: absolute; left: 10px; top: 10px; right: 10px; z-index: 4; display: flex; flex-wrap: wrap; gap: 6px; pointer-events: none; }
+#zoneTabs .ztab { pointer-events: auto; display: inline-flex; align-items: center; gap: 6px; padding: 4px 11px; border-radius: 99px; border: 1px solid var(--sep);
+                  background: rgba(30, 30, 32, .82); color: var(--primary); font-size: 12px; cursor: pointer; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+#zoneTabs .ztab:hover { background: rgba(60, 60, 64, .9); }
+#zoneTabs .ztab.on { background: var(--accent); border-color: transparent; color: #fff; }
+#zoneTabs .ztab i { width: 8px; height: 8px; border-radius: 4px; display: inline-block; }
+#zoneTabs .zsep { width: 1px; align-self: stretch; background: var(--sep); margin: 2px 2px; }

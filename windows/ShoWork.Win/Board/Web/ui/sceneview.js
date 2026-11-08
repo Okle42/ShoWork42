@@ -19,6 +19,7 @@
 import * as THREE from "three";
 import { ScnPost, category } from "../kit.js";
 import { OfficeBuilder } from "../scene/builder.js";
+import { OpenOfficeBuilder } from "../scene/openoffice.js";
 import { SCNTransaction } from "../scene/actions.js";
 import { OfficeStyleFX } from "../scene/stylefx.js";
 import { OfficeLabels } from "./labels.js";
@@ -47,7 +48,11 @@ export class OfficeSCNView {
     this.canvas.tabIndex = 0;            // acceptsFirstResponder：WASD 要收得到
     host.appendChild(this.canvas);
     this.post = new ScnPost(this.renderer);
-    this.builder = new OfficeBuilder({ aspect: 1.6 });
+    this.builder = new OpenOfficeBuilder({ aspect: 1.6 });        // 11-08 H5：單層開放式辦公室（大樓剖面 OfficeBuilder 留作基底）
+    this.builder.onAssets = () => this.playFor(0.3);
+    this.builder.onLayout = () => this.renderTabs();
+    this.mode = "overview";            // 總覽（繞著轉）／walk（走進去：第一人稱，拖曳＝轉頭、WASD＝走）
+    this.installTabs();
     this.patchOrtho(this.builder.camera);
     this.builder.onOrtho = d => this.setOrthoScale(OfficeStyleFX.orthoScale(d));
     this.labels = new OfficeLabels(labelsHost);
@@ -370,6 +375,7 @@ export class OfficeSCNView {
 
   /** 轉（orbitTurntable）：水平繞世界 Y、垂直改仰角（maximumVerticalAngle 55）。度 */
   rotate(dAz, dEl) {
+    if (this.mode === "walk") { this.look(-dAz, -dEl); return; }
     const t = this.target, v = sub(this.povPos, t);
     const r = len(v);
     if (r < 0.001) return;
@@ -379,6 +385,79 @@ export class OfficeSCNView {
     const pos = [t[0] + r * Math.cos(el) * Math.sin(az), t[1] + r * Math.sin(el), t[2] + r * Math.cos(el) * Math.cos(az)];
     this.setPov(pos, this.lookQuat(pos, t));
   }
+  /** 走進去：轉頭（鏡頭不動、看的方向轉）。度；仰俯夾在 ±60° */
+  look(dAz, dEl) {
+    const p = this.povPos, v = sub(this.target, p);
+    const r = Math.max(0.5, len(v));
+    let az = Math.atan2(v[0], v[2]), el = Math.asin(Math.max(-1, Math.min(1, v[1] / r)));
+    az += dAz * Math.PI / 180;
+    el = Math.max(-60 * Math.PI / 180, Math.min(60 * Math.PI / 180, el + dEl * Math.PI / 180));
+    const t = [p[0] + r * Math.cos(el) * Math.sin(az), p[1] + r * Math.sin(el), p[2] + r * Math.cos(el) * Math.cos(az)];
+    this.target = t;
+    this.setPov(p, this.lookQuat(p, t));
+  }
+
+  // MARK: 總覽／走進去、各區分頁（11-08 H5）
+
+  setMode(m) {
+    this.mode = m;
+    this.stopSpin();
+    if (m === "walk") {
+      const w = this.builder.walkStart?.();
+      if (!w) { this.mode = "overview"; return; }
+      SCNTransaction.begin(); SCNTransaction.animationDuration = this.testMode ? 0 : 0.8;
+      SCNTransaction.position(this.cam, w.pos);
+      SCNTransaction.quaternion(this.cam, this.lookQuat(w.pos, w.target));
+      SCNTransaction.commit();
+      this.cam.userData.modelPos = w.pos.slice();
+      this.target = w.target;
+      this.userMoved = true;
+      this.canvas.focus({ preventScroll: true });
+    } else {
+      this.userMoved = false; this.framed = false; this.frameIfNeeded();
+    }
+    this.renderTabs();
+    this.camMoved(0.9);
+  }
+
+  installTabs() {
+    const wrap = this.host.parentElement;
+    if (!wrap) return;
+    const bar = document.createElement("div");
+    bar.id = "zoneTabs";
+    wrap.appendChild(bar);
+    this.tabsEl = bar;
+    this.renderTabs();
+  }
+
+  renderTabs() {
+    const bar = this.tabsEl;
+    if (!bar) return;
+    const zones = this.builder.zones?.() ?? [];
+    bar.innerHTML = "";
+    const btn = (text, on, f, dot = null, title = "") => {
+      const b = document.createElement("button");
+      b.className = "ztab" + (on ? " on" : "");
+      if (dot !== null) { const i = document.createElement("i"); i.style.background = "#" + dot.toString(16).padStart(6, "0"); b.appendChild(i); }
+      b.appendChild(document.createTextNode(text));
+      if (title) b.title = title;
+      b.onclick = e => { e.stopPropagation(); f(); };
+      bar.appendChild(b);
+      return b;
+    };
+    btn("總覽", this.mode === "overview" && !this.zoneOn, () => { this.zoneOn = null; this.setMode("overview"); }, null, "從上面看整層");
+    btn("走進去", this.mode === "walk", () => { this.zoneOn = null; this.setMode("walk"); }, null, "第一人稱：拖曳轉頭、WASD 走、滾輪前後");
+    const sep = document.createElement("span"); sep.className = "zsep"; bar.appendChild(sep);
+    for (const z of zones) btn(z.title, this.zoneOn === z.id, () => this.goZone(z.id), z.accent ?? null);
+  }
+
+  goZone(id) {
+    this.zoneOn = id;
+    this.mode = "overview";
+    if (this.builder.frameZone?.(id, this.aspect)) { this.userMoved = true; this.camMoved(0.9); }
+    this.renderTabs();
+  }
+
   stopSpin() { this.spin = null; }
   stepSpin(dt) {
     const s = this.spin;
@@ -393,6 +472,7 @@ export class OfficeSCNView {
   /** 滾輪＝放大縮小：沿著鏡頭→轉軸那條線拉近拉遠 */
   scrollWheel(dy) {
     this.userMoved = true;
+    if (this.mode === "walk") { this.walk([0, 0, dy * 6]); return; }
     if (dy === 0) { this.checkUnderground(); return; }
     const t = this.target, p = this.povPos, v = sub(p, t);
     const dist = len(v);
@@ -422,7 +502,35 @@ export class OfficeSCNView {
   }
 
   /** WASD／方向鍵：在地面上走（鏡頭跟轉軸一起平移）；Q／E 升降 */
+  /** 走進去：沿地面走（不升降），夾在辦公室裡。d＝[右, 0, 前]（公尺） */
+  walk(d) {
+    const fw = new THREE.Vector3(0, 0, -1).applyQuaternion(this.cam.quaternion);
+    let f = [fw.x, 0, fw.z];
+    const fl = Math.max(0.001, Math.hypot(f[0], f[2])); f = [f[0] / fl, 0, f[2] / fl];
+    const r = [-f[2], 0, f[0]];
+    const p = this.povPos, b = this.builder.walkBounds;
+    let nx = p[0] + r[0] * d[0] + f[0] * d[2], nz = p[2] + r[2] * d[0] + f[2] * d[2];
+    if (b) { nx = Math.min(Math.max(nx, b.lo[0]), b.hi[0]); nz = Math.min(Math.max(nz, b.lo[1]), b.hi[1]); }
+    const delta = [nx - p[0], 0, nz - p[2]];
+    const pos = [nx, p[1], nz];
+    SCNTransaction.begin(); SCNTransaction.animationDuration = 0.12;
+    SCNTransaction.position(this.cam, pos);
+    SCNTransaction.commit();
+    this.cam.userData.modelPos = pos;
+    this.target = add(this.target, delta);
+    this.camMoved(0.25);
+  }
+
   keyDown(e) {
+    if (this.mode === "walk") {
+      const st = e.shiftKey ? 1.2 : 0.5;
+      const m = { w: [0, 0, st], arrowup: [0, 0, st], s: [0, 0, -st], arrowdown: [0, 0, -st], a: [-st, 0, 0], d: [st, 0, 0] }[e.key.toLowerCase()];
+      if (m) { this.userMoved = true; this.walk(m); return true; }
+      if (e.key === "ArrowLeft") { this.look(6, 0); this.camMoved(0.2); return true; }
+      if (e.key === "ArrowRight") { this.look(-6, 0); this.camMoved(0.2); return true; }
+      if (e.key === "Escape") { this.setMode("overview"); return true; }
+      return false;
+    }
     const step = e.shiftKey ? 2.4 : 1.0;
     const fw = new THREE.Vector3(0, 0, -1).applyQuaternion(this.cam.quaternion);
     let f = [fw.x, 0, fw.z];
@@ -570,7 +678,7 @@ export class OfficeSCNView {
         if (d.moved && d.samples.length > 1) {
           const t0 = d.samples[0][0], t1 = performance.now(), T = Math.max(16, t1 - t0) / 1000;
           const vx = d.samples.reduce((a, s) => a + s[1], 0) / T, vy = d.samples.reduce((a, s) => a + s[2], 0) / T;
-          if (Math.hypot(vx, vy) > 20) { this.spin = { vx: vx * 0.5, vy: vy * 0.5 }; this.refreshPlaying(); }
+          if (Math.hypot(vx, vy) > 20 && this.mode !== "walk") { this.spin = { vx: vx * 0.5, vy: vy * 0.5 }; this.refreshPlaying(); }
         }
         // 拖曳是轉視角，不算點
         if (!d.moved) {
