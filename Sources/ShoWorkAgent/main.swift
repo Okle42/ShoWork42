@@ -228,6 +228,15 @@ if argv.count == 5, argv[1] == "--work-snap" {
     NSApplication.shared.run()
 }
 
+// Test: ShoWorkAgent --office-web-snap <輸出.png> [demo]  → 3D 辦公大樓 Web 版（OfficeWebHost，WKWebView 載 office.html）開在螢幕外、不搶焦點；
+//       demo＝office.html?demo=1（網頁自己讀 bench/mac-input.json），否則推真的 BoardModel 資料（動作一律不送出、設定不寫回）。
+//       網頁 ready 後等 SHOWORK_SNAP_WAIT 秒（預設 6，WebGL 要畫好）截圖，印出網頁收到幾張卡、推了幾次 office2。
+//       WebGL canvas 另外用 toDataURL（?test=1 時 preserveDrawingBuffer）取回，墊在網頁截圖底下
+if argv.count >= 3, argv[1] == "--office-web-snap" {
+    MainActor.assumeIsolated { OfficeWebSnap.run(out: argv[2], demo: argv.count >= 4 && argv[3] == "demo") }
+    NSApplication.shared.run()
+}
+
 // Test: ShoWorkAgent --board-window  → 只開戰情中心視窗（不開 socket、不發光、不需要輔助使用權限）
 if argv.count == 2, argv[1] == "--board-window" {
     MainActor.assumeIsolated {

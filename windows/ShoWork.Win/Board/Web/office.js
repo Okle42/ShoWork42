@@ -27,7 +27,15 @@ const OfficeMemory = (() => {
 })();
 
 const params = new URLSearchParams(location.search);
-const host = window.chrome?.webview ?? null;
+// 原生端橋接：Windows WebView2 的 chrome.webview；Mac WKWebView（OfficeWebHost.swift）退回 webkit.messageHandlers.sw，原生端呼叫 window.swRecv(obj)。
+// Mac 拖進來的 File 沒有路徑：路徑由原生端的 WKWebView 子類先記下，這裡只送 key（files 不用傳），原生端回 dropPaths。
+const swListeners = [];
+const host = window.chrome?.webview ?? (window.webkit?.messageHandlers?.sw ? {
+  postMessage: m => window.webkit.messageHandlers.sw.postMessage(m),
+  postMessageWithAdditionalObjects: m => window.webkit.messageHandlers.sw.postMessage(m),
+  addEventListener: (_, f) => swListeners.push(f),
+} : null);
+window.swRecv = obj => swListeners.forEach(f => f({ data: obj }));
 const demoMode = params.has("demo") ? "all" : null;      // OfficeDemo.mode
 const prefs = {
   get: (k, d) => { const v = localStorage.getItem("office." + k); return v === null ? d : JSON.parse(v); },
