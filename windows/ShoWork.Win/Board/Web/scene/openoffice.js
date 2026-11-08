@@ -388,7 +388,16 @@ export class OpenOfficeBuilder extends OfficeBuilder {
       x = g1;
     }
     b.box(HW - x, WALL, 0.16, (x + HW) / 2, 0, cw, wallM);
-    for (const [dx] of Object.values(Plan.doors)) b.add("door", dx - 0.15, cw + 0.42, 1.2, 0, { blob: false });
+    // 房間門（11-09 使用者：門不會動）：門軸在門洞左緣，有人走近就往房間裡推開，走過去關上
+    this.roomDoors = Object.values(Plan.doors).map(([dx, w]) => {
+      const pivot = scnNode("room-door"); pivot.position.set(dx - w / 2, 0, cw);
+      for (const [g, m] of Props.parts("door")) {
+        const n = new THREE.Mesh(g.clone(), m); n.scale.x = w / PROPS.door.size[0]; n.position.x = w / 2; n.castShadow = true;
+        pivot.add(n);
+      }
+      root.add(pivot);
+      return { pivot, x: dx, z: cw, ang: 0 };
+    });
     for (const wx of [-4.5, 1.5, 8]) wallRun(wx, -HD, wx, cw, WALL, wx === 8 ? mat(0xC9CED2) : wallM, 0.14);
     b.box(0.35, 1.1, 5.0, 3.5, 0, 0.2, mat(0x7A5233));                // 工作區／休息區之間的矮櫃
     b.box(0.4, 0.04, 5.0, 3.5, 1.1, 0.2, mat(0xD8B48A));
@@ -635,6 +644,7 @@ export class OpenOfficeBuilder extends OfficeBuilder {
     }
     this.wander(dt);
     this.animateElevators(dt);
+    this.animateRoomDoors(dt);
   }
 
   // MARK: 行程（走路、停一下、搭電梯）
@@ -747,6 +757,20 @@ export class OpenOfficeBuilder extends OfficeBuilder {
     ] };
   }
 
+  /** 房間門：1.4 公尺內有人在走路就推開（0.5 秒），沒人就關 */
+  animateRoomDoors(dt) {
+    if (!this.roomDoors?.length) return;
+    const walkers = [];
+    for (const [id, c] of this.bodies) if (c.trip?.steps[c.trip.i]?.k === "walk") { const n = this.persons.get(id)?.node; if (n) walkers.push(n.position); }
+    for (const d of this.roomDoors) {
+      const want = walkers.some(p => Math.hypot(p.x - d.x, p.z - d.z) < 1.4) ? 1.45 : 0;
+      if (d.ang === want) continue;
+      const sp = dt * 1.45 / 0.5;
+      d.ang = want > d.ang ? Math.min(want, d.ang + sp) : Math.max(want, d.ang - sp);
+      d.pivot.rotation.y = d.ang;
+    }
+  }
+
   /** 電梯門：一樓玻璃門、B1 的門照目標開關（0.6 秒滑完） */
   animateElevators(dt) {
     const sp = dt / 0.6;
@@ -790,6 +814,7 @@ export class OpenOfficeBuilder extends OfficeBuilder {
     for (const [id, c] of this.bodies) { const node = this.persons.get(id)?.node; if (c.trip) { this.cancelTrip(c, node); if (node) this.goHome(c, node); } }
     this.elevs.forEach((e, c) => { e.k = e.target = 0; e.b1Target = 0; this.cars[c].position.y = R; });
     this.poseElevDoors();
+    for (const d of this.roomDoors ?? []) { d.ang = 0; d.pivot.rotation.y = 0; }
   }
   snapTravelers() {}
   parkCars() {}
