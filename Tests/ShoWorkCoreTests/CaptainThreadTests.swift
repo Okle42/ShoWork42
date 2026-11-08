@@ -40,11 +40,11 @@ struct CaptainThreadTests {
     @Test("舊的「巡檢無變化」與隊長的空回覆不上面板；有變化的巡檢照留")
     func noopPatrol() {
         let lines = [
-            #"{"type":"user","uuid":"p1","origin":{"kind":"peer","name":"AI工作戰情中心（巡檢）","body":"【巡檢時間】無變化（在線 6 人，跟上次一樣）"},"message":{"role":"user","content":"x"}}"#,
+            #"{"type":"user","uuid":"p1","isMeta":true,"origin":{"kind":"peer","name":"AI工作戰情中心（巡檢）","body":"【巡檢時間】無變化（在線 6 人，跟上次一樣）"},"message":{"role":"user","content":"x"}}"#,
             #"{"type":"assistant","uuid":"a1","message":{"stop_reason":"end_turn","content":[{"type":"text","text":"巡檢無變化,沒有動作。"}]}}"#,
             #"{"type":"user","uuid":"p2","origin":{"kind":"peer","name":"AI工作戰情中心（巡檢）","body":"【巡檢時間】在線 6 人（不含隊長）"},"message":{"role":"user","content":"x"}}"#,
             #"{"type":"assistant","uuid":"a2","message":{"stop_reason":"end_turn","content":[{"type":"text","text":"Chris 閒置太久，先不動"}]}}"#,
-            #"{"type":"user","uuid":"p3","origin":{"kind":"peer","name":"AI工作戰情中心（巡檢）","body":"【巡檢時間】無變化（在線 6 人，跟上次一樣）"},"message":{"role":"user","content":"x"}}"#,
+            #"{"type":"user","uuid":"p3","isMeta":true,"origin":{"kind":"peer","name":"AI工作戰情中心（巡檢）","body":"【巡檢時間】無變化（在線 6 人，跟上次一樣）"},"message":{"role":"user","content":"x"}}"#,
             #"{"type":"user","uuid":"u1","origin":{"kind":"human"},"message":{"role":"user","content":"進度？"}}"#,
             #"{"type":"assistant","uuid":"a3","message":{"stop_reason":"end_turn","content":[{"type":"text","text":"無變化"}]}}"#,
         ].joined(separator: "\n")
