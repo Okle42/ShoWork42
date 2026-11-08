@@ -312,6 +312,15 @@ public final class SessionHost: @unchecked Sendable {
         lock.lock(); open[sid] = nil; lock.unlock()
     }
 
+    /// 要送話時用：開著就回傳；終端機那邊在跑就丟 inUse；不然照紀錄（cwd、模型、權限模式）接回來。
+    /// 交棒回來不用另外按：終端機結束後，在戰情中心送話就自動接回（11-08 lazy：agent 重啟也不先全部開起來）
+    public func ensure(_ sid: String, cwd fallback: String? = nil) throws -> OwnedSession {
+        if let s = session(sid) { return s }
+        let r = owners()[sid]
+        guard let cwd = r?.cwd ?? fallback else { throw SessionHostError.launch("不知道這個 session 在哪個資料夾") }
+        return try resume(sid, cwd: cwd, model: r?.model, permissionMode: r?.permissionMode)
+    }
+
     /// 放手（交棒給終端機前）：關掉程序並等它結束；紀錄改成 terminal
     @discardableResult
     public func release(_ sid: String, to owner: OwnedRecord.Owner = .terminal, timeout: TimeInterval = 15) -> Bool {

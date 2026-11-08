@@ -164,3 +164,20 @@ struct OwnedOnBoardTests {
         #expect(cards.first?.kind == "board")
     }
 }
+
+extension SessionHostTests {
+    @Test("ensure：開著就同一個；放手後自動照紀錄接回（模型沿用）；終端機在跑就擋")
+    func ensure() throws {
+        let s = try host.start(cwd: root.path, model: "haiku", permissionMode: "acceptEdits")
+        #expect(try host.ensure(s.sessionId) === s)
+        #expect(host.release(s.sessionId))
+        let s2 = try host.ensure(s.sessionId)
+        #expect(s2 !== s)
+        let b = collect(s2)
+        #expect(wait(b) { $0.contains { $0.subtype == "init" } })
+        let a = b.xs.first { $0.subtype == "init" }!.json["args"] as! [String]
+        #expect(a.contains("--resume") && a.contains("haiku") && a.contains("acceptEdits"))
+        host.release(s2.sessionId)
+        #expect(throws: SessionHostError.self) { _ = try host.ensure("no-such") }
+    }
+}
