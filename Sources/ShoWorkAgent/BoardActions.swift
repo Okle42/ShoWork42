@@ -284,10 +284,10 @@ enum BoardActions {
         return (sock, String(pane))
     }
 
-    /// 跳到那個 AI 的終端機視窗（光暈引擎知道它在哪）
+    /// 跳到那個 AI 的終端機視窗（光暈引擎知道它在哪；不知道就照它的 tty 現找）
     @discardableResult
     static func focus(pid: Int32) -> Bool {
-        guard let p = Engine.current?.tabs.values.first(where: { $0.agentPID == pid })?.placements.first,
+        guard let p = Engine.current?.placement(forPID: pid),
               let el = AXQuery.element(pid: p.pid, wid: p.wid) else { return false }
         NSRunningApplication(processIdentifier: p.pid)?.activate()
         AXUIElementPerformAction(el, kAXRaiseAction as CFString)

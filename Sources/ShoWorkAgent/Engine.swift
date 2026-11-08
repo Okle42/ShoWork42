@@ -32,6 +32,14 @@ final class Engine {
         render()
     }
 
+    /// 戰情中心「跳到它的視窗」：先看光暈記得的位置；閒著的 AI 重啟後不會 restore（只 restore 工作中的），
+    /// 11-09 使用者 點 Chris 沒反應 → 記不得就照 claude 行程的 tty 現找一次
+    func placement(forPID pid: pid_t) -> Placement? {
+        if let p = tabs.values.first(where: { $0.agentPID == pid })?.placements.first(where: { WindowList.exists($0.wid) }) { return p }
+        guard let tty = HandoverClear.tty(of: pid) else { return nil }
+        return resolver.placements(for: tty, refresh: true).first
+    }
+
     /// 戰情中心要找 AI 的視窗時用（只有正式 agent 有 Engine）
     static weak var current: Engine?
 
