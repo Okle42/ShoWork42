@@ -5,12 +5,12 @@ import Testing
 /// 假的 claude（串流模式）：讀 stdin 每一行；user ⇒ 回 assistant＋result；control_request ⇒ 回 control_response。不連網、不碰真的 claude
 private let fakeClaude = """
 #!/usr/bin/python3 -I
-import sys, json
+import sys, json, os
 args = sys.argv[1:]
 sid = args[args.index("--resume") + 1] if "--resume" in args else args[args.index("--session-id") + 1]
 def out(o):
     sys.stdout.write(json.dumps(o, ensure_ascii=False) + "\\n"); sys.stdout.flush()
-out({"type": "system", "subtype": "init", "session_id": sid, "args": args})
+out({"type": "system", "subtype": "init", "session_id": sid, "args": args, "owned": os.environ.get("SHOWORK_OWNED"), "reviewer": os.environ.get("SHOWORK_REVIEWER")})
 for line in sys.stdin:
     o = json.loads(line)
     if o["type"] == "user" and o["message"]["content"] == "/clear":
@@ -62,6 +62,9 @@ struct SessionHostTests {
         let init0 = b.xs.first { $0.subtype == "init" }!.json["args"] as! [String]
         #expect(init0.contains("--session-id") && !init0.contains("--resume"))
         #expect(init0.contains("haiku") && init0.contains("測試員"))
+        // showork 的 hooks 靠這個才不把它當審核員略過（權限進收件匣、自報、狀態）
+        #expect(b.xs.first { $0.subtype == "init" }!.json["owned"] as? String == "1")
+        #expect(b.xs.first { $0.subtype == "init" }!.json["reviewer"] is NSNull)
         let log = try String(contentsOf: host.logFile(s.sessionId), encoding: .utf8)
         #expect(log.contains("\"_sent\"") && log.contains("你好") && log.contains("收到：你好"))
         #expect(host.owners()[s.sessionId]?.owner == .board)

@@ -30,8 +30,11 @@ nonisolated(unsafe) var permitReqPath: UnsafePointer<CChar>?   // SIGTERM 時刪
 // 戰情中心：`showork brief`（SessionStart hook 印給 AI 的說明）、`showork card …`（AI 每輪的自報）
 // 審核員自己（SHOWORK_REVIEWER=1）不參與，免得審核也上看板、也被要求自報。
 // `claude -p` 這類無頭呼叫（審核員、其他自動化腳本叫的無頭 Claude⋯）CLAUDE_CODE_ENTRYPOINT 是 sdk-*，不上看板也不用自報
+// 例外：戰情中心自己持有的 session（11-08 SessionHost，啟動時帶 SHOWORK_OWNED=1）也是 sdk-cli，但它就是使用者的工作，
+// 權限要進收件匣（不然 -p 模式直接被拒）、要自報、要亮狀態
 let isReviewer = ProcessInfo.processInfo.environment["SHOWORK_REVIEWER"] != nil
-    || (ProcessInfo.processInfo.environment["CLAUDE_CODE_ENTRYPOINT"] ?? "").hasPrefix("sdk")
+    || ((ProcessInfo.processInfo.environment["CLAUDE_CODE_ENTRYPOINT"] ?? "").hasPrefix("sdk")
+        && ProcessInfo.processInfo.environment["SHOWORK_OWNED"] == nil)
 if args.first == "brief" {
     if !isReviewer {
         var sid = ProcessInfo.processInfo.environment["CLAUDE_CODE_SESSION_ID"].flatMap { $0.isEmpty ? nil : $0 }
@@ -324,7 +327,8 @@ if args.first == "permit" {
 if args.first == "names" {
     let names = NicknameStore.all()
     let rows = NicknameStore.liveSessions().sorted { (names[$0.sessionId]?.name ?? "~") < (names[$1.sessionId]?.name ?? "~") }
-    for r in rows where r.entrypoint != "sdk-cli" {
+    let owned = SessionHost.shared.boardLiveIds()     // 戰情中心持有的 sdk-cli session 也列
+    for r in rows where r.entrypoint != "sdk-cli" || owned.contains(r.sessionId) {
         let n = names[r.sessionId]
         print("\(n?.name ?? "（還沒取名）")\t\(r.name ?? "-")\t\(n?.doing ?? "（還沒報任務）")")
     }

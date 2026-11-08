@@ -67,3 +67,12 @@
 - 斜線指令：先做 `/compact`、`/clear`（送字串，串流模式下會照常處理的先實測）、`/model`（改走 set_model）。
 - 入口：戰情中心「新任務」改成開 SessionHost session 並打開工作視窗；點 kind == "board" 的卡片＝打開工作視窗；
   非 board 的卡片多一個「搬進戰情中心」。
+
+## 11-08 收尾實測（真 claude、haiku）
+
+- `/compact`：id 不變，串流出 `system/compact_boundary`，壓縮後還記得前文。
+- `/clear`：串流出 `conversation_reset`，再出新的 `init`，**session id 會換成新的**。
+  SessionHost 的把手固定用原本的 id，新的記在 `OwnedRecord.currentId`；接回、權限、看板、終端機指令一律用 `liveId`。
+- 權限：原本 `showork` 的 hooks 會把所有 `sdk-*`（claude -p）都當成審核員直接略過，所以權限不會進收件匣，在 -p 模式下等於直接被拒。
+  修法：SessionHost 啟動時帶 `SHOWORK_OWNED=1`，hooks 看到就照常處理。
+  實測用真的 `showork permit` 加上隔離的 home（`CFFIXED_USER_HOME`），結果：允許時檔案寫成、拒絕時沒寫、真的收件匣沒被碰到。

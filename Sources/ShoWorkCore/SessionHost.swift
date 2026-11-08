@@ -86,6 +86,8 @@ public final class OwnedSession: @unchecked Sendable {
         proc.arguments = args
         proc.currentDirectoryURL = URL(fileURLWithPath: cwd)
         var e = ProcessInfo.processInfo.environment
+        e["SHOWORK_OWNED"] = "1"        // showork 的 hooks 看到這個才不把它當審核員略過（權限進收件匣、自報、狀態）
+        e["SHOWORK_REVIEWER"] = nil
         for (k, v) in env { e[k] = v }
         proc.environment = e
         proc.standardInput = stdin; proc.standardOutput = stdout; proc.standardError = stderr
