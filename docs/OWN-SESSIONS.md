@@ -1,0 +1,37 @@
+# 戰情中心自己持有 session（脫離終端機）
+
+目標：使用者在戰情中心裡就能完成所有工作，不必切到終端機。
+架構（11-08 使用者拍板「A＋交棒」）：
+
+- **平常**：戰情中心直接持有 session。用 Claude Code 官方串流模式
+  `claude -p --input-format stream-json --output-format stream-json --verbose`，stdin 一直開著，
+  一個 session 一個長駐程序。對話、工具過程、權限、中斷都是第一手資料。
+- **交棒**：同一個 session 可以在戰情中心和終端機之間換手（兩邊共用同一份對話紀錄，`--resume <id>`）。
+  - 「在終端機打開」：戰情中心先關掉自己的程序，再開終端機跑 `claude --resume <id>`。
+  - 「搬進戰情中心」：終端機那邊結束後，戰情中心用 `--resume <id>` 接回（舊 session 也能這樣搬進來）。
+  - 同一個 session 同一時間只能有一邊在跑（鎖）。
+
+## Step 0 實測（11-08，haiku，背景 tmux、不開視窗）
+
+| 項目 | 結果 |
+|---|---|
+| 長駐程序連續多回合 | ✅ 記得前一回合 |
+| 中斷：stdin 送 `{"type":"control_request","request_id":…,"request":{"subtype":"interrupt"}}` | ✅ 回 `control_response` success；該回合 `result` 是 `error_during_execution`；程序還活著，下一回合正常 |
+| 權限：`--permission-mode default` 下用 Write | ✅ `PermissionRequest` hook 照常被呼叫（`tool_name: Write`），回 allow 後檔案寫成 ⇒ 現有 `showork permit` 收件匣流程不用改 |
+| 交棒到終端機：`claude --resume <id>` 互動模式 | ✅ 畫面上有之前的對話，問暗號答對 |
+| 終端機放手後再接回串流模式 | ✅ 記得終端機裡最後一句，session id 不變 |
+
+## 分階段
+
+| 階段 | 內容 | 驗收 |
+|---|---|---|
+| H1 | `SessionHost`（ShoWorkCore）：開／接回／送訊息／中斷／關閉；事件寫進 `board/sessions/<sid>.jsonl`；擁有者紀錄（board／terminal）＋鎖 | 單元測試用假 claude（不准真的呼叫）；e2e 用 haiku 一次 |
+| H2 | 交棒：在終端機打開（Ghostty 開新視窗跑 `claude --resume`）／搬進戰情中心（偵測終端機那邊結束） | 實測兩個方向各 3 次 |
+| H3 | 工作視窗（網頁，Mac WKWebView／Windows WebView2 共用）：對話流、工具呼叫摺疊、diff、輸入框（多行、拖檔、貼圖）、中斷、模型、`/compact` 等指令、權限卡內嵌 | 真瀏覽器截圖驗 |
+| H4 | 「新任務」「交給隊長」改走 SessionHost（取代 `claude --bg`） | 從戰情中心開一個任務做到完成，全程不碰終端機 |
+| H5 | 3D 辦公室改版（大樓換成單層開放辦公室，three.js 兩平台共用；城市、B1 保留）：點角色＝打開它的工作視窗 | |
+
+## 注意
+
+- 不要用 `ghostty -e` 開終端機：會啟動第二份 Ghostty 並還原上次的視窗（見 ARCHITECTURE.md 已知坑）。
+- 戰情中心持有的程序要跟著戰情中心（agent）的生命週期：agent 重啟時，用 `--resume` 接回原本開著的 session。

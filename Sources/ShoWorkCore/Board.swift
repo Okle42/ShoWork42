@@ -431,9 +431,12 @@ public enum Board {
                              glows: [Int32: WorkState], teams: [TeamConfig], inbox: [TeamMessage],
                              reports: [String: SelfReport] = [:], reviews: [String: Review] = [:], decisions: [String: Decision] = [:],
                              contexts: [String: ContextUse] = [:], nicknames: [String: Nickname] = [:],
+                             owned: Set<String> = [],
                              now: Date, home: String, isRepo: (String) -> Bool) -> [BoardCard] {
         var out: [BoardCard] = []
-        for s in sessions.sorted(by: { ($0.updatedAt ?? 0) > ($1.updatedAt ?? 0) }) where s.entrypoint != "sdk-cli" {
+        // `sdk-cli`（claude -p）不上看板；例外是戰情中心自己持有的 session（11-08 SessionHost：卡片 kind 標成 "board"）
+        for var s in sessions.sorted(by: { ($0.updatedAt ?? 0) > ($1.updatedAt ?? 0) }) where s.entrypoint != "sdk-cli" || owned.contains(s.sessionId) {
+            if owned.contains(s.sessionId) { s.kind = "board" }
             let t = transcripts[s.sessionId] ?? TranscriptInfo()
             var base = column(status: s.status, glow: glows[s.pid], lastActivity: t.lastActivity, now: now)
             // 10-20 審查：在等子 agent／workflow 回來時主 session 本來就不寫東西，不算卡住（實測主控 session 開完 workflow 被誤判卡住）
