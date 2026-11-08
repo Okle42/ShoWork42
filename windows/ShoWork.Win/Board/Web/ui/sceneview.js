@@ -44,6 +44,8 @@ export class OfficeSCNView {
     this.renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.NoToneMapping;
+    this.renderer.shadowMap.enabled = true;                  // 11-08 H5：單層辦公室有太陽陰影
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.canvas = this.renderer.domElement;
     this.canvas.tabIndex = 0;            // acceptsFirstResponder：WASD 要收得到
     host.appendChild(this.canvas);
@@ -405,6 +407,19 @@ export class OfficeSCNView {
 
   // MARK: 總覽／走進去、各區分頁（11-08 H5）
 
+  /** 走進去模式下換區：站到那一區門口看進去 */
+  walkTo(id) {
+    const w = this.builder.walkStart?.(id);
+    if (!w) return;
+    SCNTransaction.begin(); SCNTransaction.animationDuration = this.testMode ? 0 : 0.8;
+    SCNTransaction.position(this.cam, w.pos);
+    SCNTransaction.quaternion(this.cam, this.lookQuat(w.pos, w.target));
+    SCNTransaction.commit();
+    this.cam.userData.modelPos = w.pos.slice();
+    this.target = w.target;
+    this.camMoved(0.9);
+  }
+
   setMode(m) {
     this.mode = m;
     this.stopSpin();
@@ -461,7 +476,7 @@ export class OfficeSCNView {
 
   goZone(id) {
     this.zoneOn = id;
-    if (this.mode === "walk") { this.cam.fov = 34; this.cam.updateProjectionMatrix(); }
+    if (this.mode === "walk") { this.walkTo(id); this.renderTabs(); return; }      // 走進去模式：直接走到那一區門口
     this.mode = "overview";
     if (this.builder.frameZone?.(id, this.aspect)) { this.userMoved = true; this.camMoved(0.9); }
     this.renderTabs();

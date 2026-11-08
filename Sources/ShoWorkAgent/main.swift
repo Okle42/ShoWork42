@@ -237,6 +237,78 @@ if argv.count >= 3, argv[1] == "--office-web-snap" {
     NSApplication.shared.run()
 }
 
+// Test: ShoWorkAgent --work-e2e <資料夾> <輸出資料夾>  → 真 claude（haiku）端對端：在 <資料夾> 開一個戰情中心持有的 session，
+//       工作視窗開在螢幕外，照順序在網頁裡打字送出／按按鈕：跑指令、寫檔（權限卡按允許）、寫檔（按拒絕）、中斷、/compact。
+//       每步截圖存到 <輸出資料夾>，印每步結果。session 紀錄寫在 <輸出資料夾>（不動正式的 board/sessions）；權限請求走正式的收件匣（會短暫出現）。用到 haiku 額度
+if argv.count == 4, argv[1] == "--work-e2e" {
+    MainActor.assumeIsolated {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let cwd = argv[2], out = URL(fileURLWithPath: argv[3], isDirectory: true)
+        try? FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
+        SessionHost.shared.dir = out
+        WorkWindow.testMode = true
+        let s: OwnedSession
+        do { s = try SessionHost.shared.start(cwd: cwd, model: "haiku", permissionMode: "default") } catch { print("開不起來：\(error)"); exit(2) }
+        let sid = s.sessionId
+        guard let w = WorkWindow.show(sid, cwd: cwd) else { print("找不到 work.html"); exit(2) }
+        func log() -> String { (try? String(contentsOf: SessionHost.shared.logFile(sid), encoding: .utf8)) ?? "" }
+        func idle() -> Bool { (SessionHost.shared.session(sid)?.state ?? .idle) == .idle }
+        func results() -> Int { log().components(separatedBy: "\"type\":\"result\"").count - 1 }
+        let fm = FileManager.default
+        typealias Step = (name: String, js: String, wait: () -> Bool, check: () -> String)
+        let type = { (t: String) -> String in "document.querySelector('#input').value=\(String(reflecting: t));document.querySelector('#send').click();" }
+        var base = 0
+        let steps: [Step] = [
+            ("跑指令", type("用 Bash 執行 echo hello-e2e，然後只回我輸出的那一行。"), { results() > base && idle() }, { log().contains("hello-e2e") ? "OK：看到指令與輸出" : "沒看到 hello-e2e" }),
+            ("寫檔→允許", type("用 Write 工具建立檔案 allow.txt，內容是 yes。不要用 Bash。"), { results() > base && idle() }, { fm.fileExists(atPath: cwd + "/allow.txt") ? "OK：allow.txt 建好了" : "allow.txt 沒建" }),
+            ("寫檔→拒絕", type("用 Write 工具建立檔案 deny.txt，內容是 no。不要用 Bash，被拒絕就停。"), { results() > base && idle() }, { fm.fileExists(atPath: cwd + "/deny.txt") ? "deny.txt 竟然建了" : "OK：deny.txt 沒建" }),
+            ("中斷", type("從 1 數到 400，每個數字一行，不要省略。") + "setTimeout(()=>document.querySelector('#interrupt').click(),2500);", { results() > base && idle() },
+             { log().contains("error_during_execution") ? "OK：回合被中斷" : "沒看到中斷" }),
+            ("/compact", type("/compact"), { log().contains("compact_boundary") && idle() }, { log().contains("compact_boundary") ? "OK：對話已壓縮" : "沒看到 compact_boundary" }),
+        ]
+        var i = 0, t0 = Date(), answered = Set<String>()
+        @MainActor func snap(_ name: String, then: @escaping @MainActor () -> Void) {
+            w.snapshot { img, info in
+                if let tiff = img?.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff), let png = rep.representation(using: .png, properties: [:]) {
+                    try? png.write(to: out.appendingPathComponent("step\(i + 1)-\(name.replacingOccurrences(of: "/", with: "")).png"))
+                }
+                print("  畫面：", info); fflush(stdout); MainActor.assumeIsolated { then() }
+            }
+        }
+        @MainActor func next() {
+            guard i < steps.count else { s.close(); print("work-e2e：全部跑完"); fflush(stdout); DispatchQueue.main.asyncAfter(deadline: .now() + 1) { exit(0) }; return }
+            base = results(); t0 = Date()
+            print("步驟 \(i + 1)：\(steps[i].name)"); fflush(stdout)
+            w.runJS(steps[i].js)
+            poll()
+        }
+        @MainActor func poll() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { MainActor.assumeIsolated {
+                let st = steps[i]
+                // 權限卡出現：寫 deny.txt 的按「拒絕」，其他（含 AI 自己發戰情中心卡片的指令）一律「允許」
+                if let req = Permit.pending()[SessionHost.shared.liveId(sid)], !answered.contains(req.id) {
+                    answered.insert(req.id)
+                    let want = req.summary.contains("deny.txt") ? "拒絕" : "允許"
+                    print("  權限卡：\(req.tool) \(req.summary.prefix(60)) → 按「\(want)」"); fflush(stdout)
+                    snap(st.name + "-權限卡\(answered.count)") {
+                        w.runJS("[...document.querySelectorAll('#permit button')].find(b=>b.textContent.trim()===\(String(reflecting: want)))?.click()")
+                        poll()
+                    }
+                    return
+                }
+                if st.wait() || Date().timeIntervalSince(t0) > 180 {
+                    print("  結果：", st.wait() ? st.check() : "逾時（" + st.check() + "）"); fflush(stdout)
+                    snap(st.name) { i += 1; next() }
+                    return
+                }
+                poll()
+            } }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { MainActor.assumeIsolated { next() } }
+    }
+    NSApplication.shared.run()
+}
+
 // Test: ShoWorkAgent --board-window  → 只開戰情中心視窗（不開 socket、不發光、不需要輔助使用權限）
 if argv.count == 2, argv[1] == "--board-window" {
     MainActor.assumeIsolated {

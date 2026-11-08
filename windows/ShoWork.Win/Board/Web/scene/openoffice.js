@@ -1,59 +1,60 @@
-// 單層開放式辦公室（11-08 H5，docs/OWN-SESSIONS.md）：取代大樓剖面。城市、地下室 B1、燈光、天氣、名牌照舊，只換「大樓」那一塊。
-//   一層樓、跟原本大樓同一塊地（TowerSpec.width × depth），前面、右邊不砌高牆（從右前方看進來）：
-//     每個專案一區工位（有人要坐桌子的才佔位：工作中、等你、卡住），每個 AI 一張桌子；
-//     會議室給隊長；休息區放閒著（閒置、睡著）的 AI；茶水間放做完的 AI；前台站保全。
-//   家具是 Kenney Furniture Kit（CC0，assets/kenney-furniture/License.txt），載入後換成 VoxMat 的純色材質（跟日夜、停電一起變），
-//   同材質的靜態家具合併成一個 mesh（幾十張桌子也只有十幾個 draw call）。模型是非同步載入的：先畫地板、隔間、人，家具載好再補上。
-//   角色仍是原本的方塊 Kubo（OfficeBuilder.makePerson），狀態、名牌、點擊、等你回答都沿用；閒晃行程（電梯、頂樓）在單層樓不用。
-//
-// 對外介面跟 OfficeBuilder 一樣（sceneview／labels／office.js 不用知道換過）；另外多：
-//   zones()            → [{ id, title, kind, center, accent }]：上方分頁用
-//   frameZone(id)      → 總覽模式下鏡頭飛到那一區
-//   walkStart()        → 走進去（第一人稱）的起點與朝向
+// 單層辦公室（11-08 H5 第三版，docs/OWN-SESSIONS.md）：取代大樓剖面；城市、地下室 B1、燈光、天氣、名牌照舊，只換「大樓」那一塊。
+//   一層樓拆成多個房間：會議室（隊長）、主管室、茶水間（做完的）、廁所、走道、開放工作區（每個專案一區、每個 AI 一張桌）、
+//   休息區（閒著的：撞球、手足球、沙發、懶骨頭）、前台（保全）。地板分區（木地板、地毯、磁磚、棋盤磚），牆有窗、百葉、玻璃隔間、門、門牌。
+//   房間用「人的公尺」排（24 × 19.6），整棟縮 0.5 倍放進原本大樓那塊地（12 × 9.8），城市不用動；建築外圍一圈草地、樹、路燈、步道。
+//   物件全部走 props.js 的註冊表：每種一個 glb 檔名，assets/models/manifest.json 有列就載模型，沒有就畫佔位方塊。
+//   人：person_base.glb（有 idle／walk／sit 動畫）載得到就用，否則用 person.js 的程式人物；換位置時沿走道走過去。
+//   燈：白天太陽（有陰影）；室內暖色點光＋吊燈、檯燈發光，夜裡比較亮；家具底下有接觸陰影（假 AO）。
 
 import * as THREE from "three";
-import { GLTFLoader } from "../vendor/three-r170/loaders/GLTFLoader.js";
 import { mergeGeometries } from "../vendor/three-r170/utils/BufferGeometryUtils.js";
 import { clone as cloneSkinned } from "../vendor/three-r170/utils/SkeletonUtils.js";
-import { VoxMat, TP, TD, TowerSpec, scnNode, setCategory, VoxelMesh, Kit, Xf, TM, setEuler, scnLight, scnIntensity } from "../kit.js";
+import { VoxMat, TP, TD, scnNode, setEuler } from "../kit.js";
 import { OfficeBuilder, projectId, KuboArt } from "./builder.js";
 import { OfficeBasement } from "./basement.js";
-import { CityBuilder } from "./city.js";
 import * as Tower from "./tower.js";
 import { runAction, Act } from "./actions.js";
+import { PROPS, Props, mat } from "./props.js";
+import { makeHuman } from "./person.js";
 
-const X0 = -TD.W / 2, X1 = TD.W / 2, Z0 = TD.zB, Z1 = TD.zF;     // 地：x −6…6、z −7…2.8（跟原本大樓一樣，城市不用動）
-const R = TD.room;                                                  // 地坪高（樓板頂）
-const WALL = 2.6;                                                   // 後牆、左牆高
-const KUBO = TowerSpec.kuboScale;
-/** 人和家具一起縮小（11-08：原尺寸的 Kubo 一層樓擠不下 20 個人）；地板格局用世界座標，等於房間變大 */
-export const S = 0.68;
-const TOP = R + 0.77 * S;                                           // 桌面高
+/** 房間座標（人的公尺）→ 世界：縮 OS 倍、中心放在原本大樓那塊地的中心 */
+export const OS = 0.5;
+const HW = 12, HD = 9.8, WALL = 2.9;
+const R = TD.room, CZ = TD.zC;
+const toWorld = (x, y, z) => [x * OS, R + y * OS, CZ + z * OS];
 
-/** 格局（世界座標；人＝{x, z, a}，a＝朝向，0＝面向 +z） */
-export const OpenPlan = {
-  meeting: { x0: -6, x1: -1.7, z0: Z0, z1: -4.3 },
-  pantry: { x0: 2.5, x1: 6, z0: Z0, z1: -4.3 },
-  lounge: { x0: 2.5, x1: 6, z0: -3.9, z1: 0.5 },
-  front: { x0: 2.5, x1: 6, z0: 0.8, z1: Z1 },
-  desks: { x0: -6, x1: 2.2, z0: -4.1, z1: Z1 },
-  /** 工位格子：8 欄 × 4 排（前面留一條走道貼區域名稱），人面向 +z（看得到臉），桌子在人前面。cols[c][r]；extra＝後段中間 3 張（格子滿了才用） */
-  cols: [-5.45, -4.4, -3.35, -2.3, -1.25, -0.2, 0.85, 1.9],
-  rows: [-3.6, -2.2, -0.8, 0.6],
-  extra: [{ x: -1.2, z: -6.1, a: 0 }, { x: -0.15, z: -6.1, a: 0 }, { x: 0.9, z: -6.1, a: 0 }],
-  /** 會議室：長桌兩側＋主位（隊長坐主位，面向 +x 看整張桌子） */
-  meetingSeats: [{ x: -5.35, z: -5.65, a: Math.PI / 2 }, { x: -4.3, z: -4.95, a: Math.PI }, { x: -3.2, z: -4.95, a: Math.PI },
-                 { x: -4.3, z: -6.35, a: 0 }, { x: -3.2, z: -6.35, a: 0 }],
-  /** 休息區：沙發前、地毯上站著（手上拿咖啡） */
-  loungeSlots: [{ x: 3.35, z: -0.85, a: 0.4 }, { x: 4.3, z: -0.65, a: 0 }, { x: 5.25, z: -0.85, a: -0.4 }, { x: 3.0, z: 0.15, a: 0.3 },
-                { x: 4.3, z: 0.25, a: 0 }, { x: 5.6, z: 0.15, a: -0.3 }, { x: 3.4, z: -2.75, a: 0.9 }, { x: 5.2, z: -2.75, a: -0.9 }],
-  /** 茶水間：吧台前站著 */
-  pantrySlots: [{ x: 3.1, z: -5.0, a: Math.PI }, { x: 4.1, z: -4.9, a: Math.PI }, { x: 5.1, z: -5.0, a: Math.PI },
-                { x: 3.6, z: -4.5, a: 2.6 }, { x: 4.7, z: -4.5, a: -2.6 }, { x: 5.6, z: -4.6, a: -2.8 }],
-  /** 位子不夠時站在走道 */
-  aisleSlots: [{ x: -5.6, z: 2.3, a: 0.2 }, { x: -4.2, z: 2.3, a: 0 }, { x: -2.8, z: 2.3, a: 0 }, { x: -1.4, z: 2.3, a: 0 },
-               { x: 0, z: 2.3, a: 0 }, { x: 1.4, z: 2.3, a: -0.2 }],
-  guard: { x: 4.6, z: 1.9, a: -0.35 },
+// MARK: - 格局（人的公尺；+z 朝前＝鏡頭那邊）
+
+export const Plan = {
+  rooms: {
+    meeting: { x0: -12, x1: -4.5, z0: -HD, z1: -4.0, title: "會議室", floor: "carpetBlue" },
+    manager: { x0: -4.5, x1: 1.5, z0: -HD, z1: -4.0, title: "主管室", floor: "carpetRed" },
+    pantry: { x0: 1.5, x1: 8, z0: -HD, z1: -4.0, title: "茶水間", floor: "tile" },
+    toilets: { x0: 8, x1: 12, z0: -HD, z1: -4.0, title: "廁所", floor: "checker" },
+    corridor: { x0: -12, x1: 12, z0: -4.0, z1: -2.6, title: "走道", floor: "woodDark" },
+    work: { x0: -12, x1: 3.5, z0: -2.6, z1: HD, title: "工作區", floor: "wood" },
+    lounge: { x0: 3.5, x1: 12, z0: -2.6, z1: 5.2, title: "休息區", floor: "woodDark" },
+    lobby: { x0: 3.5, x1: 12, z0: 5.2, z1: HD, title: "前台", floor: "tileLight" },
+  },
+  /** 後排房間的門（在走道那面牆 z=-4.0 上）：x 中心、寬 */
+  doors: { meeting: [-6.0, 1.2], manager: [-0.2, 1.0], pantry: [4.6, 1.4], toilets: [10.0, 1.0] },
+  /** 工位：8 欄 × 5 排；人面向 +z，桌子在人前面 */
+  cols: [-10.9, -9.2, -7.5, -5.8, -4.1, -2.4, -0.7, 1.0],
+  rows: [-1.7, 0.6, 2.9, 5.2, 7.5],
+  meetingSeats: [{ x: -11.0, z: -6.9, a: Math.PI / 2, sit: true },
+                 ...[-9.6, -8.4, -7.2, -6.0].flatMap(x => [{ x, z: -7.95, a: 0, sit: true }, { x, z: -5.85, a: Math.PI, sit: true }])],
+  /** 休息區（閒置、睡著）：撞球、手足球兩邊站著；沙發、懶骨頭坐著 */
+  loungeSlots: [{ x: 6.2, z: 0.0, a: Math.PI / 2 }, { x: 9.6, z: -0.2, a: -Math.PI / 2 }, { x: 7.9, z: -1.6, a: 0 },
+                { x: 4.6, z: 3.9, a: Math.PI / 2 }, { x: 6.9, z: 3.9, a: -Math.PI / 2 },
+                { x: 10.6, z: 2.4, a: -Math.PI / 2, sit: true, seatY: 0.45 }, { x: 10.6, z: 3.2, a: -Math.PI / 2, sit: true, seatY: 0.45 },
+                { x: 10.6, z: 4.0, a: -Math.PI / 2, sit: true, seatY: 0.45 }, { x: 8.6, z: 4.6, a: Math.PI, sit: true, seatY: 0.3 },
+                { x: 4.5, z: 1.6, a: 0.6 }],
+  /** 茶水間（做完的）：中島旁、高腳椅 */
+  pantrySlots: [{ x: 3.6, z: -5.8, a: Math.PI / 2 }, { x: 4.4, z: -5.15, a: Math.PI, sit: true, seatY: 0.72 }, { x: 5.3, z: -5.15, a: Math.PI, sit: true, seatY: 0.72 },
+                { x: 6.2, z: -5.15, a: Math.PI, sit: true, seatY: 0.72 }, { x: 6.9, z: -7.4, a: -Math.PI / 2 }, { x: 2.5, z: -6.8, a: Math.PI / 2 }],
+  aisleSlots: [-10, -8, -6, -4, -2, 0, 2].map(x => ({ x, z: 8.9, a: 0 })),
+  guard: { x: 8.0, z: 6.15, a: 0 },
+  entrance: { x: 8.5, z: HD + 0.2 },
 };
 
 /** 心情 → 放哪裡 */
@@ -62,225 +63,143 @@ export function placeKind(p) {
   switch (p.mood) {
     case "working": case "waiting": case "stuck": return "desk";
     case "finished": return "pantry";
-    default: return "lounge";           // idle、asleep
+    default: return "lounge";
   }
 }
+function roomAt(x, z) {
+  for (const [k, r] of Object.entries(Plan.rooms)) if (x >= r.x0 && x <= r.x1 && z >= r.z0 && z <= r.z1) return k;
+  return "work";
+}
 
-// MARK: - Kenney 家具
+// MARK: - 程式材質（木地板、磁磚、棋盤磚、地毯、百葉、草地）
 
-/** 每種家具的縮放（Kenney 1 單位約 2 公尺；桌面要在 0.76、椅面約 0.56，跟 Kubo 的坐姿對齊） */
-const SCALE = {
-  desk: [1.75, 2.0, 1.75], chairDesk: [1.9, 1.9, 1.9], computerScreen: [1.6, 1.6, 1.6], computerKeyboard: [1.6, 1.6, 1.6],
-  table: [2.4, 2.25, 2.6], chair: [2.0, 2.35, 2.0], loungeSofa: [2.1, 2.0, 2.1], loungeSofaLong: [2.0, 2.0, 2.0],
-  loungeChair: [2.0, 2.0, 2.0], loungeDesignSofa: [2.0, 2.0, 2.0], tableCoffee: [2.0, 2.0, 2.0], rugRectangle: [2.2, 1, 2.0], rugRound: [2.2, 1, 2.2],
-  kitchenBar: [2.0, 2.2, 2.2], kitchenBarEnd: [2.0, 2.2, 2.2], kitchenCabinet: [2.0, 2.0, 2.0], kitchenCabinetUpper: [2.0, 2.0, 2.0],
-  kitchenFridgeLarge: [2.0, 2.0, 2.0], kitchenCoffeeMachine: [2.0, 2.0, 2.0], kitchenMicrowave: [2.0, 2.0, 2.0], kitchenSink: [2.0, 2.0, 2.0],
-  stoolBar: [2.0, 2.2, 2.0], pottedPlant: [1.5, 1.5, 1.5], plantSmall1: [2.0, 2.0, 2.0], plantSmall2: [2.0, 2.0, 2.0], plantSmall3: [2.0, 2.0, 2.0],
-  bookcaseOpen: [2.0, 2.0, 2.0], bookcaseOpenLow: [2.0, 2.0, 2.0], bookcaseClosedWide: [2.0, 2.0, 2.0], televisionModern: [2.0, 2.0, 2.0],
-  cabinetTelevision: [2.0, 2.0, 2.0], lampRoundFloor: [2.0, 2.0, 2.0], lampSquareFloor: [2.0, 2.0, 2.0], trashcan: [1.6, 1.6, 1.6],
-  coatRackStanding: [2.0, 2.0, 2.0], sideTable: [2.0, 2.0, 2.0], speaker: [1.6, 1.6, 1.6], cardboardBoxClosed: [1.6, 1.6, 1.6],
-  laptop: [1.6, 1.6, 1.6], tableRound: [2.0, 2.0, 2.0], books: [1.6, 1.6, 1.6], radio: [1.6, 1.6, 1.6],
+const texCache = new Map();
+function canvasTex(key, draw, size = 256, repeat = [1, 1]) {
+  const k = `${key}|${repeat}`;
+  if (texCache.has(k)) return texCache.get(k);
+  const c = document.createElement("canvas"); c.width = c.height = size;
+  draw(c.getContext("2d"), size);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(...repeat); t.anisotropy = 4;
+  texCache.set(k, t);
+  return t;
+}
+const noise = (g, n, a, s) => { for (let i = 0; i < n; i++) { g.fillStyle = `rgba(0,0,0,${Math.random() * a})`; g.fillRect(Math.random() * s, Math.random() * s, 2, 2); } };
+const planks = (cs, edge) => (g, s) => { for (let i = 0; i < 8; i++) { g.fillStyle = cs[i % 4]; g.fillRect(0, i * s / 8, s, s / 8); g.fillStyle = edge; g.fillRect(0, i * s / 8, s, 1); g.fillRect(((i * 97) % s), i * s / 8, 1, s / 8); } noise(g, 600, 0.06, s); };
+const grid = (bg, line, n) => (g, s) => { g.fillStyle = bg; g.fillRect(0, 0, s, s); g.strokeStyle = line; g.lineWidth = 2; for (let i = 0; i <= n; i++) { g.beginPath(); g.moveTo(i * s / n, 0); g.lineTo(i * s / n, s); g.stroke(); g.beginPath(); g.moveTo(0, i * s / n); g.lineTo(s, i * s / n); g.stroke(); } noise(g, 300, 0.05, s); };
+const FLOORS = {
+  wood: rep => canvasTex("wood", planks(["#C89A68", "#BE8F5E", "#D2A673", "#C49461"], "rgba(60,35,15,.35)"), 256, rep),
+  woodDark: rep => canvasTex("woodDark", planks(["#9C6B44", "#93633E", "#A6744B", "#8E5F3B"], "rgba(40,20,8,.4)"), 256, rep),
+  tile: rep => canvasTex("tile", grid("#E9E2D6", "rgba(120,110,95,.45)", 4), 256, rep),
+  tileLight: rep => canvasTex("tileLight", grid("#D9D4CB", "rgba(100,95,85,.35)", 2), 256, rep),
+  checker: rep => canvasTex("checker", (g, s) => { for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) { g.fillStyle = (i + j) % 2 ? "#2C2E33" : "#E8E6E1"; g.fillRect(i * s / 4, j * s / 4, s / 4, s / 4); } }, 256, rep),
+  carpetBlue: rep => canvasTex("carpetBlue", (g, s) => { g.fillStyle = "#4A5A6E"; g.fillRect(0, 0, s, s); noise(g, 4000, 0.12, s); }, 128, rep),
+  carpetRed: rep => canvasTex("carpetRed", (g, s) => { g.fillStyle = "#7A3A32"; g.fillRect(0, 0, s, s); noise(g, 4000, 0.12, s); }, 128, rep),
+  grass: rep => canvasTex("grass", (g, s) => { g.fillStyle = "#5E8C46"; g.fillRect(0, 0, s, s); for (let i = 0; i < 2500; i++) { g.fillStyle = `rgba(${30 + Math.random() * 40},${80 + Math.random() * 60},${20 + Math.random() * 30},.5)`; g.fillRect(Math.random() * s, Math.random() * s, 2, 3); } }, 128, rep),
+  path: rep => canvasTex("path", grid("#B9B2A6", "rgba(80,75,65,.35)", 2), 128, rep),
 };
+const blindsTex = () => canvasTex("blinds", (g, s) => { g.fillStyle = "#EDE6D8"; g.fillRect(0, 0, s, s); for (let i = 0; i < 16; i++) { g.fillStyle = "rgba(120,100,70,.35)"; g.fillRect(0, i * s / 16 + s / 16 - 3, s, 3); } }, 128);
+/** 接觸陰影（家具底下的柔和暗影；假 AO） */
+const blobTex = () => canvasTex("blob", (g, s) => { const r = g.createRadialGradient(s / 2, s / 2, s * 0.1, s / 2, s / 2, s / 2); r.addColorStop(0, "rgba(0,0,0,.55)"); r.addColorStop(1, "rgba(0,0,0,0)"); g.fillStyle = r; g.fillRect(0, 0, s, s); }, 64);
 
-export const Kenney = {
-  base: new URL("../assets/kenney-furniture/", import.meta.url).href,
-  parts: new Map(),          // 名字 → [{ geometry（已置中、底在 0、縮放好）, material }]
-  ready: null,
-  failed: [],
-  /** 全部載完才 resolve（個別載不到的記在 failed，不擋其他的） */
-  load() {
-    if (this.ready) return this.ready;
-    const loader = new GLTFLoader();
-    const names = Object.keys(SCALE);
-    this.ready = Promise.all(names.map(n => new Promise(res => {
-      loader.load(this.base + n + ".glb", g => { this.parts.set(n, this.flatten(g.scene, SCALE[n])); res(); },
-        undefined, () => { this.failed.push(n); res(); });
-    })));
-    return this.ready;
-  },
-  /** glTF 場景 → 幾何（套上節點變換、置中、底貼 0、縮放）＋VoxMat 純色材質 */
-  flatten(root, s) {
-    root.updateMatrixWorld(true);
-    const out = [];
-    const box = new THREE.Box3().setFromObject(root);
-    const cx = (box.min.x + box.max.x) / 2, cz = (box.min.z + box.max.z) / 2, y0 = box.min.y;
-    const fix = new THREE.Matrix4().makeScale(s[0] * S, s[1] * S, s[2] * S).multiply(new THREE.Matrix4().makeTranslation(-cx, -y0, -cz));
-    root.traverse(o => {
-      if (!o.isMesh) return;
-      const mats = Array.isArray(o.material) ? o.material : [o.material];
-      const geo = o.geometry.clone().applyMatrix4(fix.clone().multiply(o.matrixWorld));
-      const keep = ["position", "normal"];
-      for (const k of Object.keys(geo.attributes)) if (!keep.includes(k)) geo.deleteAttribute(k);
-      if (!geo.attributes.normal) geo.computeVertexNormals();
-      if (mats.length === 1 || !geo.groups.length) { out.push({ geometry: geo, material: Kenney.mat(mats[0]) }); return; }
-      for (const g of geo.groups) {          // 多材質：照 group 拆開
-        const sub = geo.clone(); const idx = geo.index;
-        if (idx) sub.setIndex(Array.from(idx.array.slice(g.start, g.start + g.count)));
-        sub.clearGroups();
-        out.push({ geometry: sub, material: Kenney.mat(mats[g.materialIndex] ?? mats[0]) });
-      }
-    });
-    return out;
-  },
-  /** 保留模型原本的材質（11-08 使用者：壓成 VoxMat 純色還是方塊風）；同一個來源材質共用一份 */
-  mats: new Map(),
-  mat(m) {
-    const key = m ? `${m.name}|${m.color?.getHexString?.() ?? ""}` : "none";
-    if (!this.mats.has(key)) {
-      const c = m ? m.clone() : new THREE.MeshStandardMaterial({ color: 0xCCCCCC });
-      c.roughness = Math.max(c.roughness ?? 1, 0.75); c.metalness = Math.min(c.metalness ?? 0, 0.1);   // 沒有環境貼圖：金屬會黑掉
-      this.mats.set(key, c);
-    }
-    return this.mats.get(key);
-  },
-};
+function textTexture(text, { bg = "#1B1D21", fg = "#F3F1EC", accent = null, h = 72 } = {}) {
+  const c = document.createElement("canvas");
+  const font = `600 44px "PingFang TC","Microsoft JhengHei UI","Noto Sans TC",sans-serif`;
+  const g0 = c.getContext("2d"); g0.font = font;
+  const w = Math.ceil(Math.min(1000, g0.measureText(text).width + (accent != null ? 70 : 44)));
+  c.width = w; c.height = h;
+  const g = c.getContext("2d");
+  g.fillStyle = bg; g.fillRect(0, 0, w, h);
+  if (accent != null) { g.fillStyle = "#" + accent.toString(16).padStart(6, "0"); g.fillRect(0, 0, 12, h); }
+  g.font = font; g.fillStyle = fg; g.textBaseline = "middle"; g.fillText(text, accent != null ? 32 : 22, h / 2 + 2);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
+  return { t, aspect: w / h };
+}
 
-// MARK: - 人物（Kenney Mini Characters，CC0；有 idle／walk／sit 等動畫）
+// MARK: - 批次（同材質合併）＋接觸陰影
 
-const CHAR_K = 1.45;                       // 模型 0.67 高 ⇒ 約 0.97 公尺（Q 版比例，跟縮小後的桌椅搭）
-const SEAT_Y = 0.17;                       // 坐姿時模型原點離地（腳底在原點下 0.094×K）
-export const People = {
-  base: new URL("../assets/kenney-characters/", import.meta.url).href,
-  names: ["male-a", "female-a", "male-b", "female-b", "male-c", "female-c", "male-d", "female-d", "male-e", "female-e", "male-f", "female-f"],
-  models: new Map(),         // 名字 → { scene, clips: Map }
-  ready: null,
-  load() {
-    if (this.ready) return this.ready;
-    const loader = new GLTFLoader();
-    this.ready = Promise.all([...this.names, "worker"].map(n => new Promise(res => {
-      loader.load(`${this.base}character-${n}.glb`, g => {
-        g.scene.traverse(o => { if (o.isMesh) { o.frustumCulled = false; const m = o.material; if (m) { m.roughness = 0.85; m.metalness = 0; } } });
-        this.models.set(n, { scene: g.scene, clips: new Map(g.animations.map(a => [a.name, a])) });
-        res();
-      }, undefined, () => res());
-    })));
-    return this.ready;
-  },
-  /** 同一個人每次都是同一個造型（卡片 id 雜湊） */
-  pick(id) {
-    let h = 0;
-    for (const ch of String(id)) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-    return this.names[h % this.names.length];
-  },
-  /** 一隻人物：模型＋動畫（坐著＝sit 定格；站著＝idle 循環；做完＝點頭一次再 idle） */
-  make(name, { seated, mood }) {
-    const e = this.models.get(name) ?? this.models.get(this.names[0]);
-    if (!e) return null;
-    const model = cloneSkinned(e.scene);
-    model.scale.setScalar(CHAR_K);
-    model.position.y = seated ? SEAT_Y : 0;
-    const mixer = new THREE.AnimationMixer(model);
-    const play = (n, loop = true) => { const c = e.clips.get(n); if (!c) return null; const a = mixer.clipAction(c); a.setLoop(loop ? THREE.LoopRepeat : THREE.LoopOnce, Infinity); a.clampWhenFinished = !loop; a.play(); return a; };
-    let animated = false;
-    if (seated) { play("sit"); mixer.update(0.1); }
-    else if (mood === "finished") {
-      const a = play("emote-yes", false);
-      if (a) mixer.addEventListener("finished", () => { a.fadeOut(0.3); play("idle").fadeIn(0.3); });
-      else play("idle");
-      animated = true;
-    } else { const a = play("idle"); if (a) a.time = Math.random() * 1.3; animated = true; }
-    mixer.update(0);
-    return { model, mixer, animated };
-  },
-};
-
-/** 靜態家具批次：放好位置的幾何照材質合併 */
 class Batch {
-  constructor() { this.byMat = new Map(); }
-  add(name, x, z, a = 0, y = R, extra = null) {
-    const parts = Kenney.parts.get(name);
-    if (!parts) return false;
+  constructor() { this.byMat = new Map(); this.blobs = []; }
+  push(g, m) { if (!this.byMat.has(m)) this.byMat.set(m, []); this.byMat.get(m).push(g); }
+  /** 擺一個物件（房間座標；a＝繞 y 轉；y＝離地高） */
+  add(name, x, z, a = 0, y = 0, { blob = true } = {}) {
+    const parts = Props.parts(name);
+    if (!parts.length) return false;
     const m = new THREE.Matrix4().makeRotationY(a).premultiply(new THREE.Matrix4().makeTranslation(x, y, z));
-    if (extra) m.multiply(extra);
-    for (const p of parts) {
-      const g = p.geometry.clone().applyMatrix4(m);
-      if (!this.byMat.has(p.material)) this.byMat.set(p.material, []);
-      this.byMat.get(p.material).push(g);
-    }
+    for (const [g, mt] of parts) this.push(g.clone().applyMatrix4(m), mt);
+    if (blob && y < 0.05 && y > -0.05) { const s = PROPS[name].size; this.blobs.push([x, z, a, s[0] * 1.25 + 0.2, s[2] * 1.25 + 0.2]); }
     return true;
   }
+  box(w, h, d, x, y, z, m, ry = 0) { const g = new THREE.BoxGeometry(w, h, d); if (ry) g.rotateY(ry); g.translate(x, y + h / 2, z); this.push(g, m); }
   node(name) {
     const root = scnNode(name);
-    for (const [mat, gs] of this.byMat) {
-      const g = mergeGeometries(gs, false);
+    for (const [m, gs] of this.byMat) {
+      const g = mergeGeometries(gs.map(x => (x.index ? x.toNonIndexed() : x)), false);
       if (!g) continue;
-      const mesh = new THREE.Mesh(g, mat);
-      setCategory(mesh, 1);
+      const mesh = new THREE.Mesh(g, m);
+      mesh.castShadow = !m.transparent; mesh.receiveShadow = true;
       root.add(mesh);
+    }
+    if (this.blobs.length) {
+      const gs = this.blobs.map(([x, z, a, w, d]) => { const g = new THREE.PlaneGeometry(w, d); g.rotateX(-Math.PI / 2); g.rotateY(a); g.translate(x, 0.012, z); return g; });
+      const bm = new THREE.MeshBasicMaterial({ map: blobTex(), transparent: true, depthWrite: false, opacity: 0.85 });
+      const n = new THREE.Mesh(mergeGeometries(gs, false), bm); n.renderOrder = 1; n.name = "contact-shadows";
+      root.add(n);
     }
     return root;
   }
 }
 
-// MARK: - 招牌（區域名稱：吊在區域上方的板子，兩面都有字）
+// MARK: - 人（模型或程式人物）
 
-function signTexture(text, accent) {
-  const c = document.createElement("canvas");
-  const font = `600 44px "PingFang TC","Microsoft JhengHei UI","Noto Sans TC",sans-serif`;
-  const g0 = c.getContext("2d"); g0.font = font;
-  const w = Math.ceil(Math.min(900, g0.measureText(text).width + 70)), h = 72;
-  c.width = w; c.height = h;
-  const g = c.getContext("2d");
-  g.fillStyle = "#14161A"; g.fillRect(0, 0, w, h);
-  g.fillStyle = "#" + (accent ?? 0x8FE3EE).toString(16).padStart(6, "0"); g.fillRect(0, 0, 12, h);
-  g.font = font; g.fillStyle = "#F3F1EC"; g.textBaseline = "middle"; g.fillText(text, 32, h / 2 + 2);
-  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
-  return { t, aspect: w / h };
-}
-function makeSign(text, accent, x, z, y = R + 1.75, a = 0, maxW = 3.2) {
-  const { t, aspect } = signTexture(text, accent);
-  const h = Math.min(0.4, maxW / aspect), w = h * aspect;
-  const m = new THREE.MeshBasicMaterial({ map: t, side: THREE.DoubleSide });
-  m.userData.emission = { color: null, intensity: 1 };
-  const n = new THREE.Mesh(new THREE.PlaneGeometry(w, h), m);
-  n.position.set(x, y, z); n.rotation.y = a; n.name = "sign";
-  setCategory(n, 1);
-  const g = scnNode("zone-sign"); g.add(n);
-  // 兩條吊線
-  const wire = VoxMat.flat(0x2F3338);
-  for (const dx of [-w / 2 + 0.1, w / 2 - 0.1]) {
-    const l = new THREE.Mesh(new THREE.BoxGeometry(0.015, 0.4, 0.015), wire);
-    l.position.set(x + dx * Math.cos(a), y + h / 2 + 0.2, z - dx * Math.sin(a));
-    g.add(l);
+const PERSON_SEAT = 0.48;
+function makeBody(id, { sit, seatY = PERSON_SEAT }) {
+  const g = Props.glb.get("person_base");
+  if (g?.clips?.length) {           // 自製模型：照尺寸縮放，播 idle／sit／walk
+    const model = cloneSkinned(g.scene);
+    const box = new THREE.Box3().setFromObject(g.scene), k = 1.72 / Math.max(0.1, box.max.y - box.min.y);
+    model.scale.setScalar(k);
+    const mixer = new THREE.AnimationMixer(model);
+    const clip = n => g.clips.find(c => c.name.toLowerCase().includes(n));
+    let act = null;
+    const setPose = p => { act?.fadeOut(0.25); const c = clip(p === "sit" ? "sit" : p === "walk" ? "walk" : "idle"); act = c ? mixer.clipAction(c).reset().fadeIn(0.25).play() : null; model.position.y = p === "sit" ? seatY - 0.45 : 0; };
+    setPose(sit ? "sit" : "stand");
+    return { node: model, setPose, update: (_t, dt) => mixer.update(dt), headTop: p => (p === "sit" ? seatY + 0.9 : 1.75) };
   }
-  return g;
+  const hm = makeHuman(id, { seatY });
+  hm.setPose(sit ? "sit" : "stand");
+  return hm;
 }
 
-/** 地上的區域名稱（俯視看得清楚；貼在地毯前緣） */
-function makeDecal(text, accent, x, z, maxW) {
-  const { t, aspect } = signTexture(text, accent);
-  const h = Math.min(0.42, maxW / aspect), w = h * aspect;
-  const m = new THREE.MeshBasicMaterial({ map: t, transparent: true, opacity: 0.92, depthWrite: false });
-  const n = new THREE.Mesh(new THREE.PlaneGeometry(w, h), m);
-  n.rotation.x = -Math.PI / 2;
-  n.position.set(x, TD.slab + 0.03, z);
-  n.name = "decal";
-  setCategory(n, 1);
-  return n;
-}
-
-// MARK: - 開放式辦公室
+// MARK: - 辦公室
 
 export class OpenOfficeBuilder extends OfficeBuilder {
   constructor(opts) {
     super(opts);
     for (const c of this.cars) c.removeFromParent();      // 單層樓：沒有電梯
+    this.root = scnNode("office-root");
+    this.root.position.set(0, R, CZ); this.root.scale.setScalar(OS);
+    this.world.add(this.root);
     this.office = null; this.officeSig = "";
     this.furniture = null; this.furnitureSig = "";
-    this.zoneList = [];         // [{ id, project, title, accent, seats: [i…], rect }]
-    this.assign = new Map();    // card id → { kind, slot, zone }
-    this.onAssets = null;       // 家具載好了（sceneview 補畫一張）
-    this.onLayout = null;       // 區域變了（sceneview 重畫上方分頁）
-    Kenney.load().then(() => { this.furnitureSig = ""; this.buildFurniture(); this.onAssets?.(); });
-    this.mixers = new Set();      // 播動畫的人（tick 時推進）
-    this.lastIslands = [];
-    People.load().then(() => {        // 人物載好：方塊 Kubo 換成人物（重建一次）
+    this.outdoor = null;
+    this.zoneList = []; this.assign = new Map(); this.seats = [];
+    this.bodies = new Map();       // card id → { body, walk }
+    this.clock = 0;
+    this.lastIslands = []; this.lastGuard = null;
+    this.onAssets = null; this.onLayout = null;
+    this.indoor = [];              // 室內暖光
+    // 陰影：太陽投影
+    this.sun.castShadow = true;
+    this.sun.shadow.mapSize.set(2048, 2048);
+    const sc = this.sun.shadow.camera; sc.left = -11; sc.right = 11; sc.top = 11; sc.bottom = -11; sc.near = 60; sc.far = 160;
+    this.sun.shadow.bias = -0.0006; this.sun.shadow.normalBias = 0.02; this.sun.shadow.radius = 4;
+    Props.load().then(() => {        // 自製模型載好（或沒有）：重畫家具、人
+      Props.reset(); this.furnitureSig = ""; this.buildFurniture();
       for (const p of this.persons.values()) p.look = "";
       this.guardKey = "";
-      this.updatePeople(this.lastIslands, null, false, Date.now() / 1000);
-      this.updateGuard(this.lastGuard ?? { level: "normal" }, false);
-      this.looping = this.looping || (this.animating && !OfficeBuilder.reduceMotion);
-      this.onAssets?.(); this.onLayout?.();
+      this.updatePeople(this.lastIslands, null, false);
+      if (this.lastGuard) this.updateGuard(this.lastGuard, false);
+      this.onAssets?.();
     });
   }
 
@@ -295,20 +214,17 @@ export class OpenOfficeBuilder extends OfficeBuilder {
     const first = !this.office;
     this.layout(islands);
     if (!this.office || this.officeSig !== this.layoutSig) { this.buildShell(); this.onLayout?.(); }
+    if (!this.outdoor) this.buildOutdoor();
     this.buildFurniture();
     this.lastIslands = islands; this.lastGuard = guardStatus;
-    this.updatePeople(islands, null, animate, now);
+    this.updatePeople(islands, null, animate);
     this.updateGuard(guardStatus, scanning);
-    this.updateEmergency();
     this.highlight(this.lit);
-    if (!this.fidgetStarted) { this.fidgetStarted = true; this.scheduleFidget(); }
-    this.looping = !OfficeBuilder.reduceMotion && (scanning || this.weatherFX.raining || this.animating
-      || [...this.persons.values()].some(p => p.mood === "working" && p.islander.card.activity === "editing"));
+    this.looping = !OfficeBuilder.reduceMotion && (scanning || this.weatherFX.raining || this.bodies.size > 0);
     this.omniDirty = true; this.assignOmni();
     return first ? "layout" : "none";
   }
 
-  /** 專案順序：照 TowerPlan 的樓層號（穩定），沒在 plan 裡的照名字 */
   projectOrder(islands) {
     const byFloor = new Map(this.tower.floors.filter(f => f.kind === "project").map(f => [String(f.project ?? "").toLowerCase(), Number(f.floorNo ?? 99)]));
     return islands.slice().sort((a, b) => {
@@ -316,339 +232,396 @@ export class OpenOfficeBuilder extends OfficeBuilder {
       return fa - fb || String(a.project).localeCompare(String(b.project));
     });
   }
-
   accentOf(project) {
     const d = this.decor[String(project ?? "").toLowerCase()];
     const th = d?.theme ?? "general";
     return TP.hex(d?.accentColor ?? "") ?? TP.hex(Tower.TowerTheme?.accent?.[th] ?? "") ?? 0x8FE3EE;
   }
 
-  /** 每個人分到哪：工位（每個專案佔整欄，一欄 4 個位子；用到的欄置中）、會議室、休息區、茶水間、走道 */
+  /** 每個人分到哪：工位（每個專案佔整欄、一欄 5 張、用到的欄置中）、會議室、休息區、茶水間、走道 */
   layout(islands) {
-    const P = OpenPlan, nr = P.rows.length, nc = P.cols.length;
-    const seats = [];               // 這次用到的位子（index＝slot）
-    const zones = [], assign = new Map();
+    const P = Plan, nr = P.rows.length, nc = P.cols.length;
+    const seats = [], zones = [], assign = new Map();
     const used = { meeting: 0, lounge: 0, pantry: 0, aisle: 0 };
-    const spill = id => { assign.set(id, { kind: "aisle", slot: used.aisle++ % P.aisleSlots.length }); };
+    const spill = id => assign.set(id, { kind: "aisle", slot: used.aisle++ % P.aisleSlots.length });
     const order = this.projectOrder(islands).map(i => {
       const people = i.people.slice().sort((a, b) => (a.card.id < b.card.id ? -1 : 1)).slice(0, OfficeBuilder.maxPeople);
       return { i, people, desk: people.filter(p => placeKind(p) === "desk") };
     });
-    // 欄數：每個專案 ceil(要坐桌子的人 / 4)；總數超過 8 欄就從人最多的專案開始少給（多的人走後段、再不夠站走道）
     const want = order.map(o => Math.ceil(o.desk.length / nr));
     while (want.reduce((a, b) => a + b, 0) > nc) { const k = want.indexOf(Math.max(...want)); want[k] -= 1; }
     let col = Math.floor((nc - want.reduce((a, b) => a + b, 0)) / 2);
-    let extra = 0;
     order.forEach((o, k) => {
-      const fid = projectId(o.i.project);
-      const mine = [];
-      const c0 = col; col += want[k];
+      const fid = projectId(o.i.project), mine = [], c0 = col;
+      col += want[k];
       let n = 0;
       for (const p of o.people) {
         const kind = placeKind(p);
         if (kind === "desk") {
-          let at = null;
-          if (n < want[k] * nr) { const c = c0 + Math.floor(n / nr), r = n % nr; at = { x: P.cols[c], z: P.rows[r], a: 0 }; n++; }
-          else if (extra < P.extra.length) at = P.extra[extra++];
-          if (!at) { spill(p.card.id); continue; }
-          seats.push(at); mine.push(seats.length - 1);
+          if (n >= want[k] * nr) { spill(p.card.id); continue; }
+          const c = c0 + Math.floor(n / nr), r = n % nr; n++;
+          seats.push({ x: P.cols[c], z: P.rows[r], a: 0, sit: true });
+          mine.push(seats.length - 1);
           assign.set(p.card.id, { kind: "desk", slot: seats.length - 1, zone: fid });
         } else {
-          const cap = { meeting: P.meetingSeats.length, lounge: P.loungeSlots.length, pantry: P.pantrySlots.length }[kind];
-          if (used[kind] < cap) assign.set(p.card.id, { kind, slot: used[kind]++, zone: fid });
+          const list = { meeting: P.meetingSeats, lounge: P.loungeSlots, pantry: P.pantrySlots }[kind];
+          if (used[kind] < list.length) assign.set(p.card.id, { kind, slot: used[kind]++, zone: fid });
           else spill(p.card.id);
         }
       }
       if (mine.length) {
-        const pts = mine.map(i => seats[i]).filter(q => q.z > -5);          // 區域範圍只算前面的格子（後段那 3 張不算）
-        if (!pts.length) return;
-        const rect = { x0: Math.min(...pts.map(q => q.x)) - 0.5, x1: Math.max(...pts.map(q => q.x)) + 0.5,
-                       z0: Math.min(...pts.map(q => q.z)) - 0.42, z1: Math.max(...pts.map(q => q.z)) + 0.98 };
-        zones.push({ id: fid, project: o.i.project, title: o.i.project, accent: this.accentOf(o.i.project), seats: mine, rect });
+        const pts = mine.map(i => seats[i]);
+        zones.push({ id: fid, project: o.i.project, title: o.i.project, accent: this.accentOf(o.i.project), seats: mine,
+                     rect: { x0: Math.min(...pts.map(q => q.x)) - 0.8, x1: Math.max(...pts.map(q => q.x)) + 0.8,
+                             z0: Math.min(...pts.map(q => q.z)) - 0.7, z1: Math.max(...pts.map(q => q.z)) + 1.2 } });
       }
     });
-    this.seats = seats;
-    this.zoneList = zones;
-    this.assign = assign;
-    this.layoutSig = JSON.stringify([zones.map(z => [z.id, z.seats, z.accent]), seats.length]);
+    this.seats = seats; this.zoneList = zones; this.assign = assign;
+    this.layoutSig = JSON.stringify([zones.map(z => [z.id, z.seats.length, z.accent, z.rect.x0]), seats.length]);
   }
 
-  // MARK: 地板、牆、隔間（方塊）
+  // MARK: 房子：地板、牆、窗、百葉、玻璃隔間、門、門牌、區域名稱
 
   buildShell() {
     this.office?.removeFromParent();
     const root = scnNode("open-office");
-    const m = new VoxelMesh(), k = new Kit(m);
-    const I = Xf.identity;
-    const W = X1 - X0, D = Z1 - Z0, cx = (X0 + X1) / 2, cz = (Z0 + Z1) / 2;
-    // 樓板＋木地板
-    k.b(I, cx, 0, cz, W, TD.slab, D, TM.slab);
-    k.b(I, cx, TD.slab, cz, W - 0.1, 0.01, D - 0.1, VoxMat.dayNight(0xC9B79C, 0xB8A68C));
-    // 後牆、左牆（有窗）；前面、右邊只有矮玻璃欄杆
-    const wall = TM.backWall, frame = TM.f(TP.ST1), glassM = TM.glass(0.28);
-    k.b(I, cx, R, Z0 + 0.075, W, WALL, 0.15, wall);
-    k.b(I, X0 + 0.075, R, cz, 0.15, WALL, D, wall);
-    for (let x = X0 + 1.2; x < X1 - 0.8; x += 2.4) {          // 後牆的窗（夜裡看得到城市燈）
-      k.b(I, x, R + 0.9, Z0 + 0.16, 1.6, 1.2, 0.02, VoxMat.dayNight(0xB9D3D8, 0x22303F));
-      k.b(I, x, R + 0.85, Z0 + 0.17, 1.7, 0.05, 0.04, frame);
+    const b = new Batch();
+    b.box(2 * HW + 0.4, 0.3, 2 * HD + 0.4, 0, -0.3, 0, mat(0x8E8B85));             // 樓板
+    for (const r of Object.values(Plan.rooms)) {                                     // 地板：每個房間一種
+      const w = r.x1 - r.x0, d = r.z1 - r.z0;
+      const m = new THREE.MeshStandardMaterial({ map: FLOORS[r.floor]([w / 2, d / 2]), roughness: r.floor.startsWith("carpet") ? 1 : 0.7 });
+      const g = new THREE.PlaneGeometry(w, d); g.rotateX(-Math.PI / 2); g.translate((r.x0 + r.x1) / 2, 0.002, (r.z0 + r.z1) / 2);
+      b.push(g, m);
     }
-    for (let z = Z0 + 1.4; z < Z1 - 1.0; z += 2.4) {
-      k.b(I, X0 + 0.16, R + 0.9, z, 0.02, 1.2, 1.6, VoxMat.dayNight(0xB9D3D8, 0x22303F));
+    for (const z of this.zoneList) {                                                  // 工作區：每個專案一塊地毯
+      const r = z.rect, col = new THREE.Color(z.accent).lerp(new THREE.Color(0x8C7A66), 0.55);
+      const g = new THREE.PlaneGeometry(r.x1 - r.x0, r.z1 - r.z0); g.rotateX(-Math.PI / 2); g.translate((r.x0 + r.x1) / 2, 0.006, (r.z0 + r.z1) / 2);
+      b.push(g, mat(col.getHex(), { rough: 1 }));
     }
-    k.b(I, cx, R, Z1 - 0.03, W, 0.06, 0.06, frame);           // 前緣、右緣：踢腳＋玻璃欄杆
-    k.b(I, X1 - 0.03, R, cz, 0.06, 0.06, D, frame);
-    // 會議室：玻璃隔間（右牆、前牆；門在前牆右邊）
-    const mt = OpenPlan.meeting;
-    for (const z of [mt.z0 + 0.15, mt.z1]) k.b(I, mt.x1, R, z, 0.07, 2.3, 0.07, frame);          // 玻璃隔間的柱子
-    k.b(I, mt.x1, R, (mt.z0 + mt.z1) / 2, 0.06, 0.06, mt.z1 - mt.z0, frame);
-    k.b(I, (mt.x0 + mt.x1 - 1.0) / 2, R, mt.z1, mt.x1 - mt.x0 - 1.0, 0.06, 0.06, frame);
-    k.b(I, (mt.x0 + mt.x1 - 1.0) / 2, R + 2.24, mt.z1, mt.x1 - mt.x0 - 1.0, 0.06, 0.06, frame);
-    k.b(I, mt.x1, R + 2.24, (mt.z0 + mt.z1) / 2, 0.06, 0.06, mt.z1 - mt.z0, frame);
-    // 茶水間：地磚（跟木地板分開）
-    const pt = OpenPlan.pantry;
-    k.b(I, (pt.x0 + pt.x1) / 2, TD.slab + 0.012, (pt.z0 + pt.z1) / 2, pt.x1 - pt.x0, 0.01, pt.z1 - pt.z0, VoxMat.dayNight(0xE4E1DB, 0xD3D0CA));
-    // 前台：矮櫃台＋監控螢幕架
-    k.b(I, 4.4, R, 1.3, 2.2, 0.72, 0.45, VoxMat.dayNight(0x2F3338, 0x3A3F45));
-    k.b(I, 4.4, R + 0.72, 1.3, 2.3, 0.04, 0.55, TM.f(TP.FN5));
-    // 工位區：每區一塊地毯（區域顏色）
-    for (const z of this.zoneList) {
-      const r = z.rect, col = VoxMat.mix(VoxMat.color(z.accent), VoxMat.color(0xC9B79C), 0.55);
-      k.b(I, (r.x0 + r.x1) / 2, TD.slab + 0.014, (r.z0 + r.z1) / 2, r.x1 - r.x0, 0.01, r.z1 - r.z0, VoxMat.flat(col));
+    const wallM = mat(0xE8E1D5, { rough: 0.95 }), wallAccent = mat(0x8A4B35, { rough: 0.9 }), frameM = mat(0x2E3136, { rough: 0.5 });
+    const glassM = mat(0xA9C7D6, { opacity: 0.3, rough: 0.05 }), blindsM = new THREE.MeshStandardMaterial({ map: blindsTex(), roughness: 1 });
+    const winM = mat(0xBFD8E6, { rough: 0.1, emit: 0.25 });
+    const wallRun = (x0, z0, x1, z1, h, m, t = 0.2) => { const len = Math.hypot(x1 - x0, z1 - z0), a = Math.atan2(x1 - x0, z1 - z0); b.box(t, h, len, (x0 + x1) / 2, 0, (z0 + z1) / 2, m, a); };
+    // 外牆：後牆、左牆全高（有窗＋百葉）；前牆、右牆只到窗台（剖面看進去），上面是淡玻璃
+    wallRun(-HW, -HD, HW, -HD, WALL, wallM);
+    wallRun(-HW, -HD, -HW, HD, WALL, wallM);
+    wallRun(-HW, HD, Plan.entrance.x - 1.1, HD, 0.95, wallM);
+    wallRun(Plan.entrance.x + 1.1, HD, HW, HD, 0.95, wallM);
+    wallRun(HW, -HD, HW, HD, 0.95, wallM);
+    for (let x = -10.5; x < HW - 1; x += 3.0) {
+      b.box(1.9, 1.5, 0.04, x + 0.95, 0.9, -HD + 0.12, winM);
+      b.box(1.9, 0.75, 0.03, x + 0.95, 1.65, -HD + 0.15, blindsM);
+      b.box(2.0, 0.06, 0.12, x + 0.95, 0.86, -HD + 0.16, frameM);
     }
-    const shell = m.node("office-shell");
-    setCategory(shell, 1);
-    root.add(shell);
-    // 會議室的玻璃（另外一個 mesh：透明）
-    const gm = new VoxelMesh(), gk = new Kit(gm);
-    gk.b(I, mt.x1, R + 0.06, (mt.z0 + mt.z1) / 2, 0.03, 2.18, mt.z1 - mt.z0, glassM);
-    gk.b(I, (mt.x0 + mt.x1 - 1.0) / 2, R + 0.06, mt.z1, mt.x1 - mt.x0 - 1.0, 2.18, 0.03, glassM);
-    gk.b(I, (X0 + X1) / 2, R + 0.06, Z1 - 0.03, W, 0.95, 0.02, glassM);
-    gk.b(I, X1 - 0.03, R + 0.06, cz, 0.02, 0.95, D, glassM);
-    root.add(gm.node("office-glass"));
-    // 區域名稱：貼在地上（俯視看得清楚、不擋人）
+    for (let z = -2.0; z < HD - 1; z += 3.0) {
+      b.box(0.04, 1.5, 1.9, -HW + 0.12, 0.9, z + 0.95, winM);
+      b.box(0.03, 0.75, 1.9, -HW + 0.15, 1.65, z + 0.95, blindsM);
+    }
+    b.box(0.08, 1.4, 2 * HD, HW - 0.04, 0.95, 0, glassM);
+    b.box(Plan.entrance.x - 1.1 + HW, 1.4, 0.08, (-HW + Plan.entrance.x - 1.1) / 2, 0.95, HD - 0.04, glassM);
+    b.box(HW - Plan.entrance.x - 1.1, 1.4, 0.08, (Plan.entrance.x + 1.1 + HW) / 2, 0.95, HD - 0.04, glassM);
+    // 走道那面牆（z=-4.0）：門洞＋門楣；會議室那段是玻璃隔間；主管室那段是深色牆
+    const cw = -4.0, gaps = Object.values(Plan.doors).map(([x, w]) => [x - w / 2, x + w / 2]).sort((a, c) => a[0] - c[0]);
+    let x = -HW;
+    for (const [g0, g1] of gaps) {
+      if (g0 > x) {
+        if (x < -4.5) { b.box(g0 - x, 0.1, 0.12, (x + g0) / 2, 0, cw, frameM); b.box(g0 - x, 2.6, 0.06, (x + g0) / 2, 0.1, cw, glassM); b.box(g0 - x, 0.2, 0.14, (x + g0) / 2, 2.7, cw, frameM); }
+        else b.box(g0 - x, WALL, 0.16, (x + g0) / 2, 0, cw, x < 1.5 ? wallAccent : wallM);
+      }
+      b.box(g1 - g0, WALL - 2.25, 0.16, (g0 + g1) / 2, 2.25, cw, wallM);
+      x = g1;
+    }
+    b.box(HW - x, WALL, 0.16, (x + HW) / 2, 0, cw, wallM);
+    for (const [dx] of Object.values(Plan.doors)) b.add("door", dx - 0.15, cw + 0.42, 1.2, 0, { blob: false });
+    for (const wx of [-4.5, 1.5, 8]) wallRun(wx, -HD, wx, cw, WALL, wx === 8 ? mat(0xC9CED2) : wallM, 0.14);
+    b.box(0.35, 1.1, 5.0, 3.5, 0, 0.2, mat(0x7A5233));                // 工作區／休息區之間的矮櫃
+    b.box(0.4, 0.04, 5.0, 3.5, 1.1, 0.2, mat(0xD8B48A));
     const signs = scnNode("signs");
-    signs.add(makeDecal("會議室・隊長", 0x1E3A8A, (mt.x0 + mt.x1) / 2, mt.z1 - 0.35, 3.4));
-    signs.add(makeDecal("茶水間・做完", 0x30D158, (pt.x0 + pt.x1) / 2, pt.z1 - 0.3, 3.0));
-    const lg = OpenPlan.lounge;
-    signs.add(makeDecal("休息區・閒著", 0xF59E0B, (lg.x0 + lg.x1) / 2, lg.z1 - 0.15, 3.0));
-    signs.add(makeDecal("前台・保全", 0x1E3A8A, 3.6, Z1 - 0.3, 1.9));
-    for (const z of this.zoneList) signs.add(makeDecal(z.title, z.accent, (z.rect.x0 + z.rect.x1) / 2, z.rect.z1 + 0.32, z.rect.x1 - z.rect.x0 - 0.1));
-    root.add(signs);
-    // 假模組：每區一個節點（位置在區域中心；給 focusPoint、highlightFloor、左側索引列用）
-    const mods = new Map();
-    const addMod = (id, cx2, cz2, f) => { const n = scnNode(`floor:${id}`); n.position.set(cx2, 0, cz2); root.add(n); mods.set(id, { parts: { node: n, facades: [] }, key: id, floor: f }); };
-    for (const z of this.zoneList) addMod(z.id, (z.rect.x0 + z.rect.x1) / 2, (z.rect.z0 + z.rect.z1) / 2, { id: z.id, kind: "project", project: z.project, y: 0, height: WALL });
-    addMod("lobby", 4.4, 1.6, { id: "lobby", kind: "lobby", y: 0, height: WALL });
-    addMod("roof", (lg.x0 + lg.x1) / 2, (lg.z0 + lg.z1) / 2, { id: "roof", kind: "roof", y: 0, height: WALL });
+    for (const [k, [dx]] of Object.entries(Plan.doors)) {             // 門牌（門楣上，兩面都貼）
+      const { t, aspect } = textTexture(k === "toilets" ? "TOILETS 廁所" : Plan.rooms[k].title, { bg: "#22252A" });
+      const h = 0.32, w = h * aspect;
+      for (const side of [1, -1]) {
+        const n = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: t }));
+        n.position.set(dx, 2.55, cw + side * 0.09); if (side < 0) n.rotation.y = Math.PI;
+        signs.add(n);
+      }
+    }
+    const decal = (text, accent, x, z, maxW) => {                       // 區域名稱：貼在地上
+      const { t, aspect } = textTexture(text, { accent });
+      const h = Math.min(0.75, maxW / aspect), w = h * aspect;
+      const n = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: t, transparent: true, opacity: 0.92, depthWrite: false }));
+      n.rotation.x = -Math.PI / 2; n.position.set(x, 0.02, z); n.renderOrder = 2;
+      signs.add(n);
+    };
+    for (const z of this.zoneList) decal(z.title, z.accent, (z.rect.x0 + z.rect.x1) / 2, Math.min(9.35, z.rect.z1 + 0.4), Math.max(1.2, z.rect.x1 - z.rect.x0 - 0.2));
+    decal("休息區・閒著", 0xF59E0B, 7.8, -2.15, 4.5);
+    decal("前台・保全", 0x1E3A8A, 5.6, 9.3, 3.0);
+    root.add(b.node("office-shell")); root.add(signs);
+    const mods = new Map();          // 假模組：每區一個節點（給 focusPoint、左側索引列用）
+    const addMod = (id, r, kind) => { const n = scnNode(`floor:${id}`); n.position.set((r.x0 + r.x1) / 2, 0, (r.z0 + r.z1) / 2); root.add(n); mods.set(id, { parts: { node: n, facades: [] }, key: id, floor: { id, kind, y: 0, height: WALL } }); };
+    for (const z of this.zoneList) addMod(z.id, z.rect, "project");
+    addMod("lobby", Plan.rooms.lobby, "lobby"); addMod("roof", Plan.rooms.lounge, "roof");
     this.modules = mods;
-    this.world.add(root);
-    this.office = root; this.officeSig = this.layoutSig;
-    this.furnitureSig = "";
-    this.weatherFX.shelter(this.world, [X0, 0, Z0], [X1, R + WALL + 0.4, Z1]);
+    this.root.add(root);
+    this.office = root; this.officeSig = this.layoutSig; this.furnitureSig = "";
+    const lo = toWorld(-HW, 0, -HD), hi = toWorld(HW, WALL + 0.3, HD);
+    this.weatherFX.shelter(this.world, [lo[0], 0, lo[2]], hi);
     this.cutSig = ""; this.lodDirty = true; this.omniDirty = true;
     if (this.guardNode) { this.guardNode.removeFromParent(); this.guardNode = null; this.guardKey = ""; }
   }
 
-  // MARK: 家具（Kenney；載好才有）
+  // MARK: 家具（佔位或自製模型）
 
   buildFurniture() {
-    if (!Kenney.parts.size || !this.office) return;
-    const sig = this.layoutSig + "|" + Kenney.parts.size;
+    if (!this.office) return;
+    const sig = this.layoutSig + "|" + Props.glb.size;
     if (sig === this.furnitureSig) return;
     this.furnitureSig = sig;
     this.furniture?.removeFromParent();
     const b = new Batch();
-    // 工位：有分到人的位子才擺桌子＋椅子＋螢幕＋鍵盤（沒人用的地方留空，看得出一區一區）
-    this.seats.forEach(s => {
-      b.add("desk", s.x, s.z + 0.92 * S, Math.PI);
-      b.add("chairDesk", s.x, s.z - 0.02, Math.PI);
-      b.add("computerScreen", s.x, s.z + 1.1 * S, 0, TOP);
-      b.add("computerKeyboard", s.x, s.z + 0.8 * S, 0, TOP);
+    this.seats.forEach((s, i) => {                     // 工位：桌、隔板、雙螢幕、鍵盤、椅子；隔幾張放文件、馬克杯、檯燈、小盆栽
+      b.add("desk", s.x, s.z + 0.6, Math.PI);
+      b.add("desk_divider", s.x, s.z + 0.97, 0, 0.75, { blob: false });
+      b.add("monitor_dual", s.x, s.z + 0.78, Math.PI, 0.75, { blob: false });
+      b.add("keyboard", s.x, s.z + 0.45, 0, 0.75, { blob: false });
+      b.add("chair_office", s.x, s.z - 0.05, 0);
+      if (i % 2 === 0) b.add("documents", s.x + 0.45, s.z + 0.55, 0, 0.75, { blob: false });
+      if (i % 3 === 1) b.add("mug", s.x - 0.55, s.z + 0.4, 0, 0.75, { blob: false });
+      if (i % 4 === 2) b.add("desk_lamp", s.x - 0.55, s.z + 0.75, 0.4, 0.75, { blob: false });
+      if (i % 5 === 3) b.add("plant_small", s.x + 0.55, s.z + 0.8, 0, 0.75, { blob: false });
     });
-    // 會議室：長桌＋椅子＋電視
-    const mt = OpenPlan.meeting;
-    b.add("table", -3.75, -5.65, 0);
-    for (const s of OpenPlan.meetingSeats) b.add("chair", s.x - Math.sin(s.a) * 0.05, s.z - Math.cos(s.a) * 0.05, s.a + Math.PI);
-    b.add("bookcaseOpenLow", mt.x1 - 0.35, -6.4, -Math.PI / 2);
-    b.add("pottedPlant", mt.x0 + 0.35, mt.z1 - 0.35, 0);
-    // 茶水間：吧台一排（背牆）＋冰箱＋咖啡機
-    const pt = OpenPlan.pantry;
-    for (let x = pt.x0 + 0.45; x < pt.x1 - 1.4; x += 0.86 * S) b.add("kitchenCabinet", x, Z0 + 0.6, Math.PI);
-    b.add("kitchenSink", pt.x0 + 1.31, Z0 + 0.6, Math.PI);
-    b.add("kitchenFridgeLarge", pt.x1 - 0.7, Z0 + 0.55, Math.PI);
-    b.add("kitchenCoffeeMachine", pt.x0 + 0.45, Z0 + 0.55, Math.PI, R + 0.85 * S);
-    b.add("kitchenMicrowave", pt.x0 + 2.17, Z0 + 0.55, Math.PI, R + 0.85 * S);
-    for (let x = pt.x0 + 0.7; x < pt.x1 - 0.4; x += 0.9 * S) b.add("kitchenBar", x, -5.75, 0);
-    for (let x = pt.x0 + 0.7; x < pt.x1 - 0.4; x += 0.9) b.add("stoolBar", x, -5.1, 0);
-    // 休息區：地毯、沙發、茶几、電視、植物、立燈
-    const lg = OpenPlan.lounge;
-    b.add("rugRectangle", (lg.x0 + lg.x1) / 2, (lg.z0 + lg.z1) / 2 - 0.4, 0);
-    b.add("loungeSofaLong", 4.3, -3.3, 0);
-    b.add("loungeChair", 2.95, -1.8, Math.PI / 2);
-    b.add("loungeChair", 5.65, -1.8, -Math.PI / 2);
-    b.add("tableCoffee", 4.3, -1.8, 0);
-    b.add("pottedPlant", 5.7, 0.2, 0);
-    b.add("lampRoundFloor", 2.8, -3.5, 0);
-    b.add("bookcaseOpen", 5.75, -3.6, -Math.PI / 2);
-    // 前台旁、工位區角落的植物、垃圾桶
-    b.add("pottedPlant", 2.8, 2.4, 0);
-    b.add("plantSmall2", 5.3, 1.3, 0, R + 1.05);
-    b.add("pottedPlant", -5.6, -3.9, 0);
-    b.add("trashcan", 2.15, 2.5, 0);
-    b.add("bookcaseClosedWide", -5.65, 1.4, Math.PI / 2);
-    b.add("coatRackStanding", 2.3, -4.0, 0);
+    for (const [x, n] of [[-11, "poster"], [-8.8, "cork_board"], [-2.6, "poster"], [2.6, "cork_board"], [6.8, "poster"]]) b.add(n, x, -3.9, 0, 1.0, { blob: false });
+    for (const x of [-11.4, -3.3, 3.0, 11.4]) b.add("plant_tall", x, -3.3, 0);
+    b.add("floor_fan", -11.4, 8.9, 0.6); b.add("bookshelf", -11.75, 3.2, Math.PI / 2); b.add("bookshelf", -11.75, 4.5, Math.PI / 2);
+    b.add("trash_bin", 2.9, 8.9, 0); b.add("plant_tall", 2.9, -2.1, 0);
+    // 會議室
+    b.add("meeting_table", -7.8, -6.9, 0);
+    for (const s of Plan.meetingSeats) b.add("chair_meeting", s.x - Math.sin(s.a) * 0.05, s.z - Math.cos(s.a) * 0.05, s.a);
+    b.add("projector_screen", -7.8, -9.62, 0, 0.6, { blob: false });
+    b.add("whiteboard", -11.86, -6.9, Math.PI / 2, 0.9, { blob: false });
+    b.add("plant_tall", -5.1, -9.2, 0); b.add("plant_small", -7.8, -6.9, 0, 0.75, { blob: false });
+    // 主管室
+    b.add("rug_large", -1.5, -6.6, 0, 0, { blob: false });
+    b.add("exec_desk", -1.5, -7.9, 0); b.add("chair_exec", -1.5, -8.7, 0);
+    b.add("bookshelf", -3.6, -9.55, 0); b.add("bookshelf", 0.6, -9.55, 0);
+    b.add("trophy", -2.2, -7.9, 0, 0.78, { blob: false }); b.add("globe", 0.8, -5.0, 0); b.add("chart_board", -3.8, -5.0, 0.5);
+    b.add("plant_tall", 1.0, -8.9, 0); b.add("armchair", -1.0, -5.0, Math.PI); b.add("armchair", -2.2, -5.0, Math.PI);
+    // 茶水間
+    b.add("kitchen_counter", 4.4, -9.45, 0); b.add("fridge", 6.8, -9.35, 0); b.add("vending_machine", 2.15, -9.35, 0);
+    b.add("water_dispenser", 7.6, -6.2, -Math.PI / 2); b.add("kitchen_island", 5.3, -6.4, 0);
+    for (const x of [4.4, 5.3, 6.2]) b.add("bar_stool", x, -5.15, 0);
+    b.add("mug", 4.8, -6.4, 0, 0.95, { blob: false }); b.add("trash_bin", 7.6, -8.9, 0);
+    // 廁所
+    for (const x of [8.7, 9.75, 10.8]) b.add("toilet_stall", x, -8.95, 0, 0, { blob: false });
+    b.add("sink_counter", 11.6, -5.6, -Math.PI / 2);
+    // 休息區
+    b.add("rug_large", 7.9, 0.0, 0, 0, { blob: false }); b.add("pool_table", 7.9, 0.0, 0);
+    b.add("foosball", 5.75, 3.9, 0);
+    b.add("sofa", 11.05, 3.2, -Math.PI / 2); b.add("coffee_table", 9.6, 3.2, Math.PI / 2);
+    b.add("beanbag", 8.6, 4.6, 0); b.add("beanbag", 7.2, 4.7, 0.4);
+    b.add("tv_wall", 11.7, -1.0, -Math.PI / 2, 1.0, { blob: false });
+    b.add("plant_tall", 11.4, -2.1, 0); b.add("plant_tall", 4.0, 4.8, 0); b.add("floor_fan", 4.0, -2.0, 0.8);
+    // 前台
+    b.add("reception_desk", 8.0, 6.9, Math.PI);
+    b.add("plant_tall", 11.3, 9.2, 0); b.add("plant_tall", 4.0, 9.2, 0); b.add("bench", 10.6, 8.9, Math.PI);
+    // 吊燈：會議桌、主管桌、中島、撞球桌、前台、工作區
+    const lamps = [[-8.8, -6.9], [-6.8, -6.9], [-1.5, -7.6], [5.3, -6.4], [7.3, 0], [8.5, 0], [8.0, 6.9]];
+    for (const c of [1, 3, 5, 7]) for (const r of [0, 2, 4]) lamps.push([Plan.cols[c] - 0.85, Plan.rows[r] + 0.6]);
+    for (const [lx, lz] of lamps) b.add("pendant_lamp", lx, lz, 0, WALL - 0.9, { blob: false });
     const n = b.node("furniture");
     this.office.add(n);
     this.furniture = n;
+    this.omniDirty = true;
     this.bump(0.2);
+  }
+
+  // MARK: 戶外：草地、步道、樹、灌木、路燈、長椅（原本大樓那塊地的邊緣一圈）
+
+  buildOutdoor() {
+    // 前面緊貼城市的人行道（只留一條窄草皮＋路燈）；左、後兩邊有比較寬的綠地
+    const b = new Batch();
+    const grass = new THREE.MeshStandardMaterial({ map: FLOORS.grass([8, 7]), roughness: 1 });
+    const g = new THREE.PlaneGeometry(2 * HW + 4.4, 2 * HD + 3.4); g.rotateX(-Math.PI / 2); g.translate(-0.6, -0.29, -0.6);
+    b.push(g, grass);
+    const path = new THREE.MeshStandardMaterial({ map: FLOORS.path([1, 1]), roughness: 0.95 });
+    const p1 = new THREE.PlaneGeometry(2.4, 1.2); p1.rotateX(-Math.PI / 2); p1.translate(Plan.entrance.x, -0.27, HD + 0.6); b.push(p1, path);
+    for (const [x, z] of [[-HW - 1.3, -HD - 1.0], [HW + 0.6, -HD - 1.2], [-HW - 1.4, 1.5], [-HW - 1.3, HD - 0.5]]) b.add("tree", x, z, 0, -0.3, { blob: false });
+    for (let x = -HW + 1; x < HW; x += 2.6) b.add("bush", x, -HD - 0.7, 0, -0.3, { blob: false });
+    for (let z = -HD + 1; z < HD - 1; z += 2.6) b.add("bush", -HW - 0.7, z, 0, -0.3, { blob: false });
+    for (const x of [-10, -2, 6.6, 10.4]) b.add("street_lamp", x, HD + 0.5, 0, -0.3, { blob: false });
+    const n = b.node("outdoor");
+    this.root.add(n);
+    this.outdoor = n;
   }
 
   // MARK: 人
 
-  updatePeople(islands, _wander, animate, now) {
+  updatePeople(islands, _wander, animate) {
     const seen = new Set();
     for (const i of islands) {
       const fid = projectId(i.project);
       for (const p of i.people.slice(0, OfficeBuilder.maxPeople)) {
         const a = this.assign.get(p.card.id);
-        if (!a) continue;
+        if (!a || !this.office) continue;
         seen.add(p.card.id);
         this.placeOpen(p, fid, a, animate);
       }
     }
-    for (const [id, old] of [...this.persons]) if (!seen.has(id)) { this.persons.delete(id); old.node.removeFromParent(); this.mixers.delete(old.node.userData.mixer); }
+    for (const [id, old] of [...this.persons]) if (!seen.has(id)) { this.persons.delete(id); this.bodies.delete(id); old.node.removeFromParent(); }
     this.peopleSeeded = this.peopleSeeded || islands.length > 0;
   }
-
-  /** 一個人：Kenney 人物（載好前先用方塊 Kubo）＋腳下狀態光圈＋頭上寶石＋桌上亮的螢幕＋名牌錨點＋點擊盒 */
-  makePerson(p, seated, atDesk, noCup = false, intro = true) {
-    if (!People.models.size) { const k = super.makePerson(p, seated, atDesk, noCup, intro); k.userData.kubo = true; return k; }
-    const root = scnNode(`p:${p.card.id}`);
-    const ch = People.make(People.pick(p.card.id), { seated, mood: p.mood });
-    root.add(ch.model);
-    const tint = KuboArt.tint(p.mood);
-    const lit = p.mood !== "idle" && p.mood !== "asleep";
-    // 狀態色（11-08 使用者：不要整隻變色）：腳下光圈＋頭上寶石；閒著的只有淡灰圈、沒有寶石
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.36, 0.025, 8, 40).rotateX(-Math.PI / 2), VoxMat.flat(tint, { emit: lit ? [0.8, 1.8] : null }));
-    ring.position.y = 0.03; ring.name = "status-ring";
-    root.add(ring);
-    const top = (seated ? 0.521 * CHAR_K + SEAT_Y : 0.68 * CHAR_K);
-    if (lit) {
-      const gem = new THREE.Mesh(new THREE.OctahedronGeometry(0.09), VoxMat.flat(tint, { emit: [0.9, 2.0] }));
-      gem.position.y = top + 0.16; gem.name = "gem";
-      root.add(gem);
-    }
-    if (atDesk && seated && lit && !p.card.captain) {          // 桌上螢幕亮狀態色（背對你的人也看得到在忙什麼）
-      const scr = new THREE.Mesh(new THREE.PlaneGeometry(0.26, 0.15), VoxMat.flat(tint, { emit: [0.7, 2.6] }));
-      scr.position.set(0, TOP - R + 0.19, 0.735); scr.rotation.y = Math.PI;
-      root.add(scr);
-    }
-    const anchor = scnNode("anchor"); anchor.position.y = top + 0.3; root.add(anchor);
-    this.addHaloAndHitbox(root, 0.85);
-    OfficeBuilder.pickable(root);
-    root.userData.mixer = ch.mixer;
-    if (ch.animated && !OfficeBuilder.reduceMotion) this.mixers.add(ch.mixer);
-    return root;
-  }
-
-  get animating() { return this.mixers.size > 0 && !OfficeBuilder.heatPaused; }
-
-  tick(dt) {
-    super.tick(dt);
-    if (!(dt > 0) || OfficeBuilder.heatPaused) return;
-    for (const m of this.mixers) m.update(dt);
-  }
-
-  // 方塊 Kubo 的小動作（點頭、轉頭）：人物有自己的待機動畫，不用
-  scheduleFidget() {}
 
   slot(a) {
     switch (a.kind) {
       case "desk": return this.seats[a.slot];
-      case "meeting": return OpenPlan.meetingSeats[a.slot];
-      case "lounge": return OpenPlan.loungeSlots[a.slot];
-      case "pantry": return OpenPlan.pantrySlots[a.slot];
-      default: return OpenPlan.aisleSlots[a.slot];
+      case "meeting": return Plan.meetingSeats[a.slot];
+      case "lounge": return Plan.loungeSlots[a.slot];
+      case "pantry": return Plan.pantrySlots[a.slot];
+      default: return Plan.aisleSlots[a.slot];
     }
+  }
+
+  /** 一個人：身體（模型或程式人物）＋腳下狀態光圈＋頭上寶石＋名牌錨點＋點擊盒 */
+  makeOpenPerson(p, slot) {
+    const root = scnNode(`p:${p.card.id}`);
+    const body = makeBody(p.card.id, { sit: !!slot.sit, seatY: slot.seatY ?? PERSON_SEAT });
+    root.add(body.node);
+    const tint = KuboArt.tint(p.mood);
+    const lit = p.mood !== "idle" && p.mood !== "asleep";
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.035, 8, 40).rotateX(-Math.PI / 2), VoxMat.flat(tint, { emit: lit ? [0.9, 2.0] : null }));
+    ring.position.y = 0.04; ring.name = "status-ring";
+    root.add(ring);
+    const top = body.headTop(slot.sit ? "sit" : "stand");
+    if (lit) { const gem = new THREE.Mesh(new THREE.OctahedronGeometry(0.13), VoxMat.flat(tint, { emit: [0.9, 2.2] })); gem.position.y = top + 0.3; gem.name = "gem"; root.add(gem); }
+    const anchor = scnNode("anchor"); anchor.position.y = top + 0.55; root.add(anchor);
+    this.addHaloAndHitbox(root, 1.2);
+    OfficeBuilder.pickable(root);
+    return { root, body };
   }
 
   placeOpen(p, fid, a, animate) {
     const id = p.card.id;
-    const seated = a.kind === "desk" || a.kind === "meeting";
-    const atDesk = a.kind === "desk";
-    const look = OfficeBuilder.personKey(p) + `|${seated}|${atDesk}`;
+    const s = this.slot(a);
+    const look = OfficeBuilder.personKey(p) + `|${!!s.sit}|${s.seatY ?? ""}|${Props.glb.has("person_base")}`;
     const place = `${a.kind}:${a.slot}`;
-    const parent = this.office;
     let person = this.persons.get(id);
-    if (person && person.look === look) {
-      if (person.place === place && person.node.parent === parent) { person.islander = p; return; }
-    } else {
-      const intro = person ? person.mood !== p.mood : true;
-      if (person) { person.node.removeFromParent(); this.mixers.delete(person.node.userData.mixer); }
-      const node = this.makePerson(p, seated, atDesk, false, intro);
-      person = { node, look, place: "", mood: p.mood, islander: p, floor: fid, seat: a.slot, seats: 1 };
+    const from = person ? person.node.position.clone() : null;
+    if (person && person.look === look && person.place === place && person.node.parent === this.office) { person.islander = p; return; }
+    if (!person || person.look !== look) {
+      person?.node.removeFromParent();
+      const { root, body } = this.makeOpenPerson(p, s);
+      person = { node: root, look, place: "", mood: p.mood, islander: p, floor: fid, seat: a.slot, seats: 1 };
+      this.bodies.set(id, { body, walk: null });
     }
     person.place = place; person.mood = p.mood; person.islander = p; person.floor = a.kind === "desk" ? fid : a.kind;
     this.persons.set(id, person);
     const node = person.node;
-    node.scale.setScalar(node.userData.kubo ? S : 1);
-    if (node.parent !== parent) { node.removeFromParent(); parent.add(node); }
-    const s = this.slot(a);
-    node.position.set(s.x, R, s.z); node.rotation.y = s.a;
+    if (node.parent !== this.office) { node.removeFromParent(); this.office.add(node); }
+    node.rotation.y = s.a;
+    const ctl = this.bodies.get(id);
+    // 換位置：沿走道走過去；第一次載入、減少動態效果、太熱 ⇒ 直接到位
+    if (from && animate && this.peopleSeeded && !OfficeBuilder.reduceMotion && !OfficeBuilder.heatPaused && Math.hypot(from.x - s.x, from.z - s.z) > 0.3) {
+      const pts = this.route(from.x, from.z, s.x, s.z);
+      const lens = pts.slice(1).map((q, i) => Math.hypot(q[0] - pts[i][0], q[1] - pts[i][1]));
+      ctl.walk = { pts, lens, t: 0, end: s };
+      ctl.body.setPose("walk");
+      node.position.set(from.x, 0, from.z);
+      this.walkUntil = Math.max(this.walkUntil, Date.now() / 1000 + lens.reduce((x, y) => x + y, 0) / 1.3 + 0.2);
+    } else {
+      ctl.walk = null;
+      ctl.body.setPose(s.sit ? "sit" : "stand");
+      node.position.set(s.x, 0, s.z);
+    }
   }
 
-  // 閒晃、電梯、搬家：單層樓不用
-  settle() {}
+  /** 走路的路線：後排房間要走門；工作區 ↔ 休息區／前台從走道那頭繞過矮櫃 */
+  route(x0, z0, x1, z1) {
+    const out = [[x0, z0]];
+    const r0 = roomAt(x0, z0), r1 = roomAt(x1, z1);
+    const door = r => Plan.doors[r];
+    if (door(r0)) { out.push([door(r0)[0], -4.7]); out.push([door(r0)[0], -3.3]); }
+    if (door(r1) && r1 !== r0) { out.push([door(r1)[0], -3.3]); out.push([door(r1)[0], -4.7]); }
+    else if (!door(r0) && (r0 === "work") !== (r1 === "work")) out.push([3.5, -3.0]);
+    out.push([x1, z1]);
+    return out;
+  }
+
+  get animating() { return this.bodies.size > 0 && !OfficeBuilder.heatPaused; }
+
+  tick(dt) {
+    super.tick(dt);
+    if (!(dt > 0) || OfficeBuilder.heatPaused) return;
+    this.clock += dt;
+    for (const [id, c] of this.bodies) {
+      c.body.update(this.clock, dt);
+      const w = c.walk;
+      if (!w) continue;
+      w.t += dt * 1.3;
+      const node = id === "guard" ? null : this.persons.get(id)?.node;
+      if (!node) { c.walk = null; continue; }
+      let d = w.t, i = 0;
+      while (i < w.lens.length && d > w.lens[i]) { d -= w.lens[i]; i++; }
+      if (i >= w.lens.length) {
+        node.position.set(w.end.x, 0, w.end.z); node.rotation.y = w.end.a;
+        c.body.setPose(w.end.sit ? "sit" : "stand"); c.walk = null; continue;
+      }
+      const a = w.pts[i], b2 = w.pts[i + 1], k = d / Math.max(1e-3, w.lens[i]);
+      node.position.set(a[0] + (b2[0] - a[0]) * k, 0, a[1] + (b2[1] - a[1]) * k);
+      node.rotation.y = Math.atan2(b2[0] - a[0], b2[1] - a[1]);
+    }
+  }
+
+  // 閒晃、電梯、搬家、方塊 Kubo 的小動作：單層樓不用；視窗看不到時走路的人直接到位
+  settle() { for (const c of this.bodies.values()) if (c.walk) c.walk.t = 1e9; this.tick(0.001); }
   snapTravelers() {}
   parkCars() {}
   rebuildCore() {}
   updateGhosts() {}
   updateBoards() {}
   updateCooler() {}
+  updateEmergency() {}
+  scheduleFidget() {}
+  schedulePatrol() {}
+  startPatrol() { return false; }
 
-  // MARK: 保全（站在前台；不巡邏）
+  // MARK: 保全（前台後面站著；櫃台上三面監控螢幕）
 
   updateGuard(g, scanning) {
     if (!this.office) return;
     const level = g.level ?? "normal", hasData = !!g.hasData;
-    const key = `${level}|${hasData}|${scanning}`;
+    const key = `${level}|${hasData}|${scanning}|${Props.glb.has("person_base")}`;
     if (key === this.guardKey && this.guardNode?.parent === this.office) return;
     this.guardKey = key;
-    if (this.guardNode) { this.guardNode.removeFromParent(); this.guardNode.traverse(o => { if (o.userData?.gm) this.mixers.delete(o.userData.gm); }); }
+    if (this.guardNode) { this.guardNode.removeFromParent(); this.bodies.delete("guard"); }
     const r = scnNode("guard");
     const lv = OfficeBuilder.guardColor(level), wifi = VoxMat.color(0x38bdf8), gray = VoxMat.color(0x6b7280);
     const cols = !hasData ? [gray, wifi, gray] : level === "alert" ? [lv, lv, lv] : [lv, wifi, lv];
-    cols.forEach((c, i) => {           // 櫃台上三面監控螢幕
-      const s = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.3, 0.03), VoxMat.flat(c, { emit: [0.4, 1.3] }));
-      s.position.set(3.75 + i * 0.65, R + 0.95, 1.2);
+    cols.forEach((c, i) => {
+      const s = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.32, 0.03), VoxMat.flat(c, { emit: [0.5, 1.4] }));
+      s.position.set(7.3 + i * 0.7, 1.28, 6.62);
       r.add(s);
     });
-    const ant = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.16, 0.16), VoxMat.flat(wifi, { emit: [0.8, 1.6] }));
-    ant.position.set(5.35, R + 0.9, 1.3); setEuler(ant, 0.6, 0.78, 0);
+    const ant = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.18, 0.18), VoxMat.flat(wifi, { emit: [0.8, 1.6] }));
+    ant.position.set(9.1, 1.25, 6.8); setEuler(ant, 0.6, 0.78, 0);
     if (scanning && !OfficeBuilder.reduceMotion) runAction(ant, Act.repeatForever(Act.rotateBy(0, Math.PI, 0, 1.2)));
     r.add(ant);
-    const man = scnNode("guard-man"); if (!People.models.size) man.scale.setScalar(S);
-    const gp = OpenPlan.guard;
-    man.position.set(gp.x, R, gp.z); man.rotation.y = gp.a;
-    const gm = People.models.size ? People.make("worker", { seated: false, mood: "idle" }) : null;
-    if (gm) { man.add(gm.model); man.userData.gm = gm.mixer; if (!OfficeBuilder.reduceMotion) this.mixers.add(gm.mixer); }
-    else man.add(this.makeKubo("idle", null, { seated: false, gemColor: lv, cap: true, intro: false }));
-    const gr = new THREE.Mesh(new THREE.TorusGeometry(0.36, 0.025, 8, 40).rotateX(-Math.PI / 2), VoxMat.flat(lv, { emit: [0.8, 1.8] }));
-    gr.position.y = 0.03; man.add(gr);
+    const man = scnNode("guard-man");
+    const gp = Plan.guard;
+    man.position.set(gp.x, 0, gp.z); man.rotation.y = gp.a;
+    const body = makeBody("guard-security-0001", { sit: false });
+    man.add(body.node);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.035, 8, 40).rotateX(-Math.PI / 2), VoxMat.flat(lv, { emit: [0.9, 2.0] }));
+    ring.position.y = 0.04; man.add(ring);
     this.addHaloAndHitbox(man, 1.2);
-    const anchor = scnNode("anchor"); anchor.position.set(0, gm ? 0.68 * CHAR_K + 0.3 : 1.25 * KUBO + 0.1, 0);
-    man.add(anchor);
+    const anchor = scnNode("anchor"); anchor.position.set(0, body.headTop("stand") + 0.55, 0); man.add(anchor);
     r.add(man);
     OfficeBuilder.pickable(r);
     this.office.add(r);
     this.guardNode = r;
+    this.bodies.set("guard", { body, walk: null });
   }
-  schedulePatrol() {}
-  startPatrol() { return false; }
 
-  updateEmergency() {}
-
-  // MARK: 名牌（一整層當一層樓）
+  // MARK: 名牌（一整層當一層樓，kind "open"：不受樓層天花限制）
 
   labelTargets() {
     const ps = [];
@@ -658,90 +631,86 @@ export class OpenOfficeBuilder extends OfficeBuilder {
     }
     const ga = this.guardNode?.getObjectByName("anchor");
     if (ga) ps.push({ id: "guard", anchor: ga, card: null, mood: "idle", floor: "office" });
-    const fs = this.office ? [{ id: "office", node: this.office, height: WALL + 0.6, floorNo: "", title: "", kind: "open", names: [], accent: null }] : [];
+    const fs = this.office ? [{ id: "office", node: this.root, height: (WALL + 1.2) * OS, floorNo: "", title: "", kind: "open", names: [], accent: null }] : [];
     return { people: ps, floors: fs };
   }
 
-  /** 上方分頁用：各區 */
+  /** 上方分頁、左側索引列：各區 */
   zones() {
     const out = this.zoneList.map(z => ({ id: z.id, title: z.title, kind: "project", accent: z.accent }));
-    return [{ id: "meeting", title: "會議室", kind: "room" }, ...out, { id: "lounge", title: "休息區", kind: "room" },
-            { id: "pantry", title: "茶水間", kind: "room" }, { id: "lobby", title: "前台", kind: "room" }];
+    return [{ id: "meeting", title: "會議室", kind: "room" }, { id: "manager", title: "主管室", kind: "room" }, ...out,
+            { id: "lounge", title: "休息區", kind: "room" }, { id: "pantry", title: "茶水間", kind: "room" },
+            { id: "toilets", title: "廁所", kind: "room" }, { id: "lobby", title: "前台", kind: "room" }];
   }
-
   zoneRect(id) {
     const z = this.zoneList.find(x => x.id === id);
     if (z) return z.rect;
-    switch (id) {
-      case "meeting": return OpenPlan.meeting;
-      case "lounge": case "roof": return OpenPlan.lounge;
-      case "pantry": return OpenPlan.pantry;
-      case "lobby": return OpenPlan.front;
-      default: return null;
-    }
+    return Plan.rooms[id === "roof" ? "lounge" : id] ?? null;
   }
 
-  // MARK: 燈（夜晚：天花板下 4 盞）
+  // MARK: 燈：室內暖色點光（吊燈下）；夜裡比較亮
 
   assignOmni() {
-    if (!this.omniDirty) return;
+    if (!this.omniDirty || !this.root) return;
     this.omniDirty = false;
-    if (!(VoxMat.lamps > 0.001)) { this.omni.forEach(o => { o.visible = false; }); return; }
-    const spots = [[-3.5, -1.5], [1.0, -1.0], [4.2, -2.0], [-3.8, -5.6], [4.2, -5.6], [4.3, 1.6]];
-    while (this.omni.length < spots.length) {
-      const l = scnLight_omni(); this.world.add(l); this.omni.push(l);
+    const spots = [[-7.8, -6.9], [-1.5, -7.2], [5.0, -6.8], [10.0, -6.8], [7.9, 0.0], [8.0, 6.9], [-8.0, 1.0], [-2.5, 1.0], [-8.0, 6.5], [-2.5, 6.5], [0, -3.3]];
+    while (this.indoor.length < spots.length) {
+      const l = new THREE.PointLight(0xFFC98A, 1, 4.5, 1.6); l.userData.cat = 1;
+      this.root.add(l); this.indoor.push(l);
     }
-    this.omni.forEach((o, i) => {
-      if (i >= spots.length) { o.visible = false; return; }
-      o.position.set(spots[i][0], R + 2.7, spots[i][1]); o.visible = true;
-      o.intensity = scnIntensityOf(this.omniBase * 0.55);
-      o.distance = 7; o.userData.att = [1, 7, 2]; o.userData.cat = 1;
+    const night = VoxMat.lamps;            // 0 白天 → 1 夜晚
+    this.indoor.forEach((l, i) => {
+      l.position.set(spots[i][0], WALL - 0.4, spots[i][1]);
+      l.intensity = (0.25 + night * 1.1) * Math.PI;
+      l.distance = 9 * OS; l.visible = true;
     });
+    for (const o of this.omni) o.visible = false;
   }
-
+  applyLights() {
+    super.applyLights();
+    if (this.indoor) { this.omniDirty = true; this.assignOmni(); }
+  }
   applyCutaway() { return false; }
-  highlightFloor() { return false; }
   cutNow() {}
+  highlightFloor() { return false; }
 
-  // MARK: 取景
+  // MARK: 取景（世界座標）
 
-  /** 總覽：從右前方高處看整層（方位 24°、仰角 42°） */
   frameCamera(aspect = this.aspect) {
     aspect = Math.max(0.4, aspect);
-    const az = 24, el = 42;
-    const [dist, t] = OfficeBuilder.fit([X0, 0, Z0], [X1, R + WALL, Z1], aspect, az * Math.PI / 180, el * Math.PI / 180, 34, 1.0);
+    const az = 24, el = 46;
+    const [dist, t] = OfficeBuilder.fit(toWorld(-HW, 0, -HD), toWorld(HW, WALL, HD), aspect, az * Math.PI / 180, el * Math.PI / 180, 34, 1.0);
     this.place(t, dist, az, el);
   }
-  frameRange() { return [0, R + WALL]; }
-  /** 一區：框那一區（略俯視） */
+  frameRange() { return [0, R + WALL * OS]; }
   frameZone(id, aspect = this.aspect) {
-    if (id === "b1") {                 // 地下室 B1：鏡頭移到地面以下（sceneview 會切地下室模式）
-      const y = OfficeBasement.baseY + R + 1.2;
-      this.place([0, y, -2.1], 13, 20, 14);
-      return true;
-    }
+    if (id === "b1") { this.place([0, OfficeBasement.baseY + R + 1.2, -2.1], 13, 20, 14); return true; }
     const r = this.zoneRect(id);
     if (!r) return false;
     aspect = Math.max(0.4, aspect);
-    const az = 18, el = 50;
-    const [dist, t] = OfficeBuilder.fit([r.x0 - 0.3, R, r.z0 - 0.3], [r.x1 + 0.3, R + 2.0, r.z1 + 0.3], aspect, az * Math.PI / 180, el * Math.PI / 180, 34, 0.95);
-    this.place(t, Math.max(dist, 6), az, el);
+    const az = 18, el = 48;
+    const [dist, t] = OfficeBuilder.fit(toWorld(r.x0 - 0.5, 0, r.z0 - 0.5), toWorld(r.x1 + 0.5, 2.2, r.z1 + 0.5), aspect, az * Math.PI / 180, el * Math.PI / 180, 34, 0.95);
+    this.place(t, Math.max(dist, 4), az, el);
     return true;
   }
   frameFloor(id, aspect = this.aspect) { return this.frameZone(id, aspect); }
   focusPoint(key) {
     const id = key === "roof" || key === "lobby" ? key : key.startsWith("floor:") ? projectId(key.slice(6)) : null;
     const r = id && this.zoneRect(id);
-    return r ? [(r.x0 + r.x1) / 2, R + 1.3, (r.z0 + r.z1) / 2] : null;
+    return r ? toWorld((r.x0 + r.x1) / 2, 1.3, (r.z0 + r.z1) / 2) : null;
   }
-  totalHeight() { return R + WALL; }
+  totalHeight() { return R + WALL * OS; }
   projectFloors() { return []; }
 
-  /** 走進去：從前台旁的入口、眼睛高度，看向工位區 */
-  walkStart() { return { pos: [2.3, R + 1.85, 2.7], target: [-2.6, R + 0.5, -3.4] }; }
-  get walkBounds() { return { lo: [X0 + 0.4, Z0 + 0.4], hi: [X1 - 0.3, Z1 + 1.5] }; }
+  /** 走進去：從大門進來、眼睛高度，看向工作區；指定區域就站在那一區的門口看進去 */
+  walkStart(id = null) {
+    const at = {
+      meeting: [[-5.0, -4.5], [-10.0, -7.8]], manager: [[1.0, -4.5], [-2.4, -8.6]], pantry: [[7.6, -4.5], [3.2, -8.4]],
+      toilets: [[10.0, -4.3], [9.6, -8.8]], lounge: [[11.4, 5.0], [6.0, -1.2]], lobby: [[11.2, 9.2], [6.0, 5.6]], work: [[3.0, 9.0], [-5.5, -0.5]],
+    }[id];
+    const z = this.zoneList.find(q => q.id === id);
+    const [p, t] = at ?? (z ? [[(z.rect.x0 + z.rect.x1) / 2 + 1.2, Math.min(9.2, z.rect.z1 + 1.4)], [(z.rect.x0 + z.rect.x1) / 2, z.rect.z0]] : [[3.0, 9.0], [-5.5, -0.5]]);
+    return { pos: toWorld(p[0], 1.65, p[1]), target: toWorld(t[0], 0.9, t[1]) };
+  }
+  get walkBounds() { const lo = toWorld(-HW + 0.6, 0, -HD + 0.6), hi = toWorld(HW - 0.6, 0, HD + 1.5); return { lo: [lo[0], lo[2]], hi: [hi[0], hi[2]] }; }
 }
-
-/** 夜晚 omni（跟 builder 同一種燈） */
-function scnLight_omni() { const l = scnLight({ type: "omni", color: TP.LT1, mask: 1, start: 1, end: 7 }); l.visible = false; return l; }
-function scnIntensityOf(v) { return scnIntensity(v); }

@@ -1,10 +1,7 @@
-# 第三方美術素材
+# 3D 素材
 
-| 資料夾 | 來源 | 授權 | 用在 |
-|---|---|---|---|
-| `kenney-characters/` | Kenney「Mini Characters 2.0」（https://kenney.nl/assets/mini-characters），挑 13 個人物 `.glb`＋共用貼圖 `Textures/colormap.png` | CC0 1.0（原檔 `kenney-characters/License.txt`） | 辦公室裡的 AI 人物（idle／sit／emote-yes 動畫）、前台保全 |
-| `kenney-furniture/` | Kenney「Furniture Kit 2.0」（https://kenney.nl/assets/furniture-kit），只挑用得到的 56 個 `.glb` | CC0 1.0（公有領域，可商用、不必署名；原檔 `kenney-furniture/License.txt`） | 單層開放式辦公室的家具（`scene/openoffice.js`） |
+- `models/`：辦公室物件的 glTF（自製）。檔名照 `scene/props.js` 的物件表（清單也在 docs/OWN-SESSIONS.md「3D 物件清單」），
+  做好一個就放進來，再把檔名加進 `models/manifest.json`。沒列的物件用程式畫的佔位方塊。
+- 11-08 曾短暫用過 Kenney 的 CC0 素材包，使用者決定 3D 素材自己做一套，已拿掉。
 
 `vendor/three-r170/loaders/GLTFLoader.js`、`vendor/three-r170/utils/BufferGeometryUtils.js`、`vendor/three-r170/utils/SkeletonUtils.js` 是 three.js r170 官方 examples（MIT，見 `vendor/three-r170/LICENSE`）。
-
-要加新素材：只收 CC0 或明確可商用、可再散布的授權，來源和授權寫進上表。
