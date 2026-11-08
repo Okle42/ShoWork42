@@ -233,3 +233,49 @@ textarea.chat { display: block; width: 100%; font-size: 13px; line-height: 16px;
 #zoneTabs .ztab.on { background: var(--accent); border-color: transparent; color: #fff; }
 #zoneTabs .ztab i { width: 8px; height: 8px; border-radius: 4px; display: inline-block; }
 #zoneTabs .zsep { width: 1px; align-self: stretch; background: var(--sep); margin: 2px 2px; }
+
+/* 11-08 介面模式（ui/uxmodes.js）：專注／儀表板、人物資訊卡、區域聚焦、設定面板 */
+body.ux-focus #left, body.ux-focus #right, body.ux-hud #left, body.ux-hud #right { display: none; }
+body.ux-focus.ux-inbox-open #right, body.ux-hud.ux-inbox-open #right { display: flex; position: fixed; right: 10px; top: 54px; bottom: 10px; z-index: 60;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, .55); border-radius: 12px; }
+#uxLayer { position: absolute; inset: 0; z-index: 5; pointer-events: none; }
+#uxLayer > * { pointer-events: auto; }
+#uxLayer .ux-dim { pointer-events: none; position: absolute; inset: 0; }
+.ux-card { position: absolute; background: rgba(18, 19, 24, .86); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, .1);
+  border-radius: 12px; color: var(--primary); font-size: 12px; }
+.ux-card h4 { margin: 0 0 6px; font-size: 11px; letter-spacing: .08em; color: var(--secondary); font-weight: 600; }
+.ux-inbox-btn { position: absolute; right: 12px; top: 48px; padding: 6px 12px; border-radius: 99px; border: 1px solid var(--sep); background: rgba(30, 30, 34, .86);
+  color: var(--primary); font-size: 12px; cursor: pointer; backdrop-filter: blur(8px); }
+.ux-inbox-btn b { background: #EF4444; color: #fff; border-radius: 99px; padding: 0 6px; margin-left: 4px; }
+.ux-stats { left: 10px; top: 50px; display: grid; grid-template-columns: repeat(3, 76px); gap: 2px; padding: 8px; }
+.ux-stats div { padding: 4px 6px; } .ux-stats small { color: var(--secondary); font-size: 10px; } .ux-stats b { display: block; font-size: 20px; }
+.ux-feed { right: 12px; top: 86px; width: 280px; padding: 10px 12px; max-height: 46%; overflow: hidden; }
+.ux-feed .it, .ux-zone .it { display: flex; gap: 8px; padding: 6px 0; border-top: 1px solid rgba(255, 255, 255, .06); cursor: pointer; align-items: flex-start; }
+.ux-feed .it i, .ux-zone .it i { width: 8px; height: 8px; border-radius: 4px; margin-top: 4px; flex: none; }
+.ux-feed .it p { margin: 0; line-height: 1.35; } .ux-feed small, .ux-zone small { color: var(--secondary); font-size: 11px; display: block; }
+.ux-proj { left: 10px; bottom: 12px; width: 250px; padding: 10px 12px; }
+.ux-proj .row { display: flex; align-items: center; gap: 8px; padding: 3px 0; } .ux-proj .row span { width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ux-proj .bar { flex: 1; display: flex; height: 7px; border-radius: 4px; overflow: hidden; background: #2a2d33; } .ux-proj .bar i { display: block; height: 7px; }
+.ux-pcard { position: absolute; z-index: 40; width: 320px; background: rgba(22, 23, 28, .96); border: 1px solid rgba(255, 255, 255, .12); border-radius: 14px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, .55); color: var(--primary); font-size: 12.5px; overflow: hidden; }
+.ux-pcard .hd { display: flex; gap: 9px; align-items: center; padding: 11px 12px; border-bottom: 1px solid rgba(255, 255, 255, .08); }
+.ux-pcard .av { width: 34px; height: 34px; border-radius: 17px; display: grid; place-items: center; font-weight: 700; color: #fff; flex: none; }
+.ux-pcard .nm { min-width: 0; } .ux-pcard .nm small { display: block; color: var(--secondary); font-size: 11px; }
+.ux-pcard .st { margin-left: auto; padding: 2px 8px; border-radius: 99px; font-size: 11px; white-space: nowrap; }
+.ux-pcard .x, .ux-zone .x { border: none; background: none; color: var(--secondary); cursor: pointer; font-size: 13px; }
+.ux-pcard .bd { padding: 8px 12px 10px; } .ux-pcard .k { color: var(--secondary); font-size: 10.5px; margin-top: 7px; }
+.ux-pcard pre { margin: 3px 0 0; background: #101115; border-radius: 7px; padding: 6px 8px; font: 11.5px ui-monospace, Menlo, monospace; white-space: pre-wrap; word-break: break-all; }
+.ux-pcard .bar, .ux-zone .bar { display: flex; gap: 6px; padding: 9px 12px; border-top: 1px solid rgba(255, 255, 255, .08); }
+.ux-pcard button, .ux-zone .it button { padding: 5px 10px; border-radius: 7px; border: 1px solid rgba(255, 255, 255, .1); background: rgba(255, 255, 255, .08); color: var(--primary); cursor: pointer; font-size: 12px; }
+.ux-pcard button.p, .ux-zone .it button[data-a="answer"] { background: var(--accent); border-color: transparent; color: #fff; }
+.ux-zone { right: 12px; top: 48px; width: 280px; padding: 10px 12px; max-height: calc(100% - 70px); overflow-y: auto; }
+.ux-zone .zh { display: grid; grid-template-columns: 1fr auto; } .ux-zone .zh b { font-size: 14px; } .ux-zone .zh small { grid-column: 1 / -1; }
+.ux-zone .it div { flex: 1; min-width: 0; } .ux-zone .none { color: var(--secondary); padding: 8px 0; }
+.ux-settings { z-index: 50; width: 250px; padding: 12px; }
+.ux-settings .ux-lbl { color: var(--secondary); font-size: 11px; margin: 9px 0 4px; }
+.ux-settings .seg { display: flex; background: rgba(255, 255, 255, .06); border-radius: 8px; padding: 2px; }
+.ux-settings .seg button { flex: 1; padding: 5px 4px; border: none; border-radius: 6px; background: none; color: var(--primary); font-size: 12px; cursor: pointer; }
+.ux-settings .seg button.on { background: var(--accent); color: #fff; }
+#zoneTabs .ztab-gear { margin-left: auto; }
+#zoneTabs { z-index: 7; }
+#overlayBL { z-index: 8; }

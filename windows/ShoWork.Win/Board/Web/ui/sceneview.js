@@ -22,7 +22,8 @@ import { OfficeBuilder } from "../scene/builder.js";
 import { OpenOfficeBuilder } from "../scene/openoffice.js";
 import { SCNTransaction } from "../scene/actions.js";
 import { OfficeStyleFX } from "../scene/stylefx.js";
-import { OfficeLabels } from "./labels.js";
+import { OfficeLabels, LabelSpec } from "./labels.js";
+import { UxModes } from "./uxmodes.js";
 
 const toArr = p => !p ? null : Array.isArray(p) ? p.slice() : [p.x, p.y, p.z];
 const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -171,6 +172,8 @@ export class OfficeSCNView {
     const wasUnder = this.builder.underground;
     const p = this.cam.position;
     if (this.builder.updateLOD([p.x, p.y, p.z], this.target)) this.playFor(0.3);
+    if (this.ux?.card) this.ux.placeCard();               // 鏡頭停下來：資訊卡、聚焦亮區跟著重算位置
+    if (this.ux?.focusId) this.ux.refresh();
     // 進出地下室（10-22 B1 機房）：城市名牌要拿掉／放回；圖譜開始／停止自轉 ⇒ 重算要不要持續渲染
     if (this.builder.underground !== wasUnder) {
       if (this.lastGuard) this.refreshLabels(...this.lastGuard);
@@ -190,7 +193,13 @@ export class OfficeSCNView {
       if (p.id === "guard") specs.push(OfficeLabels.guardSpec(guardStatus, scanning, p.anchor));
       else if (p.card) {
         const sp = OfficeLabels.spec(p.card, p.mood, p.anchor, p.floor);
-        if (crowded && p.id !== this.hoverId && p.id !== this.selectedId) sp.text = OfficeLabels.shortName(p.card);
+        const focus = p.id === this.hoverId || p.id === this.selectedId;
+        if (this.ux?.minimal && !focus) {               // 極簡名牌：狀態色點＋名字
+          const dot = { working: 0xA78BFA, waiting: 0xFF6B6B, stuck: 0xFFA94D, finished: 0x69DB7C }[p.mood] ?? 0xADB5BD;
+          specs.push(LabelSpec({ id: sp.id, kind: sp.kind, text: OfficeLabels.shortName(p.card), bg: 0x14161A, bgAlpha: 0.5, dot, anchor: sp.anchor, floor: sp.floor, fg: 0xF1F1F3 }));
+          continue;
+        }
+        if (crowded && !focus) sp.text = OfficeLabels.shortName(p.card);
         specs.push(sp);
       }
     }
@@ -450,6 +459,8 @@ export class OfficeSCNView {
     bar.id = "zoneTabs";
     wrap.appendChild(bar);
     this.tabsEl = bar;
+    this.ux = new UxModes(this, wrap);                // 介面模式：專注／儀表板、極簡名牌、人物資訊卡、區域聚焦（11-08）
+    this.builder.onPeople = () => this.ux?.refresh();
     this.renderTabs();
   }
 
@@ -468,10 +479,12 @@ export class OfficeSCNView {
       bar.appendChild(b);
       return b;
     };
-    btn("總覽", this.mode === "overview" && !this.zoneOn, () => { this.zoneOn = null; this.setMode("overview"); }, null, "從上面看整層");
+    btn("總覽", this.mode === "overview" && !this.zoneOn, () => { this.zoneOn = null; this.ux?.clearZone(); this.setMode("overview"); }, null, "從上面看整層");
     btn("走進去", this.mode === "walk", () => { this.zoneOn = null; this.setMode("walk"); }, null, "第一人稱：拖曳轉頭、WASD 走、滾輪前後");
     const sep = document.createElement("span"); sep.className = "zsep"; bar.appendChild(sep);
     for (const z of zones) btn(z.title, this.zoneOn === z.id, () => this.goZone(z.id), z.accent ?? null);
+    const gear = btn("⚙︎ 介面", false, () => this.ux?.toggleSettings(gear), null, "版面（標準／專注／儀表板）、名牌、資訊卡、區域聚焦");
+    gear.classList.add("ztab-gear");
   }
 
   goZone(id) {
@@ -479,6 +492,7 @@ export class OfficeSCNView {
     if (this.mode === "walk") { this.walkTo(id); this.renderTabs(); return; }      // 走進去模式：直接走到那一區門口
     this.mode = "overview";
     if (this.builder.frameZone?.(id, this.aspect)) { this.userMoved = true; this.camMoved(0.9); }
+    this.ux?.zone(id);
     this.renderTabs();
   }
 
@@ -710,6 +724,7 @@ export class OfficeSCNView {
           const p = this.viewPoint(e);
           const id = this.pick(p);
           this.selectedId = id && !id.startsWith("city:") ? id : null;
+          this.ux?.clicked(id);
           if (this.lastGuard) this.refreshLabels(...this.lastGuard);
           if (id) this.onClick?.(id);
           else {

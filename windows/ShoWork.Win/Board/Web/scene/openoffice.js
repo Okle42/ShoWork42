@@ -222,6 +222,7 @@ export class OpenOfficeBuilder extends OfficeBuilder {
     this.highlight(this.lit);
     this.looping = !OfficeBuilder.reduceMotion && (scanning || this.weatherFX.raining || this.bodies.size > 0);
     this.omniDirty = true; this.assignOmni();
+    this.onPeople?.();
     return first ? "layout" : "none";
   }
 
@@ -690,7 +691,7 @@ export class OpenOfficeBuilder extends OfficeBuilder {
     aspect = Math.max(0.4, aspect);
     const az = 18, el = 48;
     const [dist, t] = OfficeBuilder.fit(toWorld(r.x0 - 0.5, 0, r.z0 - 0.5), toWorld(r.x1 + 0.5, 2.2, r.z1 + 0.5), aspect, az * Math.PI / 180, el * Math.PI / 180, 34, 0.95);
-    this.place(t, Math.max(dist, 4), az, el);
+    this.place(t, Math.max(dist, 6), az, el);
     return true;
   }
   frameFloor(id, aspect = this.aspect) { return this.frameZone(id, aspect); }

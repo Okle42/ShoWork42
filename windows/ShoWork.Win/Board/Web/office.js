@@ -69,6 +69,7 @@ view.applyStyle(S.style);
 view.onHover = id => { S.hovered = id; renderOverlay(); };
 view.onHoverPoint = p => { S.hoverPoint = p; };
 view.onClick = id => click(id);
+view.onInfoAction = (id, a) => { if (a === "jump") jump(id); else click(id); };     // 人物資訊卡、區域聚焦清單的按鈕（11-08）
 view.menuFor = (id, x, y) => { const m = menu(id); if (m) showMenu(x, y, m); };
 view.onVisible = v => send("wanderVisible", { visible: v }, true);
 
