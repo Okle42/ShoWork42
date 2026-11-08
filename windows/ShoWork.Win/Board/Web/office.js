@@ -513,7 +513,7 @@ function onMessage(m) {
   if (!m || typeof m !== "object") return;
   switch (m.type) {
     case "office2": apply(m); break;
-    case "heat": view.heatChanged(!!m.paused); break;                       // HeatGate：機器熱 ⇒ 持續動畫停
+    case "heat": view.heatChanged(!!m.paused, m); break;                       // HeatGate：機器熱 ⇒ 持續動畫停
     case "visible": view.setHostVisible(m.visible !== false); break;       // 視窗被蓋住／縮小（C# 另外通知）
     case "toast": toast(String(m.text ?? "")); if (m.captainDone) { S.captainBusy = false; renderInbox(); } break;
     case "captainBusy": S.captainBusy = !!m.busy; renderInbox(); break;

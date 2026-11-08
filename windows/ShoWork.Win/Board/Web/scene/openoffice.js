@@ -39,7 +39,7 @@ export const Plan = {
   /** 後排房間的門（在走道那面牆 z=-4.0 上）：x 中心、寬 */
   doors: { meeting: [-6.0, 1.2], manager: [-0.2, 1.0], pantry: [4.6, 1.4], toilets: [10.0, 1.0] },
   /** 工位：8 欄 × 5 排；人面向 +z，桌子在人前面 */
-  cols: [-10.9, -9.2, -7.5, -5.8, -4.1, -2.4, -0.7, 1.0],
+  cols: [-10.4, -8.7, -7.0, -5.3, -3.6, -1.9, -0.2, 1.5],     // 11-09 往右挪 0.5：左牆留一條走道到電梯
   rows: [-1.7, 0.6, 2.9, 5.2, 7.5],
   meetingSeats: [{ x: -11.0, z: -6.9, a: Math.PI / 2, sit: true },
                  ...[-9.6, -8.4, -7.2, -6.0].flatMap(x => [{ x, z: -7.95, a: 0, sit: true }, { x, z: -5.85, a: Math.PI, sit: true }])],
@@ -70,6 +70,42 @@ function roomAt(x, z) {
   for (const [k, r] of Object.entries(Plan.rooms)) if (x >= r.x0 && x <= r.x1 && z >= r.z0 && z <= r.z1) return k;
   return "work";
 }
+
+// MARK: - 走路網路（11-09 使用者：人都不會動）：每個點先走到走道（z −3.0），兩頭接起來；工作區走桌子後面的橫走道＋左右兩條直走道
+const LANE = { left: -11.55, right: 2.8, corridor: -3.0, lounge: 4.65, loungeR: 10.1, loungeMid: 1.7, lobby: 8.2 };
+const AISLES = Plan.rows.map(r => r - 0.8).concat([8.9]);
+function aisleOf(z) { let a = AISLES[0]; for (const v of AISLES) if (v <= z + 0.05) a = v; return a; }
+/** 點 → 走道的一串轉折點（第一個是點本身） */
+function chain(x, z) {
+  const r = roomAt(x, z), C = LANE.corridor, d = Plan.doors[r];
+  if (d) return [[x, z], [d[0], -4.7], [d[0], C]];
+  if (r === "corridor") return [[x, z], [x, C]];
+  if (r === "work") {
+    if (x < LANE.left + 0.4) return [[x, z], [LANE.left, z], [LANE.left, C]];
+    const za = aisleOf(z), side = x < -4.5 ? LANE.left : LANE.right;
+    return [[x, z], [x, za], [side, za], [side, C]];
+  }
+  if (r === "lounge") {                       // 撞球桌（z −0.75…0.75）、手足球、沙發：z 大的從兩側繞
+    if (z <= 1) return [[x, z], [x, C]];
+    if (x < 6) return [[x, z], [LANE.lounge, z], [LANE.lounge, C]];
+    return [[x, z], [x, LANE.loungeMid], [LANE.loungeR, LANE.loungeMid], [LANE.loungeR, C]];
+  }
+  return [[x, z], [x, LANE.lobby], [LANE.lounge, LANE.lobby], [LANE.lounge, C]];     // 前台：從櫃台前面繞
+}
+function simplify(pts) { return pts.filter((p, i) => i === 0 || Math.hypot(p[0] - pts[i - 1][0], p[1] - pts[i - 1][1]) > 0.05); }
+const walkStep = pts => { pts = simplify(pts); return { k: "walk", pts, lens: pts.slice(1).map((q, i) => Math.hypot(q[0] - pts[i][0], q[1] - pts[i][1])) }; };
+
+/** 走去哪裡晃一下：{x, z, a（面向）} */
+const SPOTS = {
+  pantry: [{ x: 6.9, z: -6.3, a: Math.PI / 2 }, { x: 2.2, z: -8.4, a: Math.PI }, { x: 4.4, z: -7.6, a: Math.PI }],
+  toilets: [{ x: 9.4, z: -6.2, a: Math.PI }, { x: 11.0, z: -5.6, a: Math.PI / 2 }],
+  lounge: [{ x: 5.2, z: -1.4, a: Math.PI / 2 }, { x: 9.9, z: 1.8, a: Math.PI }, { x: 5.6, z: 2.2, a: Math.PI }, { x: 10.3, z: -1.9, a: Math.PI / 2 }],
+  lobby: [{ x: 6.0, z: 7.8, a: Math.PI / 2 }, { x: 10.7, z: 7.3, a: -Math.PI / 2 }],
+};
+
+// MARK: - 電梯（11-09 使用者：B1 到一樓的電梯不見了）：大樓左外側兩座玻璃井，位置跟 B1 的電梯門對齊（TD.elevs）
+const ELEV = { zs: TD.elevs.map(e => (e.y - CZ) / OS), carScale: 0.6, carX: -6.465, halfGap: 0.72, doorH: 2.55, inX: -11.6 };
+const B1Y = OfficeBasement.baseY + TD.room;
 
 // MARK: - 程式材質（木地板、磁磚、棋盤磚、地毯、百葉、草地）
 
@@ -175,7 +211,11 @@ function makeBody(id, { sit, seatY = PERSON_SEAT }) {
 export class OpenOfficeBuilder extends OfficeBuilder {
   constructor(opts) {
     super(opts);
-    for (const c of this.cars) c.removeFromParent();      // 單層樓：沒有電梯
+    // 電梯：沿用大樓的兩部車廂（縮小放進新井），一樓 ↔ B1
+    this.cars.forEach((c, i) => { c.scale.setScalar(ELEV.carScale); c.position.set(ELEV.carX, R, TD.elevs[i].y); });
+    this.elevs = this.cars.map(() => ({ busy: null, k: 0, target: 0, b1k: 0, b1Target: 0 }));
+    this.elevDoorNodes = [];
+    this.world.add(this.buildShaft());
     this.root = scnNode("office-root");
     this.root.position.set(0, R, CZ); this.root.scale.setScalar(OS);
     this.world.add(this.root);
@@ -305,7 +345,21 @@ export class OpenOfficeBuilder extends OfficeBuilder {
     const wallRun = (x0, z0, x1, z1, h, m, t = 0.2) => { const len = Math.hypot(x1 - x0, z1 - z0), a = Math.atan2(x1 - x0, z1 - z0); b.box(t, h, len, (x0 + x1) / 2, 0, (z0 + z1) / 2, m, a); };
     // 外牆：後牆、左牆全高（有窗＋百葉）；前牆、右牆只到窗台（剖面看進去），上面是淡玻璃
     wallRun(-HW, -HD, HW, -HD, WALL, wallM);
-    wallRun(-HW, -HD, -HW, HD, WALL, wallM);
+    // 左牆：兩部電梯的門洞（門洞上方補門楣）
+    const egaps = ELEV.zs.map(z => [z - ELEV.halfGap, z + ELEV.halfGap]).sort((p, q) => p[0] - q[0]);
+    let lz = -HD;
+    for (const [g0, g1] of egaps) {
+      b.box(0.2, WALL, g0 - lz, -HW, 0, (lz + g0) / 2, wallM);
+      b.box(0.2, WALL - ELEV.doorH, g1 - g0, -HW, ELEV.doorH, (g0 + g1) / 2, wallM);
+      lz = g1;
+    }
+    b.box(0.2, WALL, HD - lz, -HW, 0, (lz + HD) / 2, wallM);
+    const steelM = mat(0x9AA3AD, { metal: 0.6, rough: 0.35 }), ledM = mat(0x7DE3F4, { emit: 1.4 });
+    for (const z of ELEV.zs) {                                                  // 門框（鋼）＋門楣一條燈
+      for (const dz of [-ELEV.halfGap - 0.04, ELEV.halfGap + 0.04]) b.box(0.26, ELEV.doorH + 0.08, 0.08, -HW, 0, z + dz, steelM);
+      b.box(0.26, 0.08, 2 * ELEV.halfGap + 0.16, -HW, ELEV.doorH, z, steelM);
+      b.box(0.03, 0.04, 2 * ELEV.halfGap - 0.1, -HW + 0.13, ELEV.doorH + 0.1, z, ledM);
+    }
     wallRun(-HW, HD, Plan.entrance.x - 1.1, HD, 0.95, wallM);
     wallRun(Plan.entrance.x + 1.1, HD, HW, HD, 0.95, wallM);
     wallRun(HW, -HD, HW, HD, 0.95, wallM);
@@ -315,6 +369,7 @@ export class OpenOfficeBuilder extends OfficeBuilder {
       b.box(2.0, 0.06, 0.12, x + 0.95, 0.86, -HD + 0.16, frameM);
     }
     for (let z = -2.0; z < HD - 1; z += 3.0) {
+      if (egaps.some(([g0, g1]) => z < g1 + 0.1 && z + 1.9 > g0 - 0.1)) continue;        // 電梯門那段不開窗
       b.box(0.04, 1.5, 1.9, -HW + 0.12, 0.9, z + 0.95, winM);
       b.box(0.03, 0.75, 1.9, -HW + 0.15, 1.65, z + 0.95, blindsM);
     }
@@ -357,6 +412,28 @@ export class OpenOfficeBuilder extends OfficeBuilder {
     for (const z of this.zoneList) decal(z.title, z.accent, (z.rect.x0 + z.rect.x1) / 2, Math.min(9.35, z.rect.z1 + 0.4), Math.max(1.2, z.rect.x1 - z.rect.x0 - 0.2));
     decal("休息區・閒著", 0xF59E0B, 7.8, -2.15, 4.5);
     decal("前台・保全", 0x1E3A8A, 5.6, 9.3, 3.0);
+    {                                                                           // 電梯門牌（兩座門中間上方）
+      const { t, aspect } = textTexture("電梯 ⇅ B1 機房", { bg: "#22252A" });
+      const h = 0.32, w = h * aspect;
+      const n = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: t }));
+      n.position.set(-HW + 0.12, ELEV.doorH + 0.15, (ELEV.zs[0] + ELEV.zs[1]) / 2); n.rotation.y = Math.PI / 2;
+      signs.add(n);
+    }
+    // 電梯玻璃滑門（每座兩片，沿 z 滑開；開幾成照 this.elevs[c].k）
+    const doorGlass = mat(0xBFE6F2, { opacity: 0.35, rough: 0.05 });
+    this.elevDoorNodes = ELEV.zs.map(z => {
+      const pair = [1, -1].map(side => {
+        const g = scnNode("edoor"), w = ELEV.halfGap;
+        const glass = new THREE.Mesh(new THREE.BoxGeometry(0.04, ELEV.doorH - 0.04, w - 0.02), doorGlass); glass.position.y = ELEV.doorH / 2; glass.renderOrder = 10;
+        const edge = new THREE.Mesh(new THREE.BoxGeometry(0.05, ELEV.doorH - 0.04, 0.03), ledM); edge.position.set(0, ELEV.doorH / 2, -side * (w / 2 - 0.02));
+        const top = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.05, w), steelM); top.position.y = ELEV.doorH - 0.05;
+        g.add(glass, edge, top);
+        root.add(g);
+        return { g, side };
+      });
+      return { z, pair };
+    });
+    this.poseElevDoors();
     root.add(b.node("office-shell")); root.add(signs);
     const mods = new Map();          // 假模組：每區一個節點（給 focusPoint、左側索引列用）
     const addMod = (id, r, kind) => { const n = scnNode(`floor:${id}`); n.position.set((r.x0 + r.x1) / 2, 0, (r.z0 + r.z1) / 2); root.add(n); mods.set(id, { parts: { node: n, facades: [] }, key: id, floor: { id, kind, y: 0, height: WALL } }); };
@@ -380,7 +457,8 @@ export class OpenOfficeBuilder extends OfficeBuilder {
     this.furnitureSig = sig;
     this.furniture?.removeFromParent();
     const b = new Batch();
-    this.seats.forEach((s, i) => {                     // 工位：桌、隔板、雙螢幕、鍵盤、椅子；隔幾張放文件、馬克杯、檯燈、小盆栽
+    // 工位：8 × 5 整片都擺（11-09 使用者：原本只擺有人的那幾張，工作區空蕩蕩像壞掉）；桌、隔板、雙螢幕、鍵盤、椅子；隔幾張放文件、馬克杯、檯燈、小盆栽
+    Plan.cols.flatMap(x => Plan.rows.map(z => ({ x, z }))).forEach((s, i) => {
       b.add("desk", s.x, s.z + 0.6, Math.PI);
       b.add("desk_divider", s.x, s.z + 0.97, 0, 0.75, { blob: false });
       b.add("monitor_dual", s.x, s.z + 0.78, Math.PI, 0.75, { blob: false });
@@ -392,9 +470,9 @@ export class OpenOfficeBuilder extends OfficeBuilder {
       if (i % 5 === 3) b.add("plant_small", s.x + 0.55, s.z + 0.8, 0, 0.75, { blob: false });
     });
     for (const [x, n] of [[-11, "poster"], [-8.8, "cork_board"], [-2.6, "poster"], [2.6, "cork_board"], [6.8, "poster"]]) b.add(n, x, -3.9, 0, 1.0, { blob: false });
-    for (const x of [-11.4, -3.3, 3.0, 11.4]) b.add("plant_tall", x, -3.3, 0);
+    for (const x of [-11.4, -3.3, 3.0, 11.4]) b.add("plant_tall", x, -3.62, 0);       // 靠走道牆，不擋路
     b.add("floor_fan", -11.4, 8.9, 0.6); b.add("bookshelf", -11.75, 3.2, Math.PI / 2); b.add("bookshelf", -11.75, 4.5, Math.PI / 2);
-    b.add("trash_bin", 2.9, 8.9, 0); b.add("plant_tall", 2.9, -2.1, 0);
+    b.add("trash_bin", 3.15, 9.45, 0);
     // 會議室
     b.add("meeting_table", -7.8, -6.9, 0);
     for (const s of Plan.meetingSeats) b.add("chair_meeting", s.x - Math.sin(s.a) * 0.05, s.z - Math.cos(s.a) * 0.05, s.a);
@@ -446,9 +524,9 @@ export class OpenOfficeBuilder extends OfficeBuilder {
     b.push(g, grass);
     const path = new THREE.MeshStandardMaterial({ map: FLOORS.path([1, 1]), roughness: 0.95 });
     const p1 = new THREE.PlaneGeometry(2.4, 1.2); p1.rotateX(-Math.PI / 2); p1.translate(Plan.entrance.x, -0.27, HD + 0.6); b.push(p1, path);
-    for (const [x, z] of [[-HW - 1.3, -HD - 1.0], [HW + 0.6, -HD - 1.2], [-HW - 1.4, 1.5], [-HW - 1.3, HD - 0.5]]) b.add("tree", x, z, 0, -0.3, { blob: false });
+    for (const [x, z] of [[-HW - 1.3, -HD - 1.0], [HW + 0.6, -HD - 1.2], [-HW - 1.4, 5.2], [-HW - 1.3, HD - 0.5]]) b.add("tree", x, z, 0, -0.3, { blob: false });
     for (let x = -HW + 1; x < HW; x += 2.6) b.add("bush", x, -HD - 0.7, 0, -0.3, { blob: false });
-    for (let z = -HD + 1; z < HD - 1; z += 2.6) b.add("bush", -HW - 0.7, z, 0, -0.3, { blob: false });
+    for (let z = -HD + 1; z < HD - 1; z += 2.6) if (Math.abs(z) > 3.2) b.add("bush", -HW - 0.7, z, 0, -0.3, { blob: false });     // 電梯井那段不種
     for (const x of [-10, -2, 6.6, 10.4]) b.add("street_lamp", x, HD + 0.5, 0, -0.3, { blob: false });
     const n = b.node("outdoor");
     this.root.add(n);
@@ -468,7 +546,7 @@ export class OpenOfficeBuilder extends OfficeBuilder {
         this.placeOpen(p, fid, a, animate);
       }
     }
-    for (const [id, old] of [...this.persons]) if (!seen.has(id)) { this.persons.delete(id); this.bodies.delete(id); old.node.removeFromParent(); }
+    for (const [id, old] of [...this.persons]) if (!seen.has(id)) { this.cancelTrip(this.bodies.get(id), old.node); this.persons.delete(id); this.bodies.delete(id); old.node.removeFromParent(); }
     this.peopleSeeded = this.peopleSeeded || islands.length > 0;
   }
 
@@ -520,34 +598,29 @@ export class OpenOfficeBuilder extends OfficeBuilder {
     if (node.parent !== this.office) { node.removeFromParent(); this.office.add(node); }
     node.rotation.y = s.a;
     const ctl = this.bodies.get(id);
+    this.cancelTrip(ctl, node);
+    ctl.home = s;
     // 換位置：沿走道走過去；第一次載入、減少動態效果、太熱 ⇒ 直接到位
     if (from && animate && this.peopleSeeded && !OfficeBuilder.reduceMotion && !OfficeBuilder.heatPaused && Math.hypot(from.x - s.x, from.z - s.z) > 0.3) {
-      const pts = this.route(from.x, from.z, s.x, s.z);
-      const lens = pts.slice(1).map((q, i) => Math.hypot(q[0] - pts[i][0], q[1] - pts[i][1]));
-      ctl.walk = { pts, lens, t: 0, end: s };
-      ctl.body.setPose("walk");
+      ctl.trip = { steps: [walkStep(this.route(from.x, from.z, s.x, s.z))], i: 0, t: 0, elev: null };
       node.position.set(from.x, 0, from.z);
-      this.walkUntil = Math.max(this.walkUntil, Date.now() / 1000 + lens.reduce((x, y) => x + y, 0) / 1.3 + 0.2);
     } else {
-      ctl.walk = null;
       ctl.body.setPose(s.sit ? "sit" : "stand");
       node.position.set(s.x, 0, s.z);
     }
   }
 
-  /** 走路的路線：後排房間要走門；工作區 ↔ 休息區／前台從走道那頭繞過矮櫃 */
+  /** 走路的路線：各自走到走道再接起來；同一側的工作區直接走桌子後面的橫走道 */
   route(x0, z0, x1, z1) {
-    const out = [[x0, z0]];
-    const r0 = roomAt(x0, z0), r1 = roomAt(x1, z1);
-    const door = r => Plan.doors[r];
-    if (door(r0)) { out.push([door(r0)[0], -4.7]); out.push([door(r0)[0], -3.3]); }
-    if (door(r1) && r1 !== r0) { out.push([door(r1)[0], -3.3]); out.push([door(r1)[0], -4.7]); }
-    else if (!door(r0) && (r0 === "work") !== (r1 === "work")) out.push([3.5, -3.0]);
-    out.push([x1, z1]);
-    return out;
+    const a = chain(x0, z0), b = chain(x1, z1).reverse();
+    if (a.length === 4 && b.length === 4 && roomAt(x0, z0) === "work" && roomAt(x1, z1) === "work" && a[2][0] === b[1][0]) return simplify([...a.slice(0, 3), ...b.slice(1)]);
+    return simplify([...a, ...b]);
   }
 
   get animating() { return this.bodies.size > 0 && !OfficeBuilder.heatPaused; }
+
+  /** 機器只是 warm：照樣走動（降幀），hot 以上才定格（sceneview.heatChanged） */
+  get walksWhenWarm() { return true; }
 
   tick(dt) {
     super.tick(dt);
@@ -555,25 +628,169 @@ export class OpenOfficeBuilder extends OfficeBuilder {
     this.clock += dt;
     for (const [id, c] of this.bodies) {
       c.body.update(this.clock, dt);
-      const w = c.walk;
-      if (!w) continue;
-      w.t += dt * 1.3;
-      const node = id === "guard" ? null : this.persons.get(id)?.node;
-      if (!node) { c.walk = null; continue; }
-      let d = w.t, i = 0;
-      while (i < w.lens.length && d > w.lens[i]) { d -= w.lens[i]; i++; }
-      if (i >= w.lens.length) {
-        node.position.set(w.end.x, 0, w.end.z); node.rotation.y = w.end.a;
-        c.body.setPose(w.end.sit ? "sit" : "stand"); c.walk = null; continue;
-      }
-      const a = w.pts[i], b2 = w.pts[i + 1], k = d / Math.max(1e-3, w.lens[i]);
-      node.position.set(a[0] + (b2[0] - a[0]) * k, 0, a[1] + (b2[1] - a[1]) * k);
-      node.rotation.y = Math.atan2(b2[0] - a[0], b2[1] - a[1]);
+      if (!c.trip) continue;
+      const node = this.persons.get(id)?.node;
+      if (!node) { c.trip = null; continue; }
+      this.stepTrip(c, node, dt);
     }
+    this.wander(dt);
+    this.animateElevators(dt);
   }
 
-  // 閒晃、電梯、搬家、方塊 Kubo 的小動作：單層樓不用；視窗看不到時走路的人直接到位
-  settle() { for (const c of this.bodies.values()) if (c.walk) c.walk.t = 1e9; this.tick(0.001); }
+  // MARK: 行程（走路、停一下、搭電梯）
+
+  /** 一段行程往前推 dt 秒；步驟：walk（沿轉折點走）、pose、wait、door（電梯門開關）、car（車廂上下）、release（還電梯） */
+  stepTrip(c, node, dt) {
+    const tr = c.trip;
+    let left = dt;
+    while (left > 0 && tr.i < tr.steps.length) {
+      const st = tr.steps[tr.i];
+      const next = over => { tr.i++; tr.t = 0; left = over; };
+      if (st.k === "walk") {
+        if (tr.t === 0) c.body.setPose("walk");
+        const total = st.lens.reduce((x, y) => x + y, 0);
+        tr.t += left * 1.3;
+        if (tr.t >= total) { const e = st.pts[st.pts.length - 1]; node.position.x = e[0]; node.position.z = e[1]; next((tr.t - total) / 1.3); continue; }
+        let d = tr.t, i = 0;
+        while (i < st.lens.length - 1 && d > st.lens[i]) { d -= st.lens[i]; i++; }
+        const a = st.pts[i], b = st.pts[i + 1], k = d / Math.max(1e-3, st.lens[i]);
+        node.position.x = a[0] + (b[0] - a[0]) * k; node.position.z = a[1] + (b[1] - a[1]) * k;
+        node.rotation.y = Math.atan2(b[0] - a[0], b[1] - a[1]);
+        left = 0;
+      } else if (st.k === "pose") {
+        c.body.setPose(st.pose); if (st.a != null) node.rotation.y = st.a; next(left);
+      } else if (st.k === "wait") {
+        tr.t += left;
+        if (tr.t >= st.d) next(tr.t - st.d); else left = 0;
+      } else if (st.k === "door") {
+        this.elevs[st.c][st.b1 ? "b1Target" : "target"] = st.open ? 1 : 0; next(left);
+      } else if (st.k === "car") {
+        tr.t += left;
+        const k = Math.min(1, tr.t / st.d), e = k * k * (3 - 2 * k), y = st.y0 + (st.y1 - st.y0) * e;
+        this.cars[st.c].position.y = y;
+        node.position.y = (y - R) / OS;
+        const anchor = node.getObjectByName("anchor"); if (anchor) anchor.userData.offstage = y < R - 0.4;     // 地底下：名牌先收起來
+        if (k >= 1) next(tr.t - st.d); else left = 0;
+      } else if (st.k === "release") {
+        this.elevs[st.c].busy = null; tr.elev = null; next(left);
+      } else next(left);
+    }
+    if (tr.i >= tr.steps.length) { c.trip = null; this.goHome(c, node); }
+  }
+  goHome(c, node) {
+    const h = c.home; if (!h) return;
+    node.position.set(h.x, 0, h.z); node.rotation.y = h.a;
+    c.body.setPose(h.sit ? "sit" : "stand");
+  }
+  /** 行程中途被打斷（換位置、人走了、太熱）：還電梯、車廂回一樓、門關上 */
+  cancelTrip(c, node) {
+    if (!c?.trip) return;
+    const e = c.trip.elev;
+    if (e != null) { const el = this.elevs[e]; el.busy = null; el.target = 0; el.b1Target = 0; this.cars[e].position.y = R; }
+    c.trip = null;
+    if (node) { node.position.y = 0; const a = node.getObjectByName("anchor"); if (a) a.userData.offstage = false; }
+  }
+
+  /** 閒晃（每 1～3 秒挑一個人）：工位上的偶爾去茶水間、廁所、找同事、搭電梯去 B1；閒著的在休息區、茶水間、前台之間晃 */
+  wander(dt) {
+    if (OfficeBuilder.reduceMotion || OfficeBuilder.noWander) return;
+    this.wanderT = (this.wanderT ?? 1.5) - dt;
+    if (this.wanderT > 0) return;
+    this.wanderT = 1 + Math.random() * 2;
+    let busy = 0;
+    for (const c of this.bodies.values()) if (c.trip) busy++;
+    if (busy >= Math.max(2, Math.ceil(this.persons.size / 3))) return;
+    const now = this.clock;
+    const pool = [...this.persons].filter(([id, p]) => {
+      const c = this.bodies.get(id);
+      if (!c || c.trip || !c.home || p.node.parent !== this.office) return false;
+      c.nextWander ??= now + 2 + Math.random() * 10;
+      return c.nextWander <= now;
+    });
+    if (!pool.length) return;
+    const [id] = pool[Math.floor(Math.random() * pool.length)];
+    const c = this.bodies.get(id), a = this.assign.get(id);
+    if (!a || a.kind === "meeting") { c.nextWander = now + 120; return; }
+    const desk = a.kind === "desk";
+    c.nextWander = now + (desk ? 35 + Math.random() * 70 : 10 + Math.random() * 20);
+    const h = c.home, freeElev = this.elevs.findIndex(e => !e.busy);
+    if (freeElev >= 0 && Math.random() < (desk ? 0.3 : 0.15)) { c.trip = this.elevatorTrip(id, h, freeElev); return; }
+    const pick = list => list[Math.floor(Math.random() * list.length)];
+    const kinds = desk ? ["pantry", "pantry", "toilets", "colleague", "lounge"] : ["lounge", "lounge", "pantry", "lobby", "toilets", "colleague"];
+    let dest = null;
+    const kind = pick(kinds);
+    if (kind === "colleague") { const s = pick(this.seats.filter(q => q !== h)); if (s) dest = { x: s.x + 0.45, z: s.z - 0.8, a: -0.4 }; }
+    else dest = pick(SPOTS[kind]);
+    if (!dest) return;
+    c.trip = { elev: null, i: 0, t: 0, steps: [
+      walkStep(this.route(h.x, h.z, dest.x, dest.z)), { k: "pose", pose: "stand", a: dest.a }, { k: "wait", d: 4 + Math.random() * 8 },
+      walkStep(this.route(dest.x, dest.z, h.x, h.z)),
+    ] };
+  }
+
+  /** 搭電梯去 B1 機房轉一圈再上來 */
+  elevatorTrip(id, h, ci) {
+    const z = ELEV.zs[ci], door = [ELEV.inX, z], inCar = [ELEV.carX / OS, z];
+    this.elevs[ci].busy = id;
+    return { elev: ci, i: 0, t: 0, steps: [
+      walkStep(this.route(h.x, h.z, door[0], door[1])), { k: "pose", pose: "stand", a: -Math.PI / 2 },
+      { k: "door", c: ci, open: true }, { k: "wait", d: 0.7 },
+      walkStep([door, inCar]), { k: "pose", pose: "stand", a: Math.PI / 2 },
+      { k: "door", c: ci, open: false }, { k: "wait", d: 0.7 },
+      { k: "car", c: ci, y0: R, y1: B1Y, d: 3.5 }, { k: "door", c: ci, b1: true, open: true },
+      { k: "wait", d: 5 + Math.random() * 6 },
+      { k: "door", c: ci, b1: true, open: false }, { k: "wait", d: 0.7 },
+      { k: "car", c: ci, y0: B1Y, y1: R, d: 3.5 },
+      { k: "door", c: ci, open: true }, { k: "wait", d: 0.7 },
+      walkStep([inCar, door]), { k: "door", c: ci, open: false }, { k: "release", c: ci },
+      walkStep(this.route(door[0], door[1], h.x, h.z)),
+    ] };
+  }
+
+  /** 電梯門：一樓玻璃門、B1 的門照目標開關（0.6 秒滑完） */
+  animateElevators(dt) {
+    const sp = dt / 0.6;
+    let moved = false;
+    this.elevs.forEach((e, c) => {
+      if (e.k !== e.target) { e.k = e.target > e.k ? Math.min(e.target, e.k + sp) : Math.max(e.target, e.k - sp); moved = true; }
+      if (e.b1k !== e.b1Target) {
+        e.b1k = e.b1Target > e.b1k ? Math.min(e.b1Target, e.b1k + sp) : Math.max(e.b1Target, e.b1k - sp);
+        const d = this.doors(c).find(q => Math.abs(q.y - B1Y) < 0.05);
+        if (d) Tower.TowerCore.setDoor(d.node, e.b1k);
+      }
+    });
+    if (moved) this.poseElevDoors();
+  }
+  poseElevDoors() {
+    (this.elevDoorNodes ?? []).forEach(({ z, pair }, c) => {
+      const k = this.elevs?.[c]?.k ?? 0, w = ELEV.halfGap;
+      for (const { g, side } of pair) g.position.set(-HW, 0, z + side * (w / 2 + k * (w - 0.08)));
+    });
+  }
+
+  /** 玻璃電梯井（世界座標）：從 B1 地坪通到屋頂上方一點；角柱＋每層橫框＋細 LED，外側、兩端、屋頂以上是淡玻璃 */
+  buildShaft() {
+    const root = scnNode("elev-shaft");
+    const x0 = -6.86, x1 = -6.07, zs = TD.elevs.map(e => e.y), z0 = Math.min(...zs) - 0.42, z1 = Math.max(...zs) + 0.42, zm = (zs[0] + zs[1]) / 2;
+    const yb = B1Y - 0.05, yt = R + WALL * OS + 0.35, roofY = R + WALL * OS;
+    const steel = mat(0x8E979F, { metal: 0.6, rough: 0.35 }), led = mat(0x7DE3F4, { emit: 1.6 }), glass = mat(0xA9D4E2, { opacity: 0.16, rough: 0.05 });
+    const box = (w, h, d, x, y, z, m) => { const n = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); n.position.set(x, y + h / 2, z); n.castShadow = m !== glass; root.add(n); return n; };
+    for (const x of [x0, x1]) for (const z of [z0, zm, z1]) box(0.05, yt - yb, 0.05, x, yb, z, steel);
+    for (const z of [z0, zm, z1]) box(0.015, yt - yb, 0.02, x0 - 0.03, yb, z, led);
+    for (const y of [B1Y, R, roofY, yt]) { box(0.05, 0.04, z1 - z0, x0, y, (z0 + z1) / 2, steel); box(x1 - x0, 0.04, 0.05, (x0 + x1) / 2, y, z0, steel); box(x1 - x0, 0.04, 0.05, (x0 + x1) / 2, y, z1, steel); }
+    box(x1 - x0 + 0.1, 0.05, z1 - z0 + 0.1, (x0 + x1) / 2, yt, (z0 + z1) / 2, steel);
+    const g1 = box(0.01, yt - 0, z1 - z0, x0, 0, (z0 + z1) / 2, glass); g1.renderOrder = 9;
+    for (const z of [z0, z1]) { const g = box(x1 - x0, yt - 0, 0.01, (x0 + x1) / 2, 0, z, glass); g.renderOrder = 9; }
+    const g2 = box(0.01, yt - roofY, z1 - z0, x1, roofY, (z0 + z1) / 2, glass); g2.renderOrder = 9;
+    return root;
+  }
+
+  // 閒晃、搬家、方塊 Kubo 的小動作：單層樓用上面自己的；視窗看不到時走路的人直接到位、電梯回一樓
+  settle() {
+    for (const [id, c] of this.bodies) { const node = this.persons.get(id)?.node; if (c.trip) { this.cancelTrip(c, node); if (node) this.goHome(c, node); } }
+    this.elevs.forEach((e, c) => { e.k = e.target = 0; e.b1Target = 0; this.cars[c].position.y = R; });
+    this.poseElevDoors();
+  }
   snapTravelers() {}
   parkCars() {}
   rebuildCore() {}

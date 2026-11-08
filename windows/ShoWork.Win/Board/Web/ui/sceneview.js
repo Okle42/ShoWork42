@@ -38,7 +38,7 @@ export class OfficeSCNView {
 
   constructor(host, labelsHost, { baseFps = 12, testMode = false, memory } = {}) {
     this.host = host;
-    this.baseFps = baseFps;
+    this.baseFps = baseFps; this.normalFps = baseFps;
     this.testMode = testMode;
     this.memory = memory;              // OfficeMemory（關窗重開要回到原樣的東西）
     this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: testMode });
@@ -368,8 +368,11 @@ export class OfficeSCNView {
   }
   setHostVisible(v) { this.hostVisible = !!v; this.occlusion(); }
   /** 熱了／退燒了：路上的人直接落地、重算要不要播 */
-  heatChanged(paused) {
-    this.hot = !!paused;
+  heatChanged(paused, { level = "", blackout = false } = {}) {
+    // 11-09 使用者：「人也不會動」——cool42 warm 一待好幾小時，整間辦公室一直定格。warm 只降到 6 fps，hot 以上或停電才定格
+    this.warm = !!paused && level === "warm" && !blackout && !!this.builder.walksWhenWarm;
+    this.hot = !!paused && !this.warm;
+    this.baseFps = this.warm ? 6 : this.normalFps;
     OfficeBuilder.heatPaused = this.hot;
     if (this.hot) this.builder.settle();
     this.onVisible?.(this.windowVisible && !OfficeBuilder.reduceMotion && !this.hot);

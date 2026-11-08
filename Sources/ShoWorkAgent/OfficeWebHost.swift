@@ -96,7 +96,7 @@ final class OfficeWebHost: NSObject, WKScriptMessageHandler, WKNavigationDelegat
             MainActor.assumeIsolated { self?.schedule() }
         })
         observers.append(nc.addObserver(forName: HeatGate.changed, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.post(["type": "heat", "paused": HeatGate.shared.paused]) }
+            MainActor.assumeIsolated { self?.post(Self.heatMessage()) }
         })
     }
 
@@ -177,7 +177,7 @@ final class OfficeWebHost: NSObject, WKScriptMessageHandler, WKNavigationDelegat
         case "ready":
             ready = true; sent = nil; graphSent = nil
             pushData()
-            post(["type": "heat", "paused": HeatGate.shared.paused])
+            post(Self.heatMessage())
             if let v = lastVisible { post(["type": "visible", "visible": v]) }
             post(["type": "b1Posts", "posts": Self.b1Posts()])
         case "action": action(m)
@@ -311,6 +311,12 @@ final class OfficeWebHost: NSObject, WKScriptMessageHandler, WKNavigationDelegat
             if !sites.isEmpty { OfficeWeather.shared.sites = sites }
         default: break
         }
+    }
+
+    /// 熱度訊息：warm 只降幀（人照樣走動），hot 以上或停電才定格（11-09 使用者：辦公室人都不會動）
+    static func heatMessage() -> [String: Any] {
+        let g = HeatGate.shared
+        return ["type": "heat", "paused": g.paused, "level": g.level?.rawValue ?? "", "blackout": g.blackout]
     }
 
     static func b1Posts() -> [[String: Any]] {

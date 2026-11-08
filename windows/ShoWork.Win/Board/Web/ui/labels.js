@@ -144,7 +144,7 @@ export class OfficeLabels {
     for (let s of specs) {
       // 錨點已經不在場景裡（出港的船開完了）：不畫
       const anchor = s.anchor;
-      if (!anchor || !anchor.parent || !inScene(anchor)) continue;
+      if (!anchor || !anchor.parent || !inScene(anchor) || anchor.userData.offstage) continue;     // offstage：搭電梯到地底下
       const wp = this.wp(anchor);
       const p = P(wp);
       if (!(p.z > 0 && p.z <= 1 && p.x > -40 && p.x < W + 40 && p.y > -40 && p.y < H + 60)) continue;
