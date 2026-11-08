@@ -39,6 +39,7 @@ public enum CaptainThread {
     /// - Parameter full: 也收每輪中途的話與工具摘要（右側對話窗格看一般 AI 用）
     public static func parse(_ tail: Data, full: Bool = false) -> [CaptainLine] {
         var out: [CaptainLine] = []
+        var skipNoopReply = false
         for raw in tail.split(separator: 0x0A) {
             guard raw.count < 2 << 20, let o = try? JSONSerialization.jsonObject(with: Data(raw)) as? [String: Any] else { continue }
             let type = o["type"] as? String
@@ -46,6 +47,7 @@ public enum CaptainThread {
             let at = (o["timestamp"] as? String).flatMap { iso.date(from: $0) }
             let msg = o["message"] as? [String: Any]
             if type == "user", o["isMeta"] as? Bool != true, let origin = o["origin"] as? [String: Any] {
+                skipNoopReply = false
                 switch origin["kind"] as? String {
                 case "human":
                     guard let t = userText(msg?["content"]), !t.hasPrefix("<") else { continue }
@@ -53,6 +55,8 @@ public enum CaptainThread {
                 case "peer":
                     let name = origin["name"] as? String ?? ""
                     let body = (origin["body"] as? String) ?? peerBody(userText(msg?["content"]) ?? "")
+                    // 舊版每 30 分鐘送「【巡檢時間】無變化」，隊長回一句「巡檢無變化，沒有動作」：兩邊都不顯示（11-09 使用者：很亂）
+                    if body.hasPrefix(alarmUnchangedPrefix) { skipNoopReply = true; continue }
                     if name == boardFromName || body.hasPrefix(boardPrefix) {
                         out.append(CaptainLine(id: id, at: at, role: .kang, text: boardText(body), via: "戰情中心"))
                     } else {
@@ -76,11 +80,16 @@ public enum CaptainThread {
                       let cs = msg?["content"] as? [[String: Any]] {
                 let t = cs.compactMap { $0["type"] as? String == "text" ? $0["text"] as? String : nil }
                     .joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+                if skipNoopReply { skipNoopReply = false; if isNoopPatrolReply(t) { continue } }
                 if !t.isEmpty { out.append(CaptainLine(id: id, at: at, role: .captain, text: stripNag(t))) }
             }
         }
         return Array(out.suffix(full ? keepFull : keep))
     }
+
+    static let alarmUnchangedPrefix = "【巡檢時間】無變化"
+    /// 隊長對「無變化」巡檢的短回覆（「巡檢無變化，沒有動作。」之類）
+    static func isNoopPatrolReply(_ t: String) -> Bool { t.count <= 40 && t.contains("無變化") }
 
     /// 工具一行：工具名＋AI 自己寫的說明或檔名（不放指令原文、網址參數、檔案內容）
     static func toolLine(_ name: String, _ input: [String: Any]) -> String {

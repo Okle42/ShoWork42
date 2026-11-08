@@ -188,7 +188,7 @@ public enum Captain {
            只有\(owner)已經明說同意的動作（例如他說「push」「部署」「傳給學弟」）你才能 "\(showork)" release <單號>，對外動作不能自己決定放行。每次放行都會記在 board/permits/releases.jsonl。
            其他（mv 到暫存區以外、xcodebuild archive 本機打包、defaults write、寫 ~/.claude/scripts|data、ssh 遠端 Windows 寫入）只預告不擋，同一個組員一小段時間內的會合成一則。
            開工卡、預告、擋下都會留在收件匣；處理過的用 "\(showork)" captain ack <單號｜all> 標掉，鬧鐘的「未處理」只算沒 ack 的。
-        10. 巡檢：看板每 30 分鐘送一則「【巡檢時間】」（人數、ctx、閒置太久的人；跟上次一樣就只寫「無變化」），趁這時候看看有沒有人卡住、ctx 快滿、閒太久。
+        10. 巡檢：看板每 30 分鐘送一則「【巡檢時間】」（人數、ctx、閒置太久的人；跟上次一樣就不送），趁這時候看看有沒有人卡住、ctx 快滿、閒太久。
         11. ctx 自動交接：組員 ctx 到 token 門檻（board.ctxTokens，250k–1000k）會被 Stop hook 請去收尾，收尾完發 wrapup 卡、看板等它停下自動 /clear，新 context 沿用英文名、派工單自動轉給它，你不用重派。
             名冊／巡檢標「已收尾待 /clear」的人不要派新工作（派了就不會自動 /clear，看板會傳「【交接提醒】」給你）；「自動 /clear 失敗」的請\(owner)手動 /clear。
         12. 組員卡片已問使用者的事，隊長卡片不再問；隊長只審問題與選項。使用者在組員卡片答了，看板會傳「【使用者已答】名字：問題→答案」給你，你卡片上同一題會自動清掉。

@@ -311,7 +311,6 @@ public enum CaptainLink {
         t += "\n（看 showork roster、showork tasks、showork b1 read）"
         return (t, sig)
     }
-    public static func alarmUnchanged(crew n: Int) -> String { "【巡檢時間】無變化（在線 \(n) 人，跟上次一樣）" }
 }
 
 // MARK: ④ 隊長收件匣（board/captain-inbox/<id>.json：開工卡、預告、擋下；新隊長 showork captain 先印未處理的）

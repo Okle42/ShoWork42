@@ -582,7 +582,7 @@ final class BoardModel: ObservableObject {
         }
     }
 
-    /// 隊長鬧鐘：每 captain.alarmMinutes 分鐘（預設 30）送【巡檢時間】；名冊跟上次一樣只送「無變化」；沒有隊長不送
+    /// 隊長鬧鐘：每 captain.alarmMinutes 分鐘（預設 30）送【巡檢時間】；名冊跟上次一樣就不送；沒有隊長不送
     private var alarmAt = Date()            // 看板啟動算起，不一開就送
     private var alarmSig: String?
     private func captainAlarm(_ roster: Roster, captain: String?, now: Date) {
@@ -590,8 +590,9 @@ final class BoardModel: ObservableObject {
         let min = UserDefaults(suiteName: OfficePrefs.suite)?.object(forKey: CaptainLink.alarmKey) as? Double ?? 30
         guard min > 0, now.timeIntervalSince(alarmAt) >= min * 60 else { return }
         alarmAt = now
-        let (full, sig) = CaptainLink.alarm(roster, pending: CaptainInbox.pending(now: now).count, now: now)
-        let text = sig == alarmSig ? CaptainLink.alarmUnchanged(crew: roster.entries.filter { !$0.captain }.count) : full
+        let (text, sig) = CaptainLink.alarm(roster, pending: CaptainInbox.pending(now: now).count, now: now)
+        // 11-09 使用者：跟上次一樣就不送（以前送「無變化」→ 每 30 分鐘叫醒 Opus 隊長回一句「巡檢無變化，沒有動作」，白花錢又洗版）
+        if sig == alarmSig { return }
         alarmSig = sig
         queue.async {
             CaptainInbox.prune(now: now)

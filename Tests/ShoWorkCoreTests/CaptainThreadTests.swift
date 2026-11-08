@@ -37,6 +37,21 @@ struct CaptainThreadTests {
         #expect(!t.map(\.text).joined().contains("1234") && !t.map(\.text).joined().contains("秘密"))
     }
 
+    @Test("舊的「巡檢無變化」與隊長的空回覆不上面板；有變化的巡檢照留")
+    func noopPatrol() {
+        let lines = [
+            #"{"type":"user","uuid":"p1","origin":{"kind":"peer","name":"AI工作戰情中心（巡檢）","body":"【巡檢時間】無變化（在線 6 人，跟上次一樣）"},"message":{"role":"user","content":"x"}}"#,
+            #"{"type":"assistant","uuid":"a1","message":{"stop_reason":"end_turn","content":[{"type":"text","text":"巡檢無變化,沒有動作。"}]}}"#,
+            #"{"type":"user","uuid":"p2","origin":{"kind":"peer","name":"AI工作戰情中心（巡檢）","body":"【巡檢時間】在線 6 人（不含隊長）"},"message":{"role":"user","content":"x"}}"#,
+            #"{"type":"assistant","uuid":"a2","message":{"stop_reason":"end_turn","content":[{"type":"text","text":"Chris 閒置太久，先不動"}]}}"#,
+            #"{"type":"user","uuid":"p3","origin":{"kind":"peer","name":"AI工作戰情中心（巡檢）","body":"【巡檢時間】無變化（在線 6 人，跟上次一樣）"},"message":{"role":"user","content":"x"}}"#,
+            #"{"type":"user","uuid":"u1","origin":{"kind":"human"},"message":{"role":"user","content":"進度？"}}"#,
+            #"{"type":"assistant","uuid":"a3","message":{"stop_reason":"end_turn","content":[{"type":"text","text":"無變化"}]}}"#,
+        ].joined(separator: "\n")
+        let t = CaptainThread.parse(Data(lines.utf8))
+        #expect(t.map(\.text) == ["【巡檢時間】在線 6 人（不含隊長）", "Chris 閒置太久，先不動", "進度？", "無變化"])
+    }
+
     @Test("peer 沒有 body 欄位時從 cross-session-message 拿內文")
     func peerBody() {
         let s = "Another Claude session sent a message:\n<cross-session-message from=\"uds:\" from-name=\"X\">\n【派工回報 T1】完成\n第二行\n</cross-session-message>"
