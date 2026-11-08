@@ -9,11 +9,16 @@ import ShoWorkCore
 //   walk  ＝閒晃（休息的 4 人照 WanderPlanner 上頂樓，最多同時 3 人在路上），預設 10 fps
 //   move  ＝每 2.2 秒觸發一次搬家（某層跟上一層對調），24 fps
 //   still ＝什麼都不動、照樣每幀畫（跟「閒置不渲染」比較用）
+//   city  ＝外部空間城市的檢查圖（示範城市資料；夜／日 × 預設視角、俯瞰、正上方、分公司特寫、港口特寫），存到 SHOWORK_BENCH_DIR
+//          加 SHOWORK_SCENE_DUMP=<資料夾> 另外輸出場景 dump（SceneDump.swift；Windows 版照搬的量尺）
+//   dump  ＝跟 city 同一份示範資料、同 6 個鏡頭，只輸出場景 dump（mac-input.json、mac-scene-day/night.json），不存圖
+//   kit   ＝地基量尺：小測試場景（白方塊、家具、貼圖）日夜各一張圖＋dump（SceneDump.kitTest）
 // 只是近似：沒有視窗合成、沒有 SwiftUI 疊層；GPU 時間不算在這個行程的 CPU 裡。
 
 @MainActor
 enum OfficeBench {
     static func run(mode: String, seconds: Double, fps: Double) -> Never {
+        if mode == "kit" { SceneDump.kitTest() }
         setenv("SHOWORK_OFFICE_DEMO", "all", 1)
         let s = BoardReader().read()
         let fm = FileManager.default
@@ -32,6 +37,7 @@ enum OfficeBench {
         var (tower, decor, wander) = cache.make(deps, cards: cards, real: [:])
         var islands = Islands.build(cards)
         OfficeBuilder.cutFade = 0          // 10-20 第 4 棒：原本牆的淡出動畫在 SCNRenderer 裡走不完，量到的是「正面玻璃＋直框都還在」的畫面
+        if mode == "dump" || ProcessInfo.processInfo.environment["SHOWORK_SCENE_DUMP"] != nil { SceneDump.enable() }    // 要在建場景之前開
         let b = OfficeBuilder()
         _ = b.setNight(true)
         b.update(tower: tower, decor: decor, wander: wander, islands: islands, guardStatus: GuardStatus(), scanning: false, animate: true)
@@ -64,6 +70,7 @@ enum OfficeBench {
                 print("bench patrol 出發 \(b.startPatrol())")
             }
         }
+        if mode == "city" || mode == "dump" { cityShots(b, v, size: size, tower: tower, decor: decor, wander: wander, islands: islands, shots: mode == "city") }
         let trips = wander.states.values.filter { $0.trip != nil }.count
         print("bench mode=\(mode) fps=\(fps) 秒=\(seconds) 路上的人=\(trips) \(b.stats())"); fflush(stdout)
 
@@ -180,6 +187,70 @@ enum OfficeBench {
         let used = cpu() - c0
         print(String(format: "bench %@：%d 張／%.1f 秒（%.1f fps），CPU %.2f 秒 ＝ 平均 %.1f%%（單核）", mode, frames, secs, Double(frames) / secs, used, used / secs * 100))
         print("bench after", b.stats())
+        exit(0)
+    }
+
+    /// city（11-01）：外部空間城市的檢查圖。示範城市資料（假名字）＋一艘出港的船（定在第 1.5 秒），
+    /// 夜／日 × 預設視角／俯瞰城市／正上方俯視 各存一張到 SHOWORK_BENCH_DIR（預設目前資料夾）；城市名牌的錨點畫成小框＋字（名牌本來是 SwiftUI 疊層，SCNRenderer 畫不到）
+    private static func cityShots(_ b: OfficeBuilder, _ v: SCNView, size: CGSize, tower: TowerPlan,
+                                  decor: [String: FloorDecor], wander: WanderPlan, islands: [Island], shots: Bool) -> Never {
+        BoardWindow.testMode = true
+        let env = ProcessInfo.processInfo.environment
+        let dir = env["SHOWORK_BENCH_DIR"] ?? FileManager.default.currentDirectoryPath
+        var s = CityMonitor.demoState()
+        s.ships = [CityShip(repo: "demo-app", at: Date(), inbound: ProcessInfo.processInfo.environment["SHOWORK_CITY_SHIP_IN"] != nil)]
+        b.updateCity(s, animate: false)
+        // 場景 dump（11-01）：輸入只寫一次；場景日夜各一份（停在 default 鏡頭的 cutaway 狀態），6 個鏡頭的參數一起記
+        let dumpDir = SceneDump.registry != nil ? (env["SHOWORK_SCENE_DUMP"] ?? dir) : nil
+        if let dd = dumpDir { SceneDump.write(SceneDump.input(tower: tower, decor: decor, wander: wander, islands: islands, city: s), "\(dd)/mac-input.json") }
+        guard let dev = MTLCreateSystemDefaultDevice() else { print("沒有 Metal"); exit(1) }
+        let r = SCNRenderer(device: dev, options: nil)
+        r.scene = b.scene
+        let views: [(String, () -> Void)] = [
+            ("default", { b.frameCamera(v) }),
+            ("overview", { b.frameCity(v) }),
+            ("top", { b.placeTest(v, target: SIMD3(0, 0, 4), dist: 125, az: 0, el: 89) }),
+            ("branch", { b.placeTest(v, target: SIMD3(Double(CityBuilder.branchX) + 1.9, 1, Double(CityBuilder.laneZ) + 1), dist: 26, az: 25, el: 32) }),
+            ("airship", { b.placeTest(v, target: SIMD3(-18.3, 4.5, Double(CityBuilder.airshipDock(0).z)), dist: 32, az: -15, el: 14) }),
+            ("port", { b.placeTest(v, target: SIMD3(Double(CityBuilder.portX) + 4, 0, Double(CityBuilder.streetZ) + 3), dist: 30, az: 12, el: 30) }),
+        ]
+        for night in [true, false] {
+            _ = b.setNight(night)
+            var cams: [[String: Any]] = []
+            for (name, place) in views {
+                place()
+                _ = b.updateLOD(camera: b.camera.position, target: v.defaultCameraController.target)
+                if dumpDir != nil { cams.append(SceneDump.camera(b, v, name: name)) }
+                guard shots else { continue }
+                r.pointOfView = v.pointOfView ?? b.camera
+                let img = r.snapshot(atTime: 1.5, with: size, antialiasingMode: .multisampling4X)
+                // 名牌錨點：投影到畫面上，畫一個小框＋字（看位置關係、有沒有疊在一起）
+                let out = NSImage(size: size)
+                out.lockFocus()
+                img.draw(in: NSRect(origin: .zero, size: size))
+                let attr: [NSAttributedString.Key: Any] = [.font: NSFont.boldSystemFont(ofSize: 12), .foregroundColor: NSColor.white,
+                                                           .backgroundColor: NSColor.black.withAlphaComponent(0.6)]
+                for l in b.cityLabelTargets() {
+                    let p = r.projectPoint(l.anchor.presentation.worldPosition)
+                    guard p.z > 0, p.z < 1 else { continue }
+                    let t = NSAttributedString(string: l.text, attributes: attr)
+                    let ts = t.size()
+                    t.draw(at: NSPoint(x: p.x - ts.width / 2, y: p.y + 4))
+                    NSColor.systemYellow.setFill(); NSRect(x: p.x - 2, y: p.y - 2, width: 4, height: 4).fill()
+                }
+                out.unlockFocus()
+                let path = "\(dir)/\(night ? "night" : "day")-\(name).png"
+                if let tiff = out.tiffRepresentation, let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) {
+                    try? png.write(to: URL(fileURLWithPath: path)); print("bench city shot", path); fflush(stdout)
+                }
+            }
+            if let dd = dumpDir {
+                views[0].1()
+                _ = b.updateLOD(camera: b.camera.position, target: v.defaultCameraController.target)
+                SceneDump.write(SceneDump.scene(b, night: night, cameras: cams), "\(dd)/mac-scene-\(night ? "night" : "day").json")
+            }
+        }
+        print("bench city", b.stats())
         exit(0)
     }
 }

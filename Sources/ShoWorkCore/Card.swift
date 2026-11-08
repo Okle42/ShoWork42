@@ -321,41 +321,34 @@ public struct ContextUse: Codable, Sendable, Equatable {
 
 /// ctx 快滿時的收尾（Kang 10-09：超過 85% 提醒我，或幫我 commit、能 push 就 push）
 public enum ContextGuard {
-    /// 門檻可以在戰情中心工具列調（10-15 Kang）；agent、showork CLI 讀同一份設定
-    public static let defaultThreshold: Double = 85
-    public static let choices: [Double] = [60, 65, 70, 75, 80, 85, 90]
-    private static let key = "board.ctxThreshold"
-    public static var threshold: Double {
-        get {
-            let v = UserDefaults(suiteName: "ai.okle42.showork")?.double(forKey: key) ?? 0
-            return (50...95).contains(v) ? v : defaultThreshold
-        }
-        set { UserDefaults(suiteName: "ai.okle42.showork")?.set(newValue, forKey: key) }
-    }
-
-    /// 10-26 Kang：context 到 250k token 就交接。用 token 數不用百分比——視窗 1M 和 200k 的 session 都同一條線；百分比門檻留著當保險
+    /// 門檻只有一條：context 用到幾 token 就交接（10-26 Kang 加 token 線；10-29 Kang：拿掉 % 保險、只留這一個條件，250k–1000k 自由調）。
+    /// 戰情中心工具列調；agent、showork CLI、Stop hook（hook_ctx_wrapup.py）讀同一份設定 board.ctxTokens
     public static let defaultTokenLimit = 250_000
-    public static let tokenChoices = [150_000, 200_000, 250_000, 300_000, 400_000]
+    public static let tokenRange = 250_000...1_000_000
+    public static let tokenStep = 10_000
     public static var tokenLimit: Int {
-        get {
-            let v = UserDefaults(suiteName: "ai.okle42.showork")?.integer(forKey: "board.ctxTokens") ?? 0
-            return v > 0 ? v : defaultTokenLimit
-        }
-        set { UserDefaults(suiteName: "ai.okle42.showork")?.set(newValue, forKey: "board.ctxTokens") }
+        get { clamp(UserDefaults(suiteName: "ai.okle42.showork")?.integer(forKey: "board.ctxTokens") ?? 0) }
+        set { UserDefaults(suiteName: "ai.okle42.showork")?.set(clamp(newValue), forKey: "board.ctxTokens") }
     }
-    public static func over(_ c: ContextUse, threshold: Double = threshold, tokenLimit: Int = tokenLimit) -> Bool {
-        c.percent >= threshold || (c.tokens ?? 0) >= tokenLimit
+    /// 沒設過（0）用預設；超出範圍的舊值（例如以前的 150k、200k）拉回 250k–1000k，對齊 10k
+    public static func clamp(_ v: Int) -> Int {
+        guard v > 0 else { return defaultTokenLimit }
+        let r = (v + tokenStep / 2) / tokenStep * tokenStep
+        return min(max(r, tokenRange.lowerBound), tokenRange.upperBound)
+    }
+    public static func over(_ c: ContextUse, tokenLimit: Int = tokenLimit) -> Bool {
+        (c.tokens ?? 0) >= tokenLimit
     }
 
     /// 打進那個 session 的收尾指令。push 與否交給那個 session 的 AI 依該 repo 的規則判斷
     /// （ghosts、客戶案等有「不准 push／要先審」的規則，看板不知道，AI 看得到）。
-    public static func wrapUpPrompt(percent: Double) -> String {
-        "【AI工作戰情中心】context 已用 \(Int(percent))%，請收尾：①把目前該存的進度 commit；②這個 repo 的規則允許才 push（規定不准 push、要先審或有客戶資料的就不要推，回報原因）；③更新交接文件（寫清楚未完成工作與下一步）與記憶；④最後發收尾卡 `showork card --kind wrapup --handoff <交接文件絕對路徑> --doing <任務> --summary \"<一句接手重點>\"`，發完就停下。看板會自動 /clear，新 context 自動讀交接接手（名字、派工單沿用）。"
+    public static func wrapUpPrompt(tokens: Int) -> String {
+        "【AI工作戰情中心】context 已用 \(tokens / 1000)k，請收尾：①把目前該存的進度 commit；②這個 repo 的規則允許才 push（規定不准 push、要先審或有客戶資料的就不要推，回報原因）；③更新交接文件（寫清楚未完成工作與下一步）與記憶；④最後發收尾卡 `showork card --kind wrapup --handoff <交接文件絕對路徑> --doing <任務> --summary \"<一句接手重點>\"`，發完就停下。看板會自動 /clear，新 context 自動讀交接接手（名字、派工單沿用）。"
     }
 
     /// 現在要不要對這張卡送收尾：超過門檻、還沒送過、它停下來了（不在工作中、也不是在問你問題）
-    public static func shouldWrapUp(card: BoardCard, ctx: ContextUse?, alreadySent: Bool, threshold: Double = threshold) -> Bool {
-        guard let c = ctx, over(c, threshold: threshold), !alreadySent, !card.id.contains("#") else { return false }
+    public static func shouldWrapUp(card: BoardCard, ctx: ContextUse?, alreadySent: Bool, tokenLimit: Int = tokenLimit) -> Bool {
+        guard let c = ctx, over(c, tokenLimit: tokenLimit), !alreadySent, !card.id.contains("#") else { return false }
         return card.column != .active && card.reason != "等你回答"
     }
 }

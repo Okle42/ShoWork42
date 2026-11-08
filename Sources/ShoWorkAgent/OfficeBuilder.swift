@@ -160,7 +160,7 @@ final class OfficeBuilder {
     /// 微縮模型（10-22 Kang「跟體素太像」）：拿掉 1600 m 大地面，整座城放在一塊有木頭邊的底座上；底座外面由後製畫成桌面
     private lazy var plinth: SCNNode = {
         let m = VoxelMesh(), k = Kit(m: m)
-        let x0: Float = -33, x1: Float = 45, z0: Float = -15, z1: Float = 22   // 含港口水面（x 到 44、z 到 21.2）
+        let x0: Float = -33, x1 = CityBuilder.harborX1 + 1, z0: Float = -15, z1 = CityBuilder.waterZ1 + 1   // 含港口水面（11-01 港口搬到正門對面）
         k.b(.identity, (x0 + x1) / 2, -0.4, (z0 + z1) / 2, x1 - x0, 0.4, z1 - z0, VoxMat.dayNight(TP.groundDay, TP.groundNight))
         k.b(.identity, (x0 + x1) / 2, -1.8, (z0 + z1) / 2, x1 - x0 + 0.6, 1.4, z1 - z0 + 0.6, VoxMat.dayNight(0x9A6A40, 0x4A3220))
         let n = m.node(name: "plinth"); n.categoryBitMask = Self.outdoorMask
@@ -170,6 +170,7 @@ final class OfficeBuilder {
         let dio = s == .diorama
         env.isHidden = dio
         if dio { if plinth.parent == nil { world.addChildNode(plinth) } } else { plinth.removeFromParentNode() }
+        city.setSkylineHidden(dio)            // 周邊高樓在底座外面，微縮模型風格不畫（11-01）
     }
 
     /// 目前套用的天色（nil＝還沒套過）
@@ -234,6 +235,7 @@ final class OfficeBuilder {
         let fixedDay = l == .day, fixedNight = l == .night
         VoxMat.setBlend(dark: l.dark, lamps: l.lamps)
         TowerSign.setDark(l.dark)
+        updateBeam()
         // 漸層天空盒＋霧（霧色＝地平線色＝天空盒下半）；霧距跟鏡頭距離走（updateLOD 鏡頭停下時才算）
         if fixedDay || fixedNight {
             scene.background.contents = fixedNight ? TowerCore.skyNight : TowerCore.skyDay
@@ -288,6 +290,7 @@ final class OfficeBuilder {
         camera.camera!.vignettingPower = 1.0
         omniBase = 700 * l.lamps * ps
         weatherFX.setDark(l.dark)
+        city.setDark(Double(l.dark))          // 周邊高樓的窗戶燈（11-01）：暗下來才亮
         omniDirty = true
         assignOmni()
     }
@@ -1270,7 +1273,7 @@ final class OfficeBuilder {
         let scanStarted = scanning && !wasScanning
         wasScanning = scanning
         if let t = OfficeView.testEnv("SHOWORK_OFFICE_PATROL").flatMap(Double.init) {   // 測試定格：巡邏第 t 秒的位置（螢幕外視窗不推進動畫）
-            man.childNodes.first?.addChildNode(Self.flashlight())
+            man.childNodes.first?.addChildNode(Self.flashlight(lit: beamLit))
             let path = patrolPath()
             path.apply(man, at: t)
             poseFrontDoor(path, at: t)
@@ -1371,7 +1374,7 @@ final class OfficeBuilder {
         guard elapsed < path.duration else { return false }
         patrolling = true
         patrolStart = Date().addingTimeInterval(-elapsed)
-        let light = Self.flashlight()
+        let light = Self.flashlight(lit: beamLit)
         kubo.addChildNode(light)
         patrolGen += 1                          // 新的一趟：舊趟（重建前）的收尾回呼、排好的下一趟都作廢
         let gen = patrolGen
@@ -1463,7 +1466,7 @@ final class OfficeBuilder {
             (SIMD3(CityBuilder.powerX, out, plazaZ), 0),
         ]
         if !city.state.disks.isEmpty {
-            let yz = CityBuilder.z0 + 3.5                                      // 第一座堆場的中線
+            let yz = CityBuilder.yardZ(0)                                      // 第一座堆場的中線
             pts += [(SIMD3(CityBuilder.trunkX, out, plazaZ), 0), (SIMD3(CityBuilder.trunkX, out, yz), 0),
                     (SIMD3(-13.4, out, yz), 4),                               // 堆場入口：照一照貨櫃
                     (SIMD3(CityBuilder.trunkX, out, yz), 0), (SIMD3(CityBuilder.trunkX, out, plazaZ), 0)]
@@ -1490,8 +1493,16 @@ final class OfficeBuilder {
         return TripPath(keys: keys)
     }
 
-    /// 手電筒：右手一支＋往前的淡黃光錐（自發光、加法混色，不是真的燈 ⇒ 不增加場景的光照成本）
-    private static func flashlight() -> SCNNode {
+    /// 手電筒要不要開：路燈亮了（晨昏、夜晚）才開（11-01 Kang：白天巡邏不用開手電筒）
+    private var beamLit: Bool { (look ?? .day).lamps >= 0.5 }
+    /// 天色換了：巡邏途中的手電筒跟著開關
+    private func updateBeam() {
+        guard let b = guardNode?.childNode(withName: "guard-man", recursively: false)?.childNodes.first?
+            .childNode(withName: "flashlight", recursively: false)?.childNode(withName: "beam", recursively: false) else { return }
+        b.isHidden = !beamLit
+    }
+    /// 手電筒：右手一支＋往前的淡黃光錐（自發光、加法混色，不是真的燈 ⇒ 不增加場景的光照成本）；白天光錐關著、只拿在手上
+    private static func flashlight(lit: Bool) -> SCNNode {
         let n = SCNNode(); n.name = "flashlight"
         n.position = SCNVector3(0.42, 0.62, 0.3)
         let body = SCNNode(geometry: SCNBox(width: 0.08, height: 0.08, length: 0.22, chamferRadius: 0))
@@ -1511,6 +1522,7 @@ final class OfficeBuilder {
         let beam = SCNNode(); beam.name = "beam"
         beam.position = SCNVector3(0, 0, 0.13)
         beam.eulerAngles.x = -.pi / 2 + 0.25
+        beam.isHidden = !lit
         let c = SCNNode(geometry: cone)
         c.position = SCNVector3(0, -h / 2, 0)
         c.castsShadow = false
@@ -2023,9 +2035,9 @@ final class OfficeBuilder {
                 tint.setFill(); NSRect(x: fr + 10, y: y + 12, width: 14, height: 14).fill()       // 方塊點（像素風）
                 draw(c.title, at: NSPoint(x: fr + 32, y: y + 4), size: 22, weight: .bold, color: .white, width: W * 0.44 - fr - 36)
                 let prog = c.report?.progress ?? c.review?.progress, conf = c.report?.confidence ?? c.review?.confidence
-                let ctx = c.ctx.map { Int($0.percent) }
+                let ctx = c.ctx.map { x in x.tokens.map { "\($0 / 1000)k" } ?? "\(Int(x.percent))%" }
                 let tok = c.tokens.map { "  🔤\(tokenShort($0.total))" } ?? ""
-                let g = "📈\(prog.map { "\($0)%" } ?? "—")  🎯\(conf.map { "\($0)%" } ?? "—")  🧠\(ctx.map { "\($0)%" } ?? "—")" + tok
+                let g = "📈\(prog.map { "\($0)%" } ?? "—")  🎯\(conf.map { "\($0)%" } ?? "—")  🧠\(ctx ?? "—")" + tok
                 let ctxHot = c.ctx.map { ContextGuard.over($0) } ?? false
                 draw(g, at: NSPoint(x: W * 0.44, y: y + 7), size: 17, weight: .semibold,
                      color: ctxHot ? NSColor.systemRed : NSColor(white: 0.92, alpha: 1), width: W * 0.56 - fr - 6)

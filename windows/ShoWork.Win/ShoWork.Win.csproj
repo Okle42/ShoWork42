@@ -12,7 +12,7 @@
     <AssemblyName>ShoWorkAgent</AssemblyName>
     <RootNamespace>ShoWork</RootNamespace>
     <!-- shown in Settings → Apps and the file's properties; pack.ps1 can override Version -->
-    <Version>0.4.0</Version>
+    <Version>0.5.1</Version>
     <Product>ShoWork42</Product>
     <AssemblyTitle>ShoWork42</AssemblyTitle>
     <Description>ShoWork42：終端機裡的 AI 在工作、做完了、在等你回答時，視窗外圍發光</Description>
@@ -26,11 +26,34 @@
 
   <ItemGroup>
     <Compile Include="..\Shared\Wire.cs" Link="Wire.cs" />
+    <!-- 11-02 P8：戰情中心的動作要用 hook 端已轉寫的 Peer（收件匣直送）、CaptainInbox（放行／事先放行）、Nickname、PushGuard：
+         直接連原始檔（namespace ShoWork.Hooks；showork.exe 那份是 internal，不會撞名） -->
+    <Compile Include="..\showork\Core\*.cs" LinkBase="Hooks" />
     <!-- showork.exe (the hook CLI and console helper) must sit next to ShoWorkAgent.exe -->
     <ProjectReference Include="..\showork\showork.csproj" Condition="'$(PackShowork)' == ''" />
     <!-- W4 packaging (pack.ps1): the native showork.exe rides inside the single ShoWork42.exe and is written
          next to the installed agent at install time -->
     <EmbeddedResource Include="$(PackShowork)" LogicalName="showork.exe" Condition="'$(PackShowork)' != ''" />
+  </ItemGroup>
+
+  <!-- W6 3D office tower: WebView2 (Win11 ships the runtime; missing runtime falls back to the card view) -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4314.35" />
+  </ItemGroup>
+  <!-- the package always references its WPF wrapper too (WindowsBase 4 vs 5 warning, ~extra dll in the output);
+       this is a WinForms app, drop it -->
+  <Target Name="DropWebView2Wpf" BeforeTargets="ResolveAssemblyReferences">
+    <ItemGroup>
+      <Reference Remove="@(Reference)" Condition="'%(Filename)' == 'Microsoft.Web.WebView2.Wpf'" />
+    </ItemGroup>
+  </Target>
+  <!-- the page (three.js r170 vendored, no CDN): copied next to the exe for normal builds, and embedded so the
+       single-file / installed exe can extract it to %LOCALAPPDATA%\ShoWork42\office-web\ (OfficeHost.WebFolder) -->
+  <ItemGroup>
+    <None Remove="Board\Web\**" />
+    <!-- Board\Web\bench：Mac／JS 3D 量尺頁（開發用，不出貨） -->
+    <Content Include="Board\Web\**" Exclude="Board\Web\bench\**" Link="Web\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Never" />
+    <EmbeddedResource Include="Board\Web\**" Exclude="Board\Web\bench\**" LogicalName="Web/$([System.String]::Copy('%(RecursiveDir)').Replace('\','/'))%(Filename)%(Extension)" />
   </ItemGroup>
 
   <!-- Release: replace the copied .NET showork.exe with the native one. Without VS Build Tools this only warns

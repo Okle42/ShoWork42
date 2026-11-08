@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI工作戰情中心・辦公大樓</title>
+<!--
+  ShoWork42 Windows 戰情中心的 3D 辦公大樓（11-02 P8：照搬 Mac OfficeView.swift）。WebView2 以 SetVirtualHostNameToFolderMapping 載入；
+  資料由 C# 用 PostWebMessageAsJson 推 {type:"office2"}（Board\Core\Office2.cs），動作用 postMessage({type:"action"}) 送回（PROTOCOL.md）。
+  不靠 Windows 單獨看：python3 -m http.server 後開 office.html?demo=1（載入 bench/mac-input.json）。
+  three.js r170（MIT，vendor\three-r170\LICENSE），離線可用，不從 CDN 載。舊的 W6 版在 office-w6.js。
+-->
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="office.css">
+<script type="importmap">
+{ "imports": { "three": "./vendor/three-r170/three.module.min.js" } }
+</script>
+</head>
+<body>
+<div id="app">
+  <div id="left" class="col rail-col"></div>
+  <div id="center">
+    <div id="attnBar" class="material"></div>
+    <div id="sceneWrap">
+      <div id="stage"></div>
+      <div id="labels"></div>
+      <div id="overlayBL"></div>
+      <div id="cityHover"></div>
+      <div id="empty" hidden>讀取中⋯</div>
+    </div>
+  </div>
+  <div id="right" class="col inbox-col" hidden></div>
+</div>
+<div id="toast" hidden></div>
+<script type="module" src="office.js"></script>
+</body>
+</html>

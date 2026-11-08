@@ -53,7 +53,7 @@ public enum CaptainLink {
         public init(name: String, block: Bool, pattern: String) { self.name = name; self.block = block; self.pattern = pattern }
     }
 
-    /// 暫存區（rm／mv 到這些地方不擋）
+    /// 暫存區（rm 到這些地方不擋、mv 到這些地方不通知）
     static let temp = #"['"]?(?:/tmp/|/private/tmp/|/private/var/folders/|/var/folders/|\$\{?TMPDIR|\$TMP\b|[^\s;&|]*scratchpad)"#
     static let claudeDir = #"(?:~|\$HOME|\$\{HOME\}|/Users/[^/\s]+)/\.claude/(?:scripts|data)\b"#
 
@@ -64,12 +64,15 @@ public enum CaptainLink {
         Rule(name: "rm 刪除（暫存區以外）", block: true,
              // 重導向（2>/dev/null、>log）不是要刪的目標（10-24 BJ6M2：rm -rf "/tmp/WT" 2>/dev/null 被擋）
              pattern: #"^rm\s+(?:-[a-zA-Z]+\s+)*(?:[^\s;&|]+\s+)*?(?!"# + temp + #")(?!-)(?![0-9&]*[<>])[^\s;&|]+"#),
-        Rule(name: "mv 到非暫存區", block: true,
+        // 10-31 使用者：mv 可以復原，改成只通知不擋（rm 刪了救不回來，照擋）
+        Rule(name: "mv 到非暫存區", block: false,
              pattern: #"^mv\s+(?:[^\n]*?\s)?(?!"# + temp + #")(?![0-9&]*[<>])[^\s]+(?:\s+[0-9&]*[<>]>?\s*\S+)*\s*$"#),
         Rule(name: "firebase 部署", block: true, pattern: #"^(?:npx\s+)?firebase\s+deploy\b"#),
-        Rule(name: "App 封裝／上傳 App Store Connect", block: true,
+        // 10-31 使用者：xcodebuild archive 只是本機打包、不對外，改成只通知；真正會上傳的 -exportArchive／altool 等照擋
+        Rule(name: "App 封裝（xcodebuild archive）", block: false, pattern: #"^xcodebuild\b(?!.*\s-exportArchive\b).*\barchive\b"#),
+        Rule(name: "App 上傳 App Store Connect", block: true,
              // 10-24 隊長：-exportArchive 前面是「-」，原本的 \b(-exportArchive) 永遠比不到 ⇒ Sam 的上傳沒擋到。匯出不論有沒有 upload 都擋
-             pattern: #"^xcodebuild\b.*(?:\barchive\b|\s-exportArchive\b)|^(?:xcrun\s+)?(?:altool\b|notarytool\s+submit\b)|^\S*(?:iTMSTransporter|Transporter)\b|^(?:bundle\s+exec\s+)?fastlane\s+(?:\S+\s+)?(?:deliver|pilot|upload_to_app_store|upload_to_testflight)\b"#),
+             pattern: #"^xcodebuild\b.*\s-exportArchive\b|^(?:xcrun\s+)?(?:altool\b|notarytool\s+submit\b)|^\S*(?:iTMSTransporter|Transporter)\b|^(?:bundle\s+exec\s+)?fastlane\s+(?:\S+\s+)?(?:deliver|pilot|upload_to_app_store|upload_to_testflight)\b"#),
         Rule(name: "LINE 對外傳訊（line_send.py）", block: true, pattern: #"^(?:python3?\s+(?:-\S+\s+)*)?\S*line_send\.py\b"#),
         // 10-24 隊長：Sam 在公開 repo 用 gh 留言／開 PR，開工卡回覆前就送出去了。這裡粗篩，Okle42 私有 repo 免擋的細判在 GHGuard
         Rule(name: "GitHub 公開發言（gh）", block: true,
@@ -83,7 +86,7 @@ public enum CaptainLink {
              pattern: #"^ssh\s+"# + NSRegularExpression.escapedPattern(for: h) + #"\b.*\b(?:Set-|Remove-|New-Item|Rename-|Move-Item|Copy-Item|Stop-|Restart-|Install-|Uninstall-|reg(?:\.exe)?\s+(?:add|delete|import))"#)
     } }
     /// preview.tsv 格式版本（舊格式的檔案會被換成新的預設）
-    static let rulesVersion = "格式 v5"
+    static let rulesVersion = "格式 v6"
 
     public static var rulesFile: URL {
         if let p = ProcessInfo.processInfo.environment["SHOWORK_PREVIEW_RULES"] { return URL(fileURLWithPath: p) }
@@ -438,5 +441,106 @@ public enum CaptainInbox {
     public static func releases() -> [ReleaseRecord] {
         guard let d = FileManager.default.contents(atPath: releaseLog.path) else { return [] }
         return d.split(separator: 0x0A).compactMap { try? BoardJSON.decoder.decode(ReleaseRecord.self, from: Data($0)) }
+    }
+}
+
+/// 戰情中心回答＝事先放行（10-31 使用者：「我交代你做事還要放行」）。
+/// 使用者在戰情中心按選項／打字回答某個 AI 的問題時，答案裡明說的對外動作（例如「開 PR」「LINE 通知」）
+/// 之後被「擋」規則攔下就直接算放行：同一個 session、30 分鐘內、每種動作一次，照樣寫 releases.jsonl（source＝戰情中心回答）並通知隊長。
+/// 點名這個動作的小句有否定字（不要／先不／別⋯）就不算；沒點名的動作照擋。rm 不在內（刪檔一律要明確放行；mv 10-31 起只通知不擋）。
+public struct Preapproval: Codable, Sendable, Equatable {
+    public var at: Date
+    public var sid: String
+    public var answer: String
+    public var question: String?
+    public var used: [String] = []        // 已經用掉的規則名
+    public init(at: Date, sid: String, answer: String, question: String?) {
+        self.at = at; self.sid = sid; self.answer = answer; self.question = question
+    }
+}
+
+extension CaptainInbox {
+    public static var preapprovalLog: URL {
+        if let p = ProcessInfo.processInfo.environment["SHOWORK_PREAPPROVAL_LOG"] { return URL(fileURLWithPath: p) }
+        return Captain.dir.appendingPathComponent("permits/preapprovals.json")
+    }
+
+    /// 擋規則 → 答案裡要出現的「動作」（regex，比對小寫後的小句）。
+    /// 11-02：原本只看關鍵字，「做完通知我」「PR 的事明天再說」「上線前先給我看」都被當成放行 ⇒ 改成要有動作詞＋對象才算
+    /// 英文字要有字界（prompt、preview、deadline、online 裡的 pr／line 不算）；動詞和對象中間只容許量詞、指示詞（開一個新的 PR、回覆那個 issue）
+    static let preapprovalActions: [(rule: String, patterns: [String])] = [
+        ("GitHub 公開發言", [#"(開|發|送|提|建立?|(?<![a-z])(create|open)(?![a-z]))\s*(一|個|則|支|條|新|的|那|這|\s){0,6}(?<![a-z])(pr|pull request|issue|release)(?![a-z])"#,
+                          #"(?<![a-z])(pr|issue)(?![a-z])\s*(開|發|送)"#,
+                          #"發布(?!的|前|之前|時|後)"#,
+                          #"(?<![a-z])(pr|issue|github)(?![a-z])\s*(上|裡)?\s*(留言|回覆)"#,
+                          #"(留言|回覆)\s*(一|個|則|支|條|那|這|\s){0,6}(?<![a-z])(pr|issue)(?![a-z])"#]),
+        ("LINE 對外傳訊", [#"(用|傳|發|丟|貼)\s*(?<![a-z])line(?![a-z])"#,
+                         #"(?<![a-z])line(?![a-z])\s*(傳|發|通知|私訊|告訴|跟|給)"#,
+                         // 通知／傳給「別人」才算；通知我、發給我看、通知一下都是對 AI 說的，不是要它對外傳
+                         #"(通知|告訴|私訊|傳給|發給|傳訊息給|發訊息給)\s*(?!我|你|一下)[^\s]"#,
+                         #"(傳到|發到)\s*\S*群"#]),
+        ("firebase 部署", [#"(部署|上線|(?<![a-z])deploy(?![a-z]))(?!的|前|之前|時|後)"#]),
+        ("App 上傳", [#"(上傳|送審|上架|(?<![a-z])testflight(?![a-z]))(?!的|前|之前|時|後)"#]),
+    ]
+    /// 否定（regex）：「別」後面接人／的／組／家／處是名詞（別人、別的），不算否定
+    static let negations = ["不要", "先不", #"別(?!人|的|組|家|處)"#, "不用", "暫緩", "取消", "不准", "禁止", "等一下", "等等", "先等"]
+    /// 有這些字的小句是在延後、問句或陳述，不是叫 AI 現在去做（切小句時保留句尾標點，所以「開 PR？」也算問句）
+    static let deferrals = ["再說", "再決定", "再看", "再談", "再議", "明天", "後天", "下週", "下禮拜", "下次", "改天", "晚點", "晚一點", "回頭", "之後", "以後", "給我看", "還沒", "了沒", "考慮", "想想",
+                            "嗎", "？", "?", "等", "之前", "已經", "如果", "要不要", "是否"]
+
+    /// 這則答案有沒有點名放行這條擋規則：按逗號、分號、句號、問號切成小句（標點留在小句尾），
+    /// 有小句帶這個動作、而且帶動作的小句都沒有否定／延後字才算（「先開 PR，不通知」＝PR 算、LINE 不算）
+    public static func authorizes(_ answer: String, rule: String) -> Bool {
+        guard let ps = preapprovalActions.first(where: { rule.hasPrefix($0.rule) })?.patterns else { return false }
+        var clauses: [String] = [], cur = ""
+        for ch in answer.lowercased() {
+            cur.append(ch)
+            if "，,、；;。！!？?\n".contains(ch) { clauses.append(cur); cur = "" }
+        }
+        if !cur.isEmpty { clauses.append(cur) }
+        let named = clauses.filter { c in ps.contains { c.range(of: $0, options: .regularExpression) != nil } }
+        return !named.isEmpty && named.allSatisfy { c in
+            !negations.contains { c.range(of: $0, options: .regularExpression) != nil } && !deferrals.contains { c.contains($0) } && !c.contains("不")
+        }
+    }
+
+    static func loadPreapprovals() -> [Preapproval] {
+        guard let d = FileManager.default.contents(atPath: preapprovalLog.path) else { return [] }
+        return (try? BoardJSON.decoder.decode([Preapproval].self, from: d)) ?? []
+    }
+    static func savePreapprovals(_ xs: [Preapproval]) {
+        try? FileManager.default.createDirectory(at: preapprovalLog.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if let d = try? BoardJSON.encoder.encode(xs) { try? d.write(to: preapprovalLog, options: .atomic) }
+    }
+
+    /// 戰情中心送出回答時記下（只留 24 小時內）
+    public static func recordAnswer(sid: String, answer: String, question: String?, now: Date) {
+        let xs = loadPreapprovals().filter { now.timeIntervalSince($0.at) < 86400 }
+        savePreapprovals(xs + [Preapproval(at: now, sid: sid, answer: answer, question: question)])
+    }
+
+    /// 被擋的這些規則是不是都已經被這個 session 30 分鐘內的戰情中心回答點名放行；是就記用掉、回那則答案
+    public static func usePreapproval(sid: String, rules: [String], now: Date) -> Preapproval? {
+        guard !rules.isEmpty else { return nil }
+        var xs = loadPreapprovals()
+        guard let k = xs.indices.last(where: { i in
+            let p = xs[i]
+            return p.sid == sid && now.timeIntervalSince(p.at) < releaseTTL && now >= p.at
+                && rules.allSatisfy { r in !p.used.contains(r) && authorizes(p.answer, rule: r) }
+        }) else { return nil }
+        xs[k].used += rules
+        savePreapprovals(xs)
+        return xs[k]
+    }
+
+    /// 事先放行的擋單：直接記成已放行＋已用，寫稽核紀錄
+    @discardableResult
+    public static func releaseByAnswer(_ item: CaptainInboxItem, answer: Preapproval, now: Date) -> CaptainInboxItem {
+        var i = item
+        save(i)
+        _ = release(id: i.id, target: i.sid, by: "戰情中心", byName: "使用者（戰情中心回答：\(answer.answer)）", source: "戰情中心回答", now: now)
+        i = self.item(i.id) ?? i
+        i.used = now; save(i)
+        return i
     }
 }

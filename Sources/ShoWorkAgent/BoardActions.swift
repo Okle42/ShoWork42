@@ -220,6 +220,12 @@ enum BoardActions {
     static func answer(_ c: BoardCard, text: String) -> String {
         let line = text.replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespaces)
         defer { tellCaptain(c, answer: line) }
+        // 10-31：戰情中心的回答本身就是使用者的決定 ⇒ 答「放行」直接放行這個 AI 等著的單；答案點名的對外動作記成事先放行（CaptainInbox.usePreapproval）
+        if line.hasPrefix("放行") {
+            _ = CaptainInbox.release(id: nil, target: c.sessionId, by: "戰情中心", byName: "使用者（戰情中心回答）", source: "戰情中心回答", now: Date())
+        } else {
+            CaptainInbox.recordAnswer(sid: c.sessionId, answer: line, question: c.report?.ask, now: Date())
+        }
         if tmuxPane(of: c.pid) != nil {
             if case .typed = sendBack(c, text: line) { return "已送進「\(c.title)」" }
         }
@@ -334,9 +340,9 @@ final class CtxGuard {
             guard let x = c.ctx, ContextGuard.over(x) else { continue }
             if state.notified[c.sessionId] == nil {
                 state.notified[c.sessionId] = Date(); changed = true
-                notify("\(c.project)：context \(Int(x.percent))%",
+                notify("\(c.project)：context \((x.tokens ?? 0) / 1000)k",
                        autoWrapUp ? "停下來後會自動請它 commit 並收尾" : "該收尾了：在AI工作戰情中心按「收尾」")
-                BoardModel.shared.append(["ev": "ctx85", "id": c.sessionId, "project": c.project, "ctx": String(Int(x.percent))])
+                BoardModel.shared.append(["ev": "ctx85", "id": c.sessionId, "project": c.project, "ctx": "\((x.tokens ?? 0) / 1000)k"])
             }
             // 後備：hook 沒接手（例如 session 開在 hook 裝好之前）、停了 60 秒以上、又在 tmux 裡才打字；
             // 打不進去就不記已送、不動剪貼簿，等下次停下來由 hook 收
@@ -368,8 +374,8 @@ extension BoardActions {
     /// 請那個 session 收尾（commit、規則允許才 push、更新交接）；回傳 "typed" 或說明
     @discardableResult
     static func wrapUp(_ c: BoardCard) -> String {
-        let text = ContextGuard.wrapUpPrompt(percent: c.ctx?.percent ?? ContextGuard.threshold)
-        BoardModel.shared.append(["ev": "wrapup", "id": c.sessionId, "project": c.project, "ctx": c.ctx.map { String(Int($0.percent)) } ?? ""])
+        let text = ContextGuard.wrapUpPrompt(tokens: c.ctx?.tokens ?? ContextGuard.tokenLimit)
+        BoardModel.shared.append(["ev": "wrapup", "id": c.sessionId, "project": c.project, "ctx": c.ctx?.tokens.map { "\($0 / 1000)k" } ?? ""])
         CtxGuard.shared.markSent(c.sessionId)
         switch sendBack(c, text: text) {
         case .typed: return "typed"

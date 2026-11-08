@@ -6,7 +6,7 @@ namespace ShoWork;
 
 // 戰情中心 P2 的資料：AI 自報（showork card）、審核、你的決定。Mac 版 Sources/ShoWorkCore/Card.swift 的移植（只搬看板要讀的部分）。
 // 三種東西都以 sessionId 為鍵存在 %LOCALAPPDATA%\ShoWork42\board\{cards,reviews,decisions}\<sid>.json（Mac 是 Application Support）。
-// Windows 目前沒有 `showork card`、沒有審核員、看板沒有放行／丟待辦按鈕 ⇒ 這三個資料夾通常不存在，讀到空的就照 P1 規則分欄。
+// W5 起 Windows 的 `showork card` 會寫 cards；還沒有審核員、看板沒有放行／丟待辦按鈕 ⇒ reviews、decisions 通常不存在，讀到空的就照 P1 規則分欄。
 // 「這一輪」的判準：記錄時間晚於該 session 最後一次你送出訊息的時間才算數，舊的一律不用。
 
 public enum ReportStatus { Working, Review, Done, Blocked }
@@ -21,11 +21,19 @@ public sealed record SelfReport
     public string? Ask { get; init; }            // 要你決定／回答的事
     public string? Report { get; init; }         // 報告檔路徑
     public string? Task { get; init; }           // 隊長派工單號（--task）
+    // 11-02 P8：showork card（W5，showork\Core\CardReport.cs）也會寫的欄位，Mac SelfReport 同名；看板讀、收件匣用 options
+    public string? Doing { get; init; }          // 正在做的任務（--doing）
+    public List<string>? Options { get; init; }  // --ask 的快速選項（--options "A|B|C"）
+    public string? How { get; init; }
+    public string? Kind { get; init; }           // start（開工卡）／wrapup（收尾完）
+    public string? Handoff { get; init; }
+    public string? Touch { get; init; }
+    public string? Outward { get; init; }
     public DateTime At { get; init; }
 
     public static int Clamp(int v) => Math.Clamp(v, 0, 100);
 
-    /// `showork card` 的參數 → 回報；格式錯回傳錯誤訊息（給 AI 看得懂的中文）。Windows 還沒有 card 子指令，先跟 Mac 對齊規則。
+    /// `showork card` 的參數 → 回報；格式錯回傳錯誤訊息（給 AI 看得懂的中文）。寫卡片的是 showork\Core\CardReport.cs（W5），這裡留著給看板與測試用。
     public static (SelfReport? Ok, string? Error) Parse(IReadOnlyList<string> args, DateTime now)
     {
         ReportStatus? status = null; int? p = null, c = null; string? s = null, ask = null, r = null, task = null;
@@ -58,7 +66,7 @@ public sealed record SelfReport
     }
 }
 
-/// 審核員（另一個 AI）的意見。Windows 沒有審核員，只讀（Mac 那邊同步過來的檔案也讀得懂）。
+/// 審核員（另一個 AI）的意見（11-02 P8 起 Windows 也有審核員：Board\BoardWorkers.cs 的 Reviewer）
 public sealed record Review
 {
     public int? Progress { get; init; }
@@ -216,7 +224,7 @@ public sealed record ContextUse
 }
 
 /// 隊長旗標與同專案重工警告（Mac 版 Captain.swift 的 annotate；派工單不搬，Windows 唯讀看板沒有派工）。
-/// 誰是隊長存在 board\captain.json（Mac 由 `showork captain` 寫）；Windows 還沒有這個子指令 ⇒ 通常沒有隊長。
+/// 誰是隊長存在 board\captain.json（`showork captain` 寫，Mac 與 Windows W5 起都有）。
 public static class Captain
 {
     /// 不算「專案」的歸屬（家目錄、看不出來的），不做重工比對
@@ -236,14 +244,19 @@ public static class Captain
         return out_;
     }
 
-    public static List<BoardCard> Annotate(IEnumerable<BoardCard> cards, string? captain)
+    /// 看板卡片＋派工單 → 標上隊長、重工、派工（Mac Captain.annotate；11-02 P8 起帶派工單）
+    public static List<BoardCard> Annotate(IEnumerable<BoardCard> cards, string? captain, IReadOnlyList<CaptainTaskInfo>? tasks = null)
     {
         var list = cards.ToList();
         var dup = SameProject(list, captain);
+        var ts = tasks ?? Array.Empty<CaptainTaskInfo>();
         foreach (var c in list.Where(c => !c.IsQueued))
         {
             c.Captain = c.SessionId == captain;
             c.SameProject = dup.GetValueOrDefault(c.SessionId) ?? new();
+            c.Tasks = c.Captain
+                ? ts.Where(t => t.From == c.SessionId).OrderByDescending(t => t.CreatedAt).ToList()
+                : ts.Where(t => CaptainTasks.Open(t.State) && (t.ToSession == c.SessionId || (t.ToSession == null && t.To == c.Name))).ToList();
         }
         return list;
     }

@@ -92,7 +92,7 @@ enum CaptainCLI {
         let open = CaptainStore.tasks().filter { $0.state.open }
         for e in r.entries.sorted(by: { ($0.captain ? 0 : 1, $0.project) < ($1.captain ? 0 : 1, $1.project) }) {
             var head = "■ \(e.name)\(e.captain ? "（隊長）" : "")｜\(e.project)｜\(e.column.title)：\(e.reason)"
-            if let c = e.ctx { head += "｜ctx \(c)%" }
+            if let t = e.ctxTokens { head += "｜ctx \(t / 1000)k" } else if let c = e.ctx { head += "｜ctx \(c)%" }
             if e.kind == "bg" { head += "｜背景" }
             if let t = e.lastActivity { head += "｜\(rel.localizedString(for: t, relativeTo: Date()))" }
             out(head)
@@ -158,7 +158,7 @@ enum CaptainCLI {
         let t = CaptainTask(id: id, from: from, to: target?.name ?? to, toSession: target?.sessionId, project: target?.project, text: text,
                             thenTo: thenTo.map { n in entry(n).map { nick[$0.sessionId] ?? $0.name } ?? n }, thenText: thenText)
         if let w = target, !w.sameProject.isEmpty { err("⚠ \(w.project) 還有別的 session：\(w.sameProject.joined(separator: "、"))") }
-        if let c = target?.ctx, c >= Int(ContextGuard.threshold) { err("⚠ \(to) 的 context 已用 \(c)%，可能做不完") }
+        if let t = target?.ctxTokens, t >= ContextGuard.tokenLimit { err("⚠ \(to) 的 context 已用 \(t / 1000)k（門檻 \(ContextGuard.tokenLimit / 1000)k），可能做不完") }
         let (saved, r) = Captain.dispatch(t, showork: showork, fromName: sessionName(from) ?? "隊長")
         switch r {
         case .success:

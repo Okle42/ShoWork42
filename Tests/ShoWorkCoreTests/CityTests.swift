@@ -165,6 +165,12 @@ struct CityTests {
         let t = now
         #expect(CityParse.departures(old: [:], new: ["A": t]).isEmpty)
         #expect(CityParse.departures(old: ["A": t, "B": t], new: ["A": t.addingTimeInterval(5), "B": t, "C": t]) == ["A"])
+        // push 不碰 FETCH_HEAD ⇒ 出港；fetch／pull 跟遠端 ref 一起改寫 FETCH_HEAD ⇒ 進港
+        #expect(!CityParse.isInbound(refAt: t, fetchHeadAt: nil))
+        #expect(!CityParse.isInbound(refAt: t, fetchHeadAt: t.addingTimeInterval(-3600)))
+        #expect(CityParse.isInbound(refAt: t, fetchHeadAt: t))
+        #expect(CityParse.isInbound(refAt: t, fetchHeadAt: t.addingTimeInterval(-2)))
+        #expect(CityShip(repo: "A", at: t, inbound: true).id != CityShip(repo: "A", at: t).id)
     }
 
     @Test("設備警示：≥90% 碟、離線伺服器、防火牆關、敞開紅門、hot；正常的不算")

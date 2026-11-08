@@ -1,5 +1,8 @@
 # ShoWork42
 
+**同時跑很多個 Claude Code session 的戰情中心——每個 session 自己回報、由「隊長」session 派工，每個終端機依狀態發光。**
+42 系列作品，作者 [Okle42](https://github.com/Okle42)。
+
 [English](README.md)
 
 > **授權：原始碼公開，不是開源。** 可以看、可以個人試用；不可商用、不可再散布。見 [LICENSE](LICENSE)。
@@ -7,7 +10,7 @@
 > [!WARNING]
 > **開發中（M0 技術驗證階段）**：尚未簽章與公證、還沒有打包好的安裝檔，行為與設定格式都可能變動。歡迎看看、試玩或回報問題，但請先不要用在正式工作環境。
 
-> 終端機裡的 AI 在工作、做完了、在等你回答——不用切過去看，視窗外圍的光就告訴你。
+> 五個終端機開著五個 Claude Code session：哪個在等你？哪個做完了？哪個正要 `git push`？ShoWork42 讓你一眼看清楚，還能讓一個 session 統籌其他的。
 
 > **Windows 版**（開發中）：傳統主控台與 Windows Terminal ＋ Claude Code，系統匣「動態島」、設定視窗、自動排版、單一 exe 安裝。說明見 [windows/README.md](windows/README.md)。
 
@@ -24,7 +27,19 @@ macOS 常駐小工具。每個跑著 AI（Claude Code、Codex、Gemini⋯⋯）�
 
 > 狀態：**開發中**。M0（技術驗證）完成，M1（Claude Code × Ghostty 日用）進行中。正式發布前要完成簽章＋公證＋全矩陣實測。
 
-## 功能
+## 戰情中心
+
+選單列 →「AI工作戰情中心⋯」打開看板，每個開著的 Claude Code session 一張卡。
+
+- **狀態卡**：工作中／待審／卡住／完成，附完成度、信心度和 AI 自己回報的一句話摘要（`showork card`）。AI 問你問題時，卡片上有選項，按一下就回答。
+- **隊長派工**：你只跟一個「隊長」session 講話；它看名冊，用 Claude Code 內建的跨 session 訊息把工作派給其他 session（`showork task`），回報會自動送回來——也能設接力（A 做完 → B 接著做）。
+- **AI 審核**：卡片進「待審」時，唯讀的 `claude -p` 審核員會查一次，留下完成度、信心度和最多 3 條疑點。
+- **對外動作閘門**：PreToolUse hook 會擋下 `git push` 這類有風險的動作，等你放行；在卡片上回答時也能事先放行。
+- **context 交接**：session 超過你設定的 token 門檻就自動收尾（commit、交接筆記、記憶），等它停下來、你也沒在打字，再自動 `/clear`。
+- **重工警告**：同一個專案開了兩個 session 會標出來。
+- **3D 辦公大樓**：每個專案一層樓、每個 session 一個坐在桌前的人；大樓四周把這台 Mac 的硬碟、雲端硬碟、SSH 主機、防火牆、git 遠端畫成一座小城市。閒置時 CPU 不到 1%。
+
+## 光暈與視窗功能
 
 - **三種終端機**：Ghostty（含 tmux）、Terminal.app、iTerm2 —— 背景分頁、多視窗、tmux 多 client 都對得到。
 - **光暈**：點擊穿透、跟著視窗移動／縮放／疊放；全螢幕改畫螢幕邊緣 3pt 細光；「減少動態效果」時不動畫。

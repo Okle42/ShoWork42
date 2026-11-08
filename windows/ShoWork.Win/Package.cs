@@ -40,6 +40,10 @@ static class Package
             foreach (var f in Directory.GetFiles(Bin))
                 if (!Path.GetFileName(f).Equals(AgentExe, StringComparison.OrdinalIgnoreCase) && !Path.GetFileName(f).Equals(CliExe, StringComparison.OrdinalIgnoreCase))
                     try { File.Delete(f); } catch { }
+            // …and folders too: a dev install's Web\ next to the exe would win over the embedded pages (OfficeHost.WebFolder),
+            // so an upgraded agent kept showing the old 3D building (P8 on the Surface); runtimes\ is dead weight
+            foreach (var d in Directory.GetDirectories(Bin))
+                try { Directory.Delete(d, recursive: true); } catch { }
         }
         else
         {

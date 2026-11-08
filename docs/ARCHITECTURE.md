@@ -131,7 +131,7 @@ AX 視窗 → CGWindowID 用私有 `_AXUIElementGetWindow`。
 
 ## 戰情中心 P2（10-08）：自報、AI 審核、你的決定、帳號流量
 
-- **自報**：安裝時加 SessionStart hook `showork brief`，把一段說明注入每個新 session；AI 每輪結束跑 `showork card --status review|done|blocked|working --progress --confidence --summary [--ask] [--report]`，存 `board/cards/<sessionId>.json`（sessionId 取 `CLAUDE_CODE_SESSION_ID`）。早於你最後一次送出訊息的自報不算。`claude -p` 無頭呼叫（`CLAUDE_CODE_ENTRYPOINT=sdk-*`，例如熬夜秘書、審核員自己）不注入、不上看板。
+- **自報**：安裝時加 SessionStart hook `showork brief`，把一段說明注入每個新 session；AI 每輪結束跑 `showork card --status review|done|blocked|working --progress --confidence --summary [--ask] [--report]`，存 `board/cards/<sessionId>.json`（sessionId 取 `CLAUDE_CODE_SESSION_ID`）。早於你最後一次送出訊息的自報不算。`claude -p` 無頭呼叫（`CLAUDE_CODE_ENTRYPOINT=sdk-*`，例如自動化腳本、審核員自己）不注入、不上看板。
 - **審核**：卡片進「待審」（等你回答的除外）就請 `claude -p --model sonnet` 唯讀查證（Read／Grep／Glob／git status·diff·log·show），輸出完成度、信心度、pass／concern／fail、最多 3 條疑點，存 `board/reviews/`。同時最多 2 個；保險絲：同一 session 一小時最多自動審 3 次。實測一次約 20 秒、US$0.02。看板上有「AI 審核」開關。
 - **決定**：放行 → 完成；丟待辦（可加備註）→ 待辦；存 `board/decisions/`，該 session 一有新動靜就失效。退回＋補一句 → 用 tmux `send-keys` 打進那個 pane 並按 Enter（不在 tmux：拷貝到剪貼簿並跳到視窗）。新任務 → `claude --bg`（資料夾要先信任過）。
 - **帳號流量**：Claude Code 只把 `rate_limits` 交給 statusLine，所以由狀態列腳本存 `~/.claude/cache/rate_limits.json`，看板右上角顯示 5 小時／7 天用量與重置倒數（≥70% 橘、≥90% 紅）。**給別人用時要附一個會存這個檔的 statusLine**，不然右上角顯示「尚無資料」。
@@ -140,8 +140,8 @@ AX 視窗 → CGWindowID 用私有 `_AXUIElementGetWindow`。
 
 ## ctx 顯示、快滿收尾與自動交接（10-09；10-24 閉環）
 
-- 狀態列腳本（`~/.claude/scripts/statusline.py`）把每個 session 的 `context_window.used_percentage` 存成 `~/.claude/cache/ctx/<sessionId>.json`；卡片在完成度／信心度後面顯示 `ctx N%`（70% 起橘、85% 起紅）。狀態列只在那個 session 有互動時更新，久沒動的 session 先不顯示。
-- 超過 85%：系統通知一次；「ctx 85% 自動收尾」開著（預設）時，等那個 AI 停下來（不在工作中、不在問你問題）就打一段收尾指令進它的 tmux pane：commit、**規則允許才 push**（push 與否交給那個 session 的 AI 依 repo 規則判斷，看板不自己跑 git）、更新交接與記憶。每個 session 只送一次（`board/ctxguard.json`）；卡片上也有手動「收尾」按鈕。
+- 狀態列腳本（`~/.claude/scripts/statusline.py`）把每個 session 的 `context_window.used_percentage` 存成 `~/.claude/cache/ctx/<sessionId>.json`；卡片在完成度／信心度後面顯示 `🧠 Nk`（token 數；到門檻 8 成起橘、到門檻紅）。狀態列只在那個 session 有互動時更新，久沒動的 session 先不顯示。
+- 超過 token 門檻（`board.ctxTokens`，250k–1000k；10-29 Kang 改成只看這一個條件）：系統通知一次；「自動收尾」開著（預設）時，等那個 AI 停下來（不在工作中、不在問你問題）就打一段收尾指令進它的 tmux pane：commit、**規則允許才 push**（push 與否交給那個 session 的 AI 依 repo 規則判斷，看板不自己跑 git）、更新交接與記憶。每個 session 只送一次（`board/ctxguard.json`）；卡片上也有手動「收尾」按鈕。
 - 只有正式 agent 會通知、會打字；`--board-window` 測試視窗不動手。
 - 實測（10-09）：把測試 session 的 ctx 檔改成 90%，1.5 秒內通知＋送出，該 session 自己 commit 兩筆、因沒有 remote 不 push、寫了 HANDOFF.md。
 
@@ -149,7 +149,7 @@ AX 視窗 → CGWindowID 用私有 `_AXUIElementGetWindow`。
 
 Kang 原話：「讓他工作超過 70% 以後就自動收尾…自己準備交接文件，處理好之後自己再接手自己的交接文件」。10-18 起 Stop hook 已會請它收尾，但收尾後沒人 /clear（10-24 早上 Quinn 收尾在 72%，又被派工做到 80%）。現在三段接起來：
 
-1. **收尾**（`~/.claude/scripts/hook_ctx_wrapup.py`，Stop hook）：ctx ≥ `board.ctxThreshold` 時 block、請 AI commit／規則允許才 push／更新交接，最後一步發 **收尾卡** `showork card --kind wrapup --handoff <交接文件絕對路徑> --summary "<接手重點>"`，發完就停。收尾卡一定要帶存在的絕對路徑，否則 CLI 拒收。收尾卡寫 `board/handover/<sid>.json`（`HandoverRecord`，pending；記 claude 行程 pid＝往上第一個有 `~/.claude/sessions/<pid>.json` 的祖先——行程名是版本號 `2.1.310` 不是 claude，10-24 實測）。
+1. **收尾**（`~/.claude/scripts/hook_ctx_wrapup.py`，Stop hook）：ctx ≥ `board.ctxTokens`（token 數，250k–1000k，預設 250k；10-29 起只看這一個條件，% 門檻已拿掉）時 block、請 AI commit／規則允許才 push／更新交接，最後一步發 **收尾卡** `showork card --kind wrapup --handoff <交接文件絕對路徑> --summary "<接手重點>"`，發完就停。收尾卡一定要帶存在的絕對路徑，否則 CLI 拒收。收尾卡寫 `board/handover/<sid>.json`（`HandoverRecord`，pending；記 claude 行程 pid＝往上第一個有 `~/.claude/sessions/<pid>.json` 的祖先——行程名是版本號 `2.1.310` 不是 claude，10-24 實測）。
 2. **自動 /clear**（agent `HandoverClear`，每次刷新）：pending 而且 ① 它最後一張卡就是收尾卡（之後又發卡＝還在做或在問問題）② 不在工作欄 ③ 沒開權限對話框、不是「等你回答」④ 停了 5 秒 ⑤ 鍵盤 60 秒沒動（全系統；隊長 10-24 要求，免得 Kang 正在那個分頁打草稿時被接上 /clear）⇒ 送 `/clear`：
    - tmux：claude 行程的 tty 擁有的 pane，`send-keys`。
    - Ghostty（沒 tmux）：用 OSC 7 nonce 從 tty 探出那個分頁的 AppleScript terminal id，再比對 terminal 標題開頭是它的英文名（`Handover.titleMatches`），兩道都對才用 `input text … to terminal` ＋ `send key "enter"` 送——**不搶焦點、不動視窗**。
@@ -159,7 +159,7 @@ Kang 原話：「讓他工作超過 70% 以後就自動收尾…自己準備交�
 3. **自動接手**（`showork brief`，SessionStart hook，原本就掛著、沒改 settings）：讀 hook JSON 的 session_id／source／cwd，`Handover.claim` 認領——compact＝同一個 sid；clear／startup／resume＝同一個 claude 行程，或同資料夾而原 session 已不在，60 分鐘內。認領後：新 sid 沿用英文名（`board/names/<sid>.json` 的 `handoverFrom` 記舊 sid）、開著的派工單 `toSession` 轉到新 sid、注入「【自動接手】你是 <名字> 的接手，先讀 <HANDOFF>…名字沿用、派工單沿用」。
 - **收尾後又派新工作**：收尾到 /clear 之間使用者送出新指令（UserPromptSubmit，`showork title`）⇒ interrupted，不自動 /clear，看板傳「【交接提醒】」給隊長（沒隊長就系統通知）；ctx 再多 15% Stop hook 會再收一次。
 - **看得到**：卡片完成度列多一個橘色「🔁 已收尾待 /clear」（泡泡也是）；`showork roster` 標出來；隊長巡檢列「已收尾、還沒 /clear：…」；隊長守則第 11 條。
-- 開關與門檻照舊：`board.autoWrapUp`、`board.ctxThreshold`（defaults `ai.okle42.showork`）。測試用：claude 行程帶 `SHOWORK_TEST_CTX=72` 啟動，Stop hook 就當 ctx 是 72%。
+- 開關與門檻：`board.autoWrapUp`、`board.ctxTokens`（defaults `ai.okle42.showork`；工具列「ctx 250k」點開是滑桿，250k–1000k、10k 一格）。測試用：claude 行程帶 `SHOWORK_TEST_CTX=300k` 啟動，Stop hook 就當 ctx 用了 300k token。
 - **Ghostty 送字不搶焦點**（隊長 10-24 的四點疑慮逐條判斷）：Ghostty 1.3 的 AppleScript `input text`／`send key` 是直接送給指定的 terminal surface，不是 System Events 的 keystroke，**不需要把視窗拉到前面**。
   ① 使用者閒置：一律要求鍵盤 60 秒沒動才送。② 前景還原：不會改前景，所以不用還原——實測送前／送後前景都是同一個 App。③ 縮在 Dock／別的桌面空間：照樣送得到、視窗不會被叫出來或搬動，所以不用退回「通知手動」——實測縮在 Dock 的分頁送字後仍是縮著、指令有執行。真正的退回條件是「驗不到目標」（tty 探不到分頁、標題對不上英文名、不在 tmux 也不在 Ghostty）。④ 測試只用自己開的 Ghostty 視窗：等使用者閒 20 秒才開、開完立刻縮到 Dock（只縮名字唯一對得上的新窗）、焦點還給原 App，測完以 terminal id 關掉。
 - 實測（10-24，假專案「專案A」、Haiku 測試 session，`SHOWORK_TEST_CTX=72`）：
@@ -179,7 +179,7 @@ Kang 原話：「讓他工作超過 70% 以後就自動收尾…自己準備交�
 - **名冊**：agent 每次刷新把卡片加工後寫成 `board/roster.json`；`showork roster` 印出每個 session 的名字、專案、欄位、在做什麼、ctx、交給它的派工單。超過 30 秒沒更新就當作 agent 沒在跑。
 - **重工警告**：同一個專案名（往上找 `.git`）有兩個以上 session，卡片上顯示「同專案還有 ⋯」（橘色），名冊也會標。隊長自己、家目錄、看不出專案的不算。
 - **派工單**：`showork task add --to <名字> --text "…"` 建 `board/tasks/<單號>.json`，印出要用 SendMessage 送的全文（第一行「【隊長派工 單號】…」，最後附回報方式）。對方回報用 `showork card --task <單號> …`，CLI 直接更新那張單（working／review／done／blocked；done 帶 `--ask` 算 review）。`showork tasks` 看狀態；`showork task cancel <單號>` 取消。
-- **隊長**：`showork captain` 把目前的 session 登記進 `board/captain.json`，並印出隊長守則（先看名冊、同專案只給一個、ctx ≥ 85% 不派、建單、SendMessage＋notify_when_idle、追蹤；小事自己做；不叫別人做自己權限會被擋的事）。第一次 `task add` 也會自動登記。看板上隊長卡有「隊長」皇冠，列出派出去的單；其他卡列出交給它、還沒結束的單。
+- **隊長**：`showork captain` 把目前的 session 登記進 `board/captain.json`，並印出隊長守則（先看名冊、同專案只給一個、ctx 到 token 門檻不派、建單、SendMessage＋notify_when_idle、追蹤；小事自己做；不叫別人做自己權限會被擋的事）。第一次 `task add` 也會自動登記。看板上隊長卡有「隊長」皇冠，列出派出去的單；其他卡列出交給它、還沒結束的單。
 
 ### 看板的已知耦合（b3 交接，10-09）
 
@@ -272,7 +272,7 @@ LaunchAgent：`~/Library/LaunchAgents/ai.okle42.showork.agent.plist`
 - **B1 收尾時順便留**（10-27 T1027193007）：不再叫醒 B1 閒置的 session（`B1Talk.pick` 與 BoardSource.b1Talk 已移除，閒置零花費）。改在 Stop hook `~/.claude/scripts/hook_ctx_wrapup.py` 的收尾提示裡，用 `showork b1 hint` 取 `B1Talk.wrapupNote` 插成第 ④ 步（收尾卡順延成 ⑤）：頂多一則可零則，沒有失敗、被糾正、重工就不留；只留需要修正的事（錯在哪、根因、建議規則、證據）；提示裡直接附板上最近 5 則（每則截 60 字，不多一次 b1 read），同一個坑就 `--re` 或不留。`b1-talks.json` 不再寫入。
 - **隊長連動**（10-24，派工 T1024033803；規則 `ShoWorkCore/CaptainLink.swift`，沒有新增 hook，全掛在原本的 `showork title`（UserPromptSubmit）與 `showork guard-push`（PreToolUse Bash））：
   - ①開工卡：使用者直接下的指令（`CaptainLink.needsStart`：`<cross-session-message`／`<task-notification`／系統標籤開頭的不算）⇒ additionalContext 提醒動手前先發 `showork card --kind start --doing --summary --how --touch --outward`。距該 session 上一道使用者指令（`board/prompts/<sid>` 的 mtime）超過 10 分鐘＝完整提醒，10 分鐘內只提醒「換了任務才發」。隊長自己、cwd 含 `/ProjectC` 的 session 不提醒。轉隊長時 `CardRelay.text` 前綴【開工】，不受 60 秒節流；同一個 doing 10 分鐘內不重送。
-  - ②動作預告：`board/guard/preview.tsv`（`類別<TAB>擋|告<TAB>正規表示式`，格式 v5；舊格式自動換成預設）。比對前 `CaptainLink.segments` 把指令切成一段段（引號外的 `; && || | & ( ) $(` 換行；去 sudo／env／VAR=值 前綴；heredoc 內文拿掉；引號內容換成 Q，ssh 那段保留；同一條指令裡設成暫存路徑的變數如 `T=$(mktemp -d)` 展開成 /tmp/），所以 `^` 就是指令的第一個詞。擋（rm／mv 到暫存區以外、firebase deploy、App 封裝上傳、line_send.py、GitHub 公開發言）⇒ deny＋單號、立即送隊長；GitHub 公開發言（10-24 隊長：Sam 在公開 repo 用 gh 留言／開 PR，開工卡回覆前就送出去了）＝`gh issue comment|create`、`gh pr create|comment|review`、`gh release create`、`gh api` 寫入 `repos/…`（-X POST／PATCH／PUT／DELETE，或帶 -f／-F／--input 這類預設成 POST 的欄位）；正規表示式只粗篩，命中後 `GHGuard.blockReason` 逐段看目標 repo（`-R`／`--repo`、參數裡的 github.com 網址、api 路徑的 owner/name；都沒有就是資料夾的每一個 remote，fork 的 PR 會開到上游所以上游也算；跟著 cd 走），全部是 Okle42 而且 `gh repo view --json isPrivate,owner` 回私有才免擋；別人的、公開的、gh 查不到或 8 秒沒回、路徑用變數 ⇒ 照擋，擋的原因附在預告摘要後面。api 只算 repos/ 路徑（graphql 等不算，照隊長給的範圍）。放行＝隊長 `showork release <單號>`（只限現任隊長）或使用者在那個 session 打「放行」「放行 <單號>」，30 分鐘內同一 session 同一指令（FNV 指紋）用一次，每次放行寫 `board/permits/releases.jsonl`（時間、單號、放行者、指令摘要、來源）。告（defaults write、寫 ~/.claude/scripts|data、ssh winbox 寫入）⇒ 先進收件匣，看板把同一 session 安靜 5 秒（最多 30 秒）的合成一則送。隊長自己的指令不擋不告。`showork preview-check "<指令>"` 無副作用試算。限制：AI 技術上能偽造環境變數自己 release，只能靠規則與稽核紀錄；Write／Edit 工具不經過這個 hook。
+  - ②動作預告：`board/guard/preview.tsv`（`類別<TAB>擋|告<TAB>正規表示式`，格式 v6；舊格式自動換成預設）。比對前 `CaptainLink.segments` 把指令切成一段段（引號外的 `; && || | & ( ) $(` 換行；去 sudo／env／VAR=值 前綴；heredoc 內文拿掉；引號內容換成 Q，ssh 那段保留；同一條指令裡設成暫存路徑的變數如 `T=$(mktemp -d)` 展開成 /tmp/），所以 `^` 就是指令的第一個詞。擋（rm 到暫存區以外、firebase deploy、App 上傳（-exportArchive／altool／notarytool／Transporter／fastlane）、line_send.py、GitHub 公開發言）⇒ deny＋單號、立即送隊長；GitHub 公開發言（10-24 隊長：Sam 在公開 repo 用 gh 留言／開 PR，開工卡回覆前就送出去了）＝`gh issue comment|create`、`gh pr create|comment|review`、`gh release create`、`gh api` 寫入 `repos/…`（-X POST／PATCH／PUT／DELETE，或帶 -f／-F／--input 這類預設成 POST 的欄位）；正規表示式只粗篩，命中後 `GHGuard.blockReason` 逐段看目標 repo（`-R`／`--repo`、參數裡的 github.com 網址、api 路徑的 owner/name；都沒有就是資料夾的每一個 remote，fork 的 PR 會開到上游所以上游也算；跟著 cd 走），全部是 Okle42 而且 `gh repo view --json isPrivate,owner` 回私有才免擋；別人的、公開的、gh 查不到或 8 秒沒回、路徑用變數 ⇒ 照擋，擋的原因附在預告摘要後面。api 只算 repos/ 路徑（graphql 等不算，照隊長給的範圍）。放行＝隊長 `showork release <單號>`（只限現任隊長）或使用者在那個 session 打「放行」「放行 <單號>」，30 分鐘內同一 session 同一指令（FNV 指紋）用一次，每次放行寫 `board/permits/releases.jsonl`（時間、單號、放行者、指令摘要、來源）。告（mv 到暫存區以外、xcodebuild archive 本機打包——10-31 使用者：可復原或不對外的改成只通知；defaults write、寫 ~/.claude/scripts|data、ssh winbox 寫入）⇒ 先進收件匣，看板把同一 session 安靜 5 秒（最多 30 秒）的合成一則送。隊長自己的指令不擋不告。`showork preview-check "<指令>"` 無副作用試算。限制：AI 技術上能偽造環境變數自己 release，只能靠規則與稽核紀錄；Write／Edit 工具不經過這個 hook。
   - ④隊長收件匣 `board/captain-inbox/<單號>.json`（start／notice／block；delivered、released、used、acked），7 天後刪。新隊長 `showork captain` 先印未處理的；`showork captain ack <單號｜all>` 標已處理。
   - ③⑤隊長鬧鐘：看板每 `captain.alarmMinutes`（預設 30）分鐘送【巡檢時間】（不含隊長的人數、各自 ctx、閒置超過 30 分鐘的人、收件匣未處理數）；指紋跟上次一樣只送「無變化」一行；沒有隊長不送；看板啟動起算。
 

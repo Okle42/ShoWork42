@@ -240,6 +240,12 @@ struct OfficeTests {
         #expect(OfficeLighting.day.nextChange(after: now, calendar: cal) == nil)
         #expect(OfficeLighting.auto.label(at: local("2026-10-21T17:25:00")) == "自動・日落")
         #expect(OfficeLighting.auto.label(at: local("2026-10-21T05:20:00")) == "自動・清晨")
+        // 11-01：跟天氣設定的地點走——台北中午＝紐約半夜
+        let ny = (lat: 40.71, lon: -74.01)
+        #expect(!OfficeLighting.auto.isNight(at: noon, calendar: cal))
+        #expect(OfficeLighting.auto.look(at: noon, site: ny).isNight)
+        #expect(OfficeLighting.auto.label(at: noon, site: ny) == "自動・夜晚")
+        #expect(OfficeLighting.auto.nextChange(after: noon, calendar: cal, site: ny)! > noon.addingTimeInterval(3600))
     }
 
     @Test("太陽：台北冬至、夏至、今天的日出日落（NOAA）跟參考值差 ≤ 3 分鐘")

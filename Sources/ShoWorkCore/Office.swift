@@ -365,15 +365,16 @@ public enum OfficeLighting: String, Sendable, CaseIterable {
         }
     }
 
-    /// 自動：跟台北的真實太陽（10-21 日出日落，Solar.swift）；白天／夜晚固定＝改版前的兩組燈光
-    public func sun(at date: Date) -> SunSample { Solar.position(at: date) }
+    /// 自動：跟真實太陽（10-21 日出日落，Solar.swift）；白天／夜晚固定＝改版前的兩組燈光。
+    /// 地點（11-01 Kang）：天氣設定的主地點（OfficeWeather.main）；沒給＝台北
+    public func sun(at date: Date, site: (lat: Double, lon: Double) = Solar.taipei) -> SunSample { Solar.position(at: date, lat: site.lat, lon: site.lon) }
 
     /// 這個時間點的天色與燈光
-    public func look(at date: Date) -> SkyLook {
+    public func look(at date: Date, site: (lat: Double, lon: Double) = Solar.taipei) -> SkyLook {
         switch self {
         case .day: return .day
         case .night: return .night
-        case .auto: return SkyLook.at(sun(at: date))
+        case .auto: return SkyLook.at(sun(at: date, site: site))
         }
     }
 
@@ -381,8 +382,8 @@ public enum OfficeLighting: String, Sendable, CaseIterable {
     public func isNight(at date: Date, calendar: Calendar = .current) -> Bool { look(at: date).isNight }
 
     /// 標籤文字：自動＝「自動・清晨／日出／白天／傍晚／日落／黃昏／夜晚」
-    public func label(at date: Date) -> String {
-        self == .auto ? "自動・\(SkyLook.phaseTitle(sun(at: date)))" : title
+    public func label(at date: Date, site: (lat: Double, lon: Double) = Solar.taipei) -> String {
+        self == .auto ? "自動・\(SkyLook.phaseTitle(sun(at: date, site: site)))" : title
     }
 
     /// 天色會變的仰角範圍（這段每分鐘更新一次）；白天只有太陽方向在動（每 5 分鐘）；夜晚整段不變
@@ -390,16 +391,16 @@ public enum OfficeLighting: String, Sendable, CaseIterable {
 
     /// 自動模式下一次要重算燈光的時間（畫面排一次性的 sleep，不輪詢）：
     /// 晨昏那段每 60 秒、白天每 5 分鐘（主光東升西落）、夜晚睡到天快亮（仰角回到 −13°）。白天／夜晚固定就回 nil
-    public func nextChange(after date: Date, calendar: Calendar = .current) -> Date? {
+    public func nextChange(after date: Date, calendar: Calendar = .current, site: (lat: Double, lon: Double) = Solar.taipei) -> Date? {
         guard self == .auto else { return nil }
-        let e = Solar.position(at: date).elevation
+        let e = sun(at: date, site: site).elevation
         if Self.changingBand.contains(e) { return date.addingTimeInterval(60) }
         if e > Self.changingBand.upperBound { return date.addingTimeInterval(300) }
         // 夜晚：每 2 分鐘往後找第一個進入晨昏帶的時間（最多 24 小時）
         var t = date
         for _ in 0..<720 {
             t = t.addingTimeInterval(120)
-            if Solar.position(at: t).elevation >= Self.changingBand.lowerBound { return t }
+            if sun(at: t, site: site).elevation >= Self.changingBand.lowerBound { return t }
         }
         return date.addingTimeInterval(3600)
     }

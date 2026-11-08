@@ -201,7 +201,7 @@ public struct WorkSignature: Sendable, Equatable {
         return out
     }
 
-    /// 專案名拆詞：ProjectC → Master Line 42、In_Unison42 → In Unison 42（只用在身分分數）
+    /// 專案名拆詞：DemoLine42 → Demo Line 42、In_Unison42 → In Unison 42（只用在身分分數）
     public static func splitName(_ s: String) -> String {
         var out = ""
         var prev: Character?

@@ -21,3 +21,4 @@ docs/design/office-tower/review/
 
 # 本機工具資料（claude-flow 外掛），不進 git
 .claude-flow/
+__pycache__/

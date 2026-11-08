@@ -107,7 +107,7 @@ struct OfficeView: View {
         // 示範資料：大樓、主題、閒晃在這裡用假卡片算（不碰你的樓層號名冊）；正式就是 BoardModel 算好的
         let (towerShown, decorShown, wanderShown) = OfficeDemo.mode == nil ? (tower, decor, wander) : demoTower.make(deps, cards: cards, real: decor)
         let guardShown = OfficeDemo.guardStatus(guardStatus)
-        let now = OfficeClock.now(), look = lighting.look(at: now).weathered(weather.look), night = look.isNight    // 10-21 日出日落：天色依太陽仰角連續混合
+        let now = OfficeClock.now(), site = weather.main.coord, look = lighting.look(at: now, site: site).weathered(weather.look), night = look.isNight    // 10-21 日出日落：天色依太陽仰角連續混合；11-01 起跟天氣設定的主地點
         // 點了等你回答的角色：開可互動卡（還在等你才顯示，回答完／換狀態就自己收掉）
         let answering = answeringId.flatMap { i in cards.first { $0.id == i && Mood.of($0) == .waiting } }
         let attention = AttentionSummary.make(cards)
@@ -128,7 +128,7 @@ struct OfficeView: View {
                              onWaiting: { if !wide { inboxOpen = true }; focusAttention(attention.waiting, answer: true) },
                              onStuck: { focusAttention(attention.stuck, answer: false) },
                              onFinished: { focusAttention(attention.finished, answer: false) }) {
-                    controls(towerShown: towerShown, decorShown: decorShown, night: night, lightLabel: lighting.label(at: now))
+                    controls(towerShown: towerShown, decorShown: decorShown, night: night, lightLabel: lighting.label(at: now, site: site))
                 }
                 scene(islands: islands, towerShown: towerShown, decorShown: decorShown, wanderShown: wanderShown,
                       guardShown: guardShown, night: night, look: look, answering: answering, cards: cards)
@@ -190,7 +190,7 @@ struct OfficeView: View {
         SwiftUI.Menu {
             Picker("燈光", selection: lightingBinding) {
                 ForEach(OfficeLighting.allCases, id: \.self) { l in
-                    Text(l == .auto ? "自動（跟著台北日出日落）" : l.title).tag(l)
+                    Text(l == .auto ? "自動（跟著\(weather.main.title)日出日落）" : l.title).tag(l)
                 }
             }
             .pickerStyle(.inline)
@@ -309,11 +309,11 @@ struct OfficeView: View {
                 }
                 print("attention click", k, "→", answeringId.map { "answer \($0)" } ?? "focus \(lastAttention ?? "nil")"); fflush(stdout)
             }
-            .task(id: "\(lighting.rawValue)|\(clockTick)") {
+            .task(id: "\(lighting.rawValue)|\(clockTick)|\(weather.main.title)") {
                 // 自動燈光：晨昏每 60 秒、白天每 5 分鐘、夜晚睡到天快亮再重算一次；白天／夜晚固定、測試假時間（凍結）就不排
                 guard OfficeClock.fixed == nil else { return }
                 let now = OfficeClock.now()
-                guard let next = lighting.nextChange(after: now) else { return }
+                guard let next = lighting.nextChange(after: now, site: weather.main.coord) else { return }
                 try? await Task.sleep(for: .seconds(max(1, next.timeIntervalSince(now) + 0.5)))
                 if !Task.isCancelled { clockTick += 1 }
             }
@@ -903,7 +903,7 @@ private struct GuardBadge: View {
 /// 保全面板裡的 push 守門：最近 24 小時檢查／擋下幾次＋最近幾筆（PushGuard，10-22）
 private struct PushGuardSection: View {
     let status: GuardStatus
-    @State private var allowed: Set<String> = []     // 這次開面板按過放行的（dir+head）
+    @State private var allowed: Set<String> = []     // 這次開面板按過放行的（dir+head+被擋時間）
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
@@ -926,7 +926,8 @@ private struct PushGuardSection: View {
                     }
                     Spacer(minLength: 4)
                     if e.verdict == .block, let h = e.head, !h.isEmpty, Date().timeIntervalSince(e.at) < 3600 {
-                        let k = e.dir + h
+                        // 記號要帶被擋的時間：同一個 HEAD 放行用掉後又被擋（例如 git 自己拒推、重推），新的那筆要能再按（11-03）
+                        let k = e.dir + h + "\(e.at.timeIntervalSince1970)"
                         Button(allowed.contains(k) ? "已放行" : "放行一次") {
                             guard OfficeDemo.mode == nil, OfficeDemo.guardMode == nil else { allowed.insert(k); return }   // 示範資料不寫檔
                             PushGuard.allow(e); allowed.insert(k)
@@ -1144,17 +1145,17 @@ enum OfficeDemo {
     static var captainThread: [CaptainLine] {
         let t = Date()
         return [
-            CaptainLine(id: "d1", at: t.addingTimeInterval(-1500), role: .kang, text: "把 ProjectD 上架做完，客製 NFC 訂購頁一起做", via: "戰情中心"),
-            CaptainLine(id: "d2", at: t.addingTimeInterval(-1480), role: .captain, text: "收到，兩條線並行：\n- **Dora** 繼續 ProjectD 上架\n- 客製訂購頁我開 workflow，三個決策已發到收件匣，你拍板就開工"),
-            CaptainLine(id: "d3", at: t.addingTimeInterval(-900), role: .report, text: "【工作回報】Dora（ProjectD）：重建商品 完成度 92%", via: "AI工作戰情中心"),
+            CaptainLine(id: "d1", at: t.addingTimeInterval(-1500), role: .kang, text: "把 ProjectD 的設定頁做完，匯出功能一起做", via: "戰情中心"),
+            CaptainLine(id: "d2", at: t.addingTimeInterval(-1480), role: .captain, text: "收到，兩條線並行：\n- **Dora** 繼續 ProjectD 設定頁\n- 匯出功能我開 workflow，三個決策已發到收件匣，你拍板就開工"),
+            CaptainLine(id: "d3", at: t.addingTimeInterval(-900), role: .report, text: "【工作回報】Dora（ProjectD）：設定頁 完成度 92%", via: "AI工作戰情中心"),
             CaptainLine(id: "d4", at: t.addingTimeInterval(-600), role: .report, text: "【派工回報 T1022020414】Ethan：完成——794c14b 已 push", via: "AI工作戰情中心"),
-            CaptainLine(id: "d5", at: t.addingTimeInterval(-590), role: .captain, text: "Ethan 的固定英文名已上線，我核對過 origin/main 一致。Dora 商品建到 11 個，有 3 個價格被 Apple 限制調整，建完列表給你看。"),
-            CaptainLine(id: "d6", at: t.addingTimeInterval(-120), role: .kang, text: "年繳打七折可以", via: "終端機"),
+            CaptainLine(id: "d5", at: t.addingTimeInterval(-590), role: .captain, text: "Ethan 的固定英文名已上線，我核對過 origin/main 一致。Dora 設定頁做到 11 項，有 3 項要你決定預設值，做完列表給你看。"),
+            CaptainLine(id: "d6", at: t.addingTimeInterval(-120), role: .kang, text: "預設值照你建議的", via: "終端機"),
         ]
     }
     static var captainTasks: [CaptainTask] {
-        [CaptainTask(id: "T1022021500", from: "x", to: "Dora", project: "ProjectD", text: "ProjectD 上架：重建 15 個訂閱商品並列最終價格表"),
-         CaptainTask(id: "T1022022000", from: "x", to: "Bella", project: "Okle42", text: "客製 NFC 訂購頁：先出三版版型")]
+        [CaptainTask(id: "T1022021500", from: "x", to: "Dora", project: "ProjectD", text: "ProjectD 設定頁：15 個選項與預設值"),
+         CaptainTask(id: "T1022022000", from: "x", to: "Bella", project: "ProjectA", text: "匯出功能：先出三版版型")]
     }
     static let start = Date()
 

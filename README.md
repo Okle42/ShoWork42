@@ -1,6 +1,6 @@
 # ShoWork42
 
-**A glow around your terminal window tells you what the AI inside is doing.**
+**A command center for running many Claude Code sessions at once — every session reports in, a "captain" session hands out the work, and each terminal glows by state.**
 Part of the **42 series** by [Okle42](https://github.com/Okle42) — follow for more AI tools that actually ship.
 
 [繁體中文說明](README.zh-TW.md)
@@ -10,7 +10,7 @@ Part of the **42 series** by [Okle42](https://github.com/Okle42) — follow for 
 > [!WARNING]
 > **Work in progress (M0 technical validation)**: not yet signed or notarized, no packaged installer, and behavior and settings may still change. Feel free to look around, try it out and report issues, but please don't rely on it for real work yet.
 
-> The AI in your terminal is working, finished, or waiting for your answer — no need to switch over and check. The glow around the window tells you.
+> Five Claude Code sessions in five terminals. Which one is waiting for you? Which one is done? Which one is about to `git push`? ShoWork42 tells you at a glance — and lets one session coordinate the rest.
 
 > **Windows version** (work in progress): classic console and Windows Terminal + Claude Code, tray "dynamic island", settings window, auto-layout, single-exe installer. See [windows/README.md](windows/README.md).
 
@@ -27,7 +27,19 @@ When a window has several tabs, it shows whichever needs attention most: **red >
 
 > Status: **work in progress**. M0 (technical validation) is done; M1 (daily driver for Claude Code × Ghostty) is underway. Code signing, notarization and full-matrix testing come before a release.
 
-## Features
+## Command center
+
+Menu bar → 「AI工作戰情中心⋯」 (the board UI is currently in Traditional Chinese) opens a board with one card per open Claude Code session.
+
+- **Status cards**: working / needs review / blocked / done, with progress, confidence and a one-line summary the AI reports itself (`showork card`). When the AI asks you something, the card shows one-click answers.
+- **Captain dispatch**: talk to one "captain" session; it reads the roster, hands tasks to other sessions (`showork task`) through Claude Code's built-in cross-session messages, and gets their reports back automatically — including relays (A finishes → B starts).
+- **AI review**: when a card moves to "needs review", a read-only `claude -p` reviewer checks the work and leaves completion, confidence and up to 3 concerns.
+- **Gate for outward actions**: a PreToolUse hook holds risky actions like `git push` until you approve; answering a card can approve them in advance.
+- **Context hand-off**: when a session passes your token threshold, it wraps up (commit, hand-off notes, memory), then gets `/clear` once it's idle and you're not typing.
+- **Duplicate-work warning**: two sessions on the same project get flagged.
+- **3D office tower**: each project is a floor and each session a person at a desk; around the tower, your Mac's disks, cloud drives, SSH hosts, firewall and git remotes are drawn as a small city. Under 1% CPU when idle.
+
+## Glow & window features
 
 - **Three terminals**: Ghostty (including tmux), Terminal.app and iTerm2 — background tabs, multiple windows and multiple tmux clients are all matched correctly.
 - **Glow**: click-through; follows the window as it moves, resizes and gets stacked; in full screen it switches to a thin 3pt line along the screen edge; no animation when Reduce Motion is on.
