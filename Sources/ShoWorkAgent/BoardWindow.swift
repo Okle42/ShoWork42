@@ -173,9 +173,15 @@ struct BoardView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             // 測試視窗可用 SHOWORK_TEST_VIEW=islands|office 指定檢視（只讀不寫，不會改到你存的選擇；10-20 審查）
             if (BoardWindow.testMode ? ProcessInfo.processInfo.environment["SHOWORK_TEST_VIEW"] : nil) ?? view == "office" {
-                OfficeView(cards: model.cards, departments: model.departments, tower: model.tower, decor: model.decor, wander: model.wander, guardStatus: model.guardStatus, guardScanning: model.guardScanning, captainThread: model.captainThread, captainTasks: model.captainTasks, sessionThread: model.sessionThread, runs: model.runs, city: model.city, loaded: model.loaded,
-                           reviewing: model.reviewing, onSendBack: { sendBackCard = $0 }, onPark: { parkCard = $0 },
-                           onDispatch: { dispatchCard = $0 }, onToast: show)
+                // 11-08 H5：改用共用的 three.js 網頁（單層開放式辦公室，跟 Windows 同一份）；SHOWORK_OFFICE_LEGACY=1 退回舊的 SceneKit 大樓
+                if ProcessInfo.processInfo.environment["SHOWORK_OFFICE_LEGACY"] == "1" {
+                    OfficeView(cards: model.cards, departments: model.departments, tower: model.tower, decor: model.decor, wander: model.wander, guardStatus: model.guardStatus, guardScanning: model.guardScanning, captainThread: model.captainThread, captainTasks: model.captainTasks, sessionThread: model.sessionThread, runs: model.runs, city: model.city, loaded: model.loaded,
+                               reviewing: model.reviewing, onSendBack: { sendBackCard = $0 }, onPark: { parkCard = $0 },
+                               onDispatch: { dispatchCard = $0 }, onToast: show)
+                } else {
+                    OfficeWebScene(onSendBack: { sendBackCard = $0 }, onPark: { parkCard = $0 },
+                                   onDispatch: { dispatchCard = $0 }, onToast: show)
+                }
             } else {
                 IslandsView(cards: model.cards, reviewing: model.reviewing, onSendBack: { sendBackCard = $0 }, onPark: { parkCard = $0 },
                             onDispatch: { dispatchCard = $0 }, onToast: show)

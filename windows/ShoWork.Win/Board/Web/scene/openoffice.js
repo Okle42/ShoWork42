@@ -43,8 +43,8 @@ export const OpenPlan = {
   meetingSeats: [{ x: -5.35, z: -5.65, a: Math.PI / 2 }, { x: -4.3, z: -4.95, a: Math.PI }, { x: -3.2, z: -4.95, a: Math.PI },
                  { x: -4.3, z: -6.35, a: 0 }, { x: -3.2, z: -6.35, a: 0 }],
   /** 休息區：沙發前、地毯上站著（手上拿咖啡） */
-  loungeSlots: [{ x: 3.2, z: -1.0, a: 0.5 }, { x: 4.3, z: -0.6, a: 0 }, { x: 5.3, z: -1.1, a: -0.5 }, { x: 3.4, z: -2.4, a: 0.9 },
-                { x: 5.2, z: -2.5, a: -0.9 }, { x: 4.3, z: -3.2, a: 0 }, { x: 3.0, z: 0.1, a: 0.3 }, { x: 5.6, z: 0.1, a: -0.3 }],
+  loungeSlots: [{ x: 3.35, z: -0.85, a: 0.4 }, { x: 4.3, z: -0.65, a: 0 }, { x: 5.25, z: -0.85, a: -0.4 }, { x: 3.0, z: 0.15, a: 0.3 },
+                { x: 4.3, z: 0.25, a: 0 }, { x: 5.6, z: 0.15, a: -0.3 }, { x: 3.4, z: -2.75, a: 0.9 }, { x: 5.2, z: -2.75, a: -0.9 }],
   /** 茶水間：吧台前站著 */
   pantrySlots: [{ x: 3.1, z: -5.0, a: Math.PI }, { x: 4.1, z: -4.9, a: Math.PI }, { x: 5.1, z: -5.0, a: Math.PI },
                 { x: 3.6, z: -4.5, a: 2.6 }, { x: 4.7, z: -4.5, a: -2.6 }, { x: 5.6, z: -4.6, a: -2.8 }],
@@ -605,7 +605,7 @@ export class OpenOfficeBuilder extends OfficeBuilder {
     const r = this.zoneRect(id);
     if (!r) return false;
     aspect = Math.max(0.4, aspect);
-    const az = 20, el = 38;
+    const az = 18, el = 50;
     const [dist, t] = OfficeBuilder.fit([r.x0 - 0.3, R, r.z0 - 0.3], [r.x1 + 0.3, R + 2.0, r.z1 + 0.3], aspect, az * Math.PI / 180, el * Math.PI / 180, 34, 0.95);
     this.place(t, Math.max(dist, 6), az, el);
     return true;

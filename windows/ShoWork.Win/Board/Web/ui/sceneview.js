@@ -150,7 +150,7 @@ export class OfficeSCNView {
     this.builder.frameCamera(this.bounds.width / this.bounds.height);
     // 關窗重開（10-24 C）：你動過的視角接回去
     const m = this.memory?.camera;
-    if (m && !this.userMoved) {
+    if (m && !this.userMoved && m.layout === "open") {       // 11-08 H5：大樓剖面時代存的視角不接（格局不一樣了）
       this.setPov(m.pos, new THREE.Quaternion(...m.quat));
       this.target = m.target;
       this.userMoved = true;
@@ -163,7 +163,7 @@ export class OfficeSCNView {
   updateLOD() {
     if (this.userMoved && this.memory) {
       const q = this.cam.quaternion;
-      this.memory.camera = { pos: this.povPos, quat: [q.x, q.y, q.z, q.w], target: this.target.slice() };
+      this.memory.camera = { pos: this.povPos, quat: [q.x, q.y, q.z, q.w], target: this.target.slice(), layout: "open" };
       this.memory.save?.();
     }
     const wasUnder = this.builder.underground;
