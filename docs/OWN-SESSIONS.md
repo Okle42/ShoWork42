@@ -76,3 +76,20 @@
 - 權限：原本 `showork` 的 hooks 會把所有 `sdk-*`（claude -p）都當成審核員直接略過，所以權限不會進收件匣，在 -p 模式下等於直接被拒。
   修法：SessionHost 啟動時帶 `SHOWORK_OWNED=1`，hooks 看到就照常處理。
   實測用真的 `showork permit` 加上隔離的 home（`CFFIXED_USER_HOME`），結果：允許時檔案寫成、拒絕時沒寫、真的收件匣沒被碰到。
+
+## 11-08 交接（Bella → 下一棒）
+
+已在分支 board/own-sessions（本機，未 push）：H1、H2、H3（Alex）、/clear 換 id、hooks 放行（SHOWORK_OWNED）、H4（6b5bc0f）。swift test 264 項全過。
+
+下一步（使用者要求「能完成的全部完成，再開給他用」）：
+1. **等 Alex 的 H5**（3D 辦公室改版：大樓換單層開放辦公室、Mac 改 WKWebView 載共用 three.js、城市與 B1 保留、點角色開工作視窗）。Alex 做完會傳訊息，收到要先核對（swift test、螢幕外截圖、私人字掃描）。
+2. **整合安裝**：`scripts/showork_install.py`。裝之前先確認 Alex 沒在改同一個檔。
+3. **裝好後的實測**（交給使用者之前要做的）：
+   - 新任務從頭到完成全程不碰終端機：工作視窗送話、看工具過程、權限卡允許／拒絕、中斷、/compact。
+   - 交給隊長：會開一個 Opus 隊長，先告訴使用者會用到額度。
+   - 交棒到 Ghostty：會在使用者螢幕開視窗，要先問。
+4. **還沒做、這台 Mac 上做不了**：Windows WebView2 宿主（Surface 由 Gavin 主導）。
+
+已知邊角：
+- /clear 之後 CaptainStore 記的還是把手 id，看板「誰是隊長」的判斷可能對不上。
+- H4 的 BoardActions 改動沒有自動測試（ShoWorkAgent 這個 target 沒有測試）。
