@@ -207,6 +207,9 @@ def install_agent_app(ident):
     shutil.copy2(os.path.join(ROOT, ".build/release/ShoWorkAgent"), os.path.join(tmp, "Contents/MacOS/ShoWorkAgent"))
     shutil.copy2(os.path.join(ROOT, "Support/ShoWorkAgent-Info.plist"), os.path.join(tmp, "Contents/Info.plist"))
     shutil.copy2(os.path.join(ROOT, "assets/ShoWork42.icns"), os.path.join(tmp, "Contents/Resources/AppIcon.icns"))
+    web = os.path.join(tmp, "Contents/Resources/Web"); os.makedirs(web)   # 工作視窗（11-08 H3）：網頁跟 Windows 共用
+    for f in ("work.html", "work.css", "work.js"):
+        shutil.copy2(os.path.join(ROOT, "windows/ShoWork.Win/Board/Web", f), os.path.join(web, f))
     subprocess.run(["codesign", "-f", "-s", ident, "--identifier", AGENT_ID, tmp], check=True, stderr=subprocess.DEVNULL)
     old = None
     if os.path.exists(AGENT_APP):

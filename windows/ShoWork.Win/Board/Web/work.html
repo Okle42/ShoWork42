@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>工作視窗</title>
+<link rel="stylesheet" href="work.css">
+</head>
+<body>
+<header id="top">
+  <div class="who">
+    <b id="project">—</b>
+    <span id="state" class="pill">讀取中</span>
+  </div>
+  <div class="ctl">
+    <label>模型 <select id="model">
+      <option value="">預設</option><option value="opus">Opus</option><option value="sonnet">Sonnet</option><option value="haiku">Haiku</option>
+    </select></label>
+    <label>權限 <select id="mode">
+      <option value="default">每次問</option><option value="acceptEdits">自動改檔</option><option value="plan">只規劃</option>
+    </select></label>
+    <span id="ctx" class="ctx" title="這個 session 目前用掉的 context"></span>
+    <button id="interrupt" class="btn warn" title="停下目前這一回合">中斷</button>
+    <button id="toTerminal" class="btn" title="關掉戰情中心的程序，改在終端機接著做">在終端機打開</button>
+    <button id="close" class="btn" title="關掉程序；紀錄留著，之後送話會自動接回">關掉</button>
+  </div>
+</header>
+
+<main id="flow" class="select"></main>
+
+<section id="permit" hidden></section>
+
+<footer id="compose">
+  <div id="attach"></div>
+  <textarea id="input" rows="1" placeholder="輸入要交代的事⋯（⌘↩ 送出；可拖檔、貼圖；/compact、/clear、/model sonnet）"></textarea>
+  <button id="send" class="btn primary">送出</button>
+</footer>
+
+<div id="toast" hidden></div>
+<div id="demoNote" hidden>示範資料：不送出</div>
+
+<script src="work.js"></script>
+</body>
+</html>

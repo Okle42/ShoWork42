@@ -204,6 +204,30 @@ if argv.count == 4, argv[1] == "--label-sheet" {
     exit(0)
 }
 
+// Test: ShoWorkAgent --work-snap <sessions 資料夾> <sid> <輸出.png>  → 工作視窗（11-08 H3）讀那個資料夾的 <sid>.jsonl，
+//       開在螢幕外、不搶焦點，等 3 秒截網頁、印訊息數與狀態後結束。不啟動 claude、不動正式的 board/sessions
+if argv.count == 5, argv[1] == "--work-snap" {
+    MainActor.assumeIsolated {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        SessionHost.shared.dir = URL(fileURLWithPath: argv[2], isDirectory: true)
+        WorkWindow.testMode = true
+        let env = ProcessInfo.processInfo.environment
+        guard let w = WorkWindow.show(argv[3], cwd: env["SHOWORK_WORK_CWD"]) else { print("找不到 work.html"); exit(2) }
+        // SHOWORK_WORK_JS：1.5 秒後在網頁裡跑（模擬按鈕、送話；搭配 SHOWORK_CLAUDE_BIN 指向假 claude）
+        if let js = env["SHOWORK_WORK_JS"] { DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { w.runJS(js) } }
+        DispatchQueue.main.asyncAfter(deadline: .now() + (env["SHOWORK_WORK_JS"] == nil ? 3 : 5)) {
+            w.snapshot { img, info in
+                print("work-snap:", info); fflush(stdout)
+                guard let tiff = img?.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
+                      let png = rep.representation(using: .png, properties: [:]) else { print("截圖失敗"); exit(1) }
+                try? png.write(to: URL(fileURLWithPath: argv[4]))
+                exit(0)
+            }
+        }
+    }
+    NSApplication.shared.run()
+}
+
 // Test: ShoWorkAgent --board-window  → 只開戰情中心視窗（不開 socket、不發光、不需要輔助使用權限）
 if argv.count == 2, argv[1] == "--board-window" {
     MainActor.assumeIsolated {

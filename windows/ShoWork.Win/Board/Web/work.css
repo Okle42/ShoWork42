@@ -1,0 +1,106 @@
+/* 工作視窗（11-08 H3，docs/OWN-SESSIONS.md）：戰情中心自己持有的 session 的對話。配色、字級跟 office.css 同一套（macOS 深色外觀取樣）。 */
+[hidden] { display: none !important; }
+:root {
+  --win: #323232; --card: rgba(41, 41, 43, .97); --well: #262628;
+  --primary: rgba(255, 255, 255, .86); --secondary: rgba(235, 235, 245, .55); --tertiary: rgba(235, 235, 245, .28);
+  --accent: rgb(118, 86, 255); --sep: rgba(255, 255, 255, .1);
+  --red: #ff6b5e; --green: #4cd27a; --orange: #f5a623;
+  --add: rgba(76, 210, 122, .14); --del: rgba(255, 107, 94, .14);
+  --font: -apple-system, "PingFang TC", "Segoe UI", "Microsoft JhengHei UI", "Microsoft JhengHei", system-ui, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Microsoft JhengHei UI", monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--win); }
+body { font: 13px/1.5 var(--font); color: var(--primary); display: flex; flex-direction: column; overflow: hidden; }
+button, select, textarea { font: inherit; color: inherit; }
+.select, .select * { user-select: text; -webkit-user-select: text; }
+
+/* 上方列 */
+#top { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 12px;
+       border-bottom: 1px solid var(--sep); background: rgba(44, 45, 45, .97); user-select: none; -webkit-user-select: none; }
+.who { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.who b { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pill { font-size: 11px; padding: 1px 8px; border-radius: 99px; background: rgba(255, 255, 255, .08); color: var(--secondary); white-space: nowrap; }
+.pill.busy { background: rgba(118, 86, 255, .25); color: #cfc4ff; }
+.pill.idle { background: rgba(76, 210, 122, .16); color: var(--green); }
+.pill.exited { background: rgba(255, 255, 255, .06); color: var(--tertiary); }
+.ctl { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.ctl label { font-size: 11px; color: var(--secondary); display: flex; align-items: center; gap: 4px; }
+select { background: var(--well); border: 1px solid var(--sep); border-radius: 6px; padding: 2px 6px; font-size: 12px; }
+.ctx { font-size: 11px; color: var(--secondary); font-variant-numeric: tabular-nums; }
+.btn { background: rgba(255, 255, 255, .08); border: 1px solid var(--sep); border-radius: 6px; padding: 3px 10px; font-size: 12px; cursor: pointer; white-space: nowrap; }
+.btn:hover { background: rgba(255, 255, 255, .14); }
+.btn:disabled { opacity: .4; cursor: default; }
+.btn.primary { background: var(--accent); border-color: transparent; color: #fff; }
+.btn.warn { color: var(--orange); }
+
+/* 對話流 */
+#flow { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 16px 20px; display: flex; flex-direction: column; gap: 10px; }
+.msg { max-width: 900px; width: 100%; margin: 0 auto; }
+.user { align-self: center; }
+.user .bubble { margin-left: auto; width: fit-content; max-width: 80%; background: rgba(118, 86, 255, .22); border-radius: 12px 12px 3px 12px; padding: 7px 11px; white-space: pre-wrap; word-break: break-word; }
+.user .imgs { display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px; }
+.user .imgs img { max-height: 90px; border-radius: 6px; border: 1px solid var(--sep); }
+.ai .text { white-space: pre-wrap; word-break: break-word; }
+.ai .text code { font: 12px var(--mono); background: rgba(255, 255, 255, .07); border-radius: 4px; padding: 0 4px; }
+.ai .text pre { font: 12px/1.45 var(--mono); background: var(--well); border-radius: 8px; padding: 8px 10px; overflow-x: auto; white-space: pre; margin: 6px 0; }
+.ai .text h1, .ai .text h2, .ai .text h3 { font-size: 14px; margin: 8px 0 2px; }
+.note { text-align: center; color: var(--tertiary); font-size: 11px; }
+.note.err, .err { color: var(--red); }
+.think summary { color: var(--tertiary); font-size: 12px; cursor: pointer; }
+.think div { color: var(--secondary); font-size: 12px; white-space: pre-wrap; padding: 4px 0 0 14px; }
+
+/* 工具呼叫：一行摘要，點開看輸入／結果／diff */
+.tool { border: 1px solid var(--sep); border-radius: 8px; background: rgba(255, 255, 255, .025); }
+.tool > summary { list-style: none; display: flex; align-items: center; gap: 8px; padding: 4px 10px; cursor: pointer; font-size: 12px; min-width: 0; }
+.tool > summary::-webkit-details-marker { display: none; }
+.tool > summary::before { content: "▸"; color: var(--tertiary); font-size: 10px; flex: none; }
+.tool[open] > summary::before { content: "▾"; }
+.tool .name { font-weight: 600; flex: none; }
+.tool .sum { color: var(--secondary); font-family: var(--mono); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1; }
+.tool .st { flex: none; font-size: 11px; color: var(--tertiary); }
+.tool .st.ok { color: var(--green); }
+.tool .st.bad { color: var(--red); }
+.tool .st.run::after { content: "執行中⋯"; }
+.tool .body { border-top: 1px solid var(--sep); padding: 6px 10px 8px; }
+.tool .lbl { font-size: 10px; letter-spacing: .1em; color: var(--tertiary); margin: 4px 0 2px; }
+.tool pre { font: 11.5px/1.45 var(--mono); background: var(--well); border-radius: 6px; padding: 6px 8px; margin: 0; max-height: 320px; overflow: auto; white-space: pre-wrap; word-break: break-all; }
+.tool pre.bad { color: var(--red); }
+.diff { font: 11.5px/1.45 var(--mono); background: var(--well); border-radius: 6px; max-height: 420px; overflow: auto; }
+.diff div { white-space: pre-wrap; word-break: break-all; padding: 0 8px; }
+.diff .a { background: var(--add); }
+.diff .a::before { content: "+ "; color: var(--green); }
+.diff .d { background: var(--del); }
+.diff .d::before { content: "- "; color: var(--red); }
+.diff .c::before { content: "  "; }
+.diff .gap { color: var(--tertiary); text-align: center; }
+.result { text-align: center; font-size: 11px; color: var(--tertiary); }
+.result.err { color: var(--red); }
+
+/* 權限卡：內嵌在對話流下面、輸入框上面 */
+#permit { flex: none; max-height: 45vh; overflow-y: auto; margin: 0 16px 8px; padding: 10px 12px; border-radius: 10px;
+          border: 1px solid rgba(245, 166, 35, .5); background: rgba(245, 166, 35, .08); }
+#permit h4 { margin: 0 0 4px; font-size: 13px; color: var(--orange); }
+#permit pre { font: 12px/1.45 var(--mono); background: var(--well); border-radius: 6px; padding: 6px 8px; margin: 4px 0; white-space: pre-wrap; word-break: break-all; max-height: 200px; overflow: auto; }
+#permit .why { color: var(--secondary); font-size: 12px; }
+#permit .q { margin: 8px 0 4px; font-weight: 600; }
+#permit .opts { display: flex; flex-wrap: wrap; gap: 6px; }
+#permit .opt { text-align: left; }
+#permit .opt.on { background: var(--accent); border-color: transparent; color: #fff; }
+#permit .opt small { display: block; color: inherit; opacity: .7; font-size: 11px; }
+#permit .row { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+
+/* 輸入區 */
+#compose { flex: none; display: flex; align-items: flex-end; gap: 8px; padding: 8px 12px 10px; border-top: 1px solid var(--sep); flex-wrap: wrap; }
+#compose.drag { outline: 2px dashed var(--accent); outline-offset: -4px; }
+#attach { flex-basis: 100%; display: flex; gap: 6px; flex-wrap: wrap; }
+#attach:empty { display: none; }
+.chip { position: relative; }
+.chip img { height: 54px; border-radius: 6px; border: 1px solid var(--sep); display: block; }
+.chip button { position: absolute; top: -6px; right: -6px; width: 18px; height: 18px; border-radius: 9px; border: none; background: #555; font-size: 11px; line-height: 18px; padding: 0; cursor: pointer; }
+#input { flex: 1; min-width: 200px; resize: none; max-height: 40vh; background: var(--well); border: 1px solid var(--sep); border-radius: 8px; padding: 7px 10px; line-height: 1.45; outline: none; }
+#input:focus { border-color: rgba(118, 86, 255, .7); }
+
+#toast { position: fixed; left: 50%; bottom: 70px; transform: translateX(-50%); padding: 7px 14px; border-radius: 9px; background: rgba(30, 30, 32, .95);
+         border: 1px solid var(--sep); box-shadow: 0 6px 20px rgba(0, 0, 0, .4); font-size: 12px; z-index: 50; }
+#demoNote { position: fixed; left: 14px; bottom: 1px; font-size: 10px; color: var(--tertiary); }

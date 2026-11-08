@@ -548,7 +548,7 @@ struct NewTaskSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("新任務").font(.headline)
-            Text("在選的資料夾開一個 Claude 背景 session（不開視窗），看板上看得到；要看細節用 claude attach。")
+            Text("在選的資料夾開一個 Claude session，由戰情中心直接持有：會打開工作視窗，在裡面就能交代事、看過程、回權限。")
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             HStack {
                 Picker("資料夾", selection: $folder) {
@@ -580,23 +580,20 @@ struct NewTaskSheet: View {
         .padding(20).frame(width: 520)
     }
 
+    /// 11-08 H3：改成戰情中心自己持有的 session（SessionHost，串流模式），開好就打開工作視窗；不再用 claude --bg
     private func start() {
+        if BoardWindow.testMode { onDone("測試：不開新任務"); dismiss(); return }
         busy = true; error = nil
-        let f = folder, p = prompt, a = fullAuto
-        DispatchQueue.global().async {
-            let r = BoardActions.newTask(folder: f, prompt: p, fullAuto: a)
-            DispatchQueue.main.async {
-                busy = false
-                switch r {
-                case .success(let id):
-                    BoardModel.shared.append(["ev": "newtask", "folder": f, "bg": id, "prompt": p])
-                    BoardModel.shared.refresh()
-                    onDone("已開背景 session \(id)")
-                    dismiss()
-                case .failure(let e):
-                    error = e.message.contains("not trusted") ? "這個資料夾還沒信任過：先在終端機進去跑一次 claude 並同意。" : e.message
-                }
-            }
+        let r = OwnedActions.start(cwd: folder, prompt: prompt, permissionMode: fullAuto ? "bypassPermissions" : nil)
+        busy = false
+        switch r {
+        case .success(let id):
+            BoardModel.shared.refresh()
+            WorkWindow.show(id, cwd: folder)
+            onDone("已開新任務，工作視窗打開了")
+            dismiss()
+        case .failure(let e):
+            error = e.message.contains("not trusted") ? "這個資料夾還沒信任過：先在終端機進去跑一次 claude 並同意。" : e.message
         }
     }
 }

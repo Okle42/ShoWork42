@@ -93,3 +93,35 @@
 - `guardScan`：Windows 沒有 Mac 的 wifiwatch.sh；有 `~/.claude/scripts/wifiwatch.ps1`（或 `SHOWORK_WIFIWATCH_SCRIPT`）才跑，沒有就回原因。
 - `openGraph`：開那個專案（或任一份）的 graphify 輸出 `graph3d.html`／`graph.html`；整棟版（Mac GraphSource.openBuilding）還沒轉寫。
 - `setPref` 存在 `%LOCALAPPDATA%\ShoWork42\board\prefs.json`（`office.lighting`／`office.style`／`office.guardPatrol`），天氣開關與地點沿用 `office-weather-off`／`office-weather.json`。
+
+---
+
+# 工作視窗 work.html ⇄ 原生端（11-08 H3，docs/OWN-SESSIONS.md）
+
+戰情中心自己持有的 session 的對話視窗。Mac：`Sources/ShoWorkAgent/WorkWindow.swift`（WKWebView）；Windows：還沒做（WebView2 照下面的格式接）。
+`work.js` 是一般 script（不是 ES module），file:// 就能載入。示範：`work.html?demo=1`（資料在 `work-demo.js`，不送任何動作）。
+- 原生端 → 網頁：Windows `PostWebMessageAsJson`；Mac `window.swRecv(obj)`。
+- 網頁 → 原生端：Windows `chrome.webview.postMessage`；Mac `webkit.messageHandlers.sw.postMessage`。
+
+## 原生端 → 網頁
+| type | 欄位 | 網頁做什麼 |
+|---|---|---|
+| `session` | `sid, cwd, name?, model?, permissionMode?, state?` | 上方列：專案名、模型、權限模式 |
+| `lines` | `lines: object[]`, `replay` | `board/sessions/<sid>.jsonl` 的行（stream-json 原樣；自己送的話帶 `_sent`）。打開時整份重播（`replay:true`），之後只推新增的行 |
+| `state` | `state: starting\|idle\|busy\|exited\|terminal` | 狀態膠囊；「中斷」只有 busy 能按 |
+| `permit` | `req: {id, tool, summary, detail?, alwaysLabel?, plan?, questions?} \| null` | 權限卡（內嵌在輸入框上面）；null＝收掉。`questions` 形狀同 `AskQuestion` |
+| `toast` | `text` | 一行提示（動作的結果） |
+| `dropPaths` | `paths, key?` | 拖進來的非圖片檔路徑，插進輸入框 |
+
+## 網頁 → 原生端
+| type | 欄位 | Mac 對應 |
+|---|---|---|
+| `ready` | | 推 `session`、整份 `lines`、`state`、`permit`，之後每 0.3 秒看 log 有沒有新行 |
+| `send` | `text, images: [{mediaType, data(base64)}]` | `OwnedActions.send`（程序沒在跑就自動接回）；有圖片時 content 是 [image…, text] 區塊 |
+| `interrupt` | | `OwnedActions.interrupt` |
+| `openInTerminal` | | `OwnedActions.openInTerminal`（交棒到 Ghostty） |
+| `close` | | `OwnedActions.close` |
+| `setModel` | `model` | control_request `set_model`（輸入 `/model X` 也走這個） |
+| `setPermissionMode` | `mode` | control_request `set_permission_mode` |
+| `permit` | `permitId, decision: allow\|always\|deny, answers?, message?` | `Permit.answer`＋`Permit.logAnswer`（跟收件匣同一條路） |
+| `dropFiles` | `key`（WebView2 `postMessageWithAdditionalObjects`） | Windows 換成路徑回 `dropPaths`；Mac 由 `WorkWebView` 自己接拖放，不經網頁 |

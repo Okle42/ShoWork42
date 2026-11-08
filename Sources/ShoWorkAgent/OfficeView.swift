@@ -404,13 +404,29 @@ struct OfficeView: View {
         guardOpen = false
         answeringId = Mood.of(c) == .waiting ? id : nil
         talk(c.captain ? nil : id)
+        if c.kind == "board" { openWork(c) }                     // 點戰情中心持有的角色＝打開它的工作視窗（11-08 H3）
     }
 
     private func jump(_ id: String) {
         guard let c = shown.first(where: { $0.id == id }) else { return }
+        if c.kind == "board" { openWork(c); return }          // 戰情中心自己持有的 session 沒有終端機視窗：開工作視窗（11-08 H3）
         if !BoardActions.focus(pid: c.pid) {
             onToast(c.kind == "bg" ? "這是背景 session，沒有視窗；用 claude attach 打開" : "找不到這個 session 的視窗")
         }
+    }
+
+    /// 工作視窗（11-08 H3）：測試視窗只回報、不開
+    private func openWork(_ c: BoardCard) {
+        if OfficeDemo.mode != nil || BoardWindow.testMode { onToast("測試：不開工作視窗（\(c.title)）"); return }
+        WorkWindow.show(c.sessionId, cwd: c.cwd)
+    }
+
+    /// 搬進戰情中心：終端機那邊要先結束；搬成功就打開工作視窗
+    private func moveIn(_ c: BoardCard) {
+        if OfficeDemo.mode != nil || BoardWindow.testMode { onToast("測試：不搬（\(c.title)）"); return }
+        let msg = OwnedActions.moveIn(c.sessionId, cwd: c.cwd ?? FileManager.default.homeDirectoryForCurrentUser.path)
+        onToast(msg)
+        if SessionHost.shared.session(c.sessionId) != nil { WorkWindow.show(c.sessionId, cwd: c.cwd) }
     }
 
     /// 點地下室神經網路（10-22）：用預設瀏覽器開 3D 知識星雲。
@@ -459,7 +475,11 @@ struct OfficeView: View {
         }
         guard let c = shown.first(where: { $0.id == id }) else { return nil }
         let m = NSMenu()
-        m.addItem(ClosureItem("跳到這個視窗") { jump(id) })
+        if c.kind == "board" { m.addItem(ClosureItem("打開工作視窗") { openWork(c) }) }
+        else {
+            m.addItem(ClosureItem("跳到這個視窗") { jump(id) })
+            m.addItem(ClosureItem("搬進戰情中心") { moveIn(c) })
+        }
         if c.column == .review { m.addItem(ClosureItem("放行") { BoardActions.approve(c); onToast("已放行「\(c.title)」") }) }
         if !c.captain { m.addItem(ClosureItem("派工給它⋯") { onDispatch(c) }) }
         m.addItem(ClosureItem("退回並補指示⋯") { onSendBack(c) })

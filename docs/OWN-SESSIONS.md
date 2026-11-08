@@ -43,7 +43,17 @@
 - ✅ H2 `Sources/ShoWorkAgent/OwnedActions.swift`：送話時 `SessionHost.ensure` 自動接回；在終端機打開＝Ghostty AppleScript
   `new surface configuration`（`initial working directory`、`initial input`）＋`new window with configuration`。
   腳本語法與屬性已用 osascript 驗過（沒開視窗）；**真的開 Ghostty 視窗交棒還沒實測**（會開在使用者螢幕上，要先問）。
-- ⏭ H3 工作視窗：還沒開始。
+- ✅ H3 工作視窗（Mac）：網頁 `windows/ShoWork.Win/Board/Web/work.{html,css,js}`（示範 `work.html?demo=1`），
+  Mac `Sources/ShoWorkAgent/WorkWindow.swift`；訊息格式在 Web/PROTOCOL.md「工作視窗」。
+  - 對話來源讀 log（打開時重播、之後照 offset 每 0.3 秒讀新行），不掛 `OwnedSession.onEvent`：ensure 換程序也接得上。
+  - work.js 用一般 script，file:// 就能載入，沒用自訂 scheme（跟原規格不同，原因同上一行：不需要 ES module）。
+  - 入口：新任務改開 SessionHost session 並打開工作視窗（不再用 `claude --bg`）；點 `kind == "board"` 的角色＝打開工作視窗；
+    右鍵：board 角色「打開工作視窗」，其他角色多「搬進戰情中心」。
+  - 安裝腳本把 work.{html,css,js} 放進 ShoWorkAgent.app 的 Resources/Web。
+  - 驗證：瀏覽器截圖（示範資料）；`ShoWorkAgent --work-snap <資料夾> <sid> <png>` 在螢幕外開真的 WKWebView 截圖，
+    重播、即時新增行、送話（`SHOWORK_CLAUDE_BIN` 假 claude：送出→自動接回→回覆出現）、換權限模式都跑過。
+  - 還沒做：Windows 端的 WebView2 宿主；`/compact`、`/clear` 在串流模式的行為還沒用真 claude 實測（目前當一般文字送）；
+    權限卡只用示範資料驗過畫面，沒接真的 PermissionRequest 跑一次；真的開 Ghostty 交棒仍未實測（要先問使用者）。
 
 ## H3 規格（下一棒照這個做）
 
