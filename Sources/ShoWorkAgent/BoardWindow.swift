@@ -3,7 +3,7 @@ import SceneKit
 import SwiftUI
 import ShoWorkCore
 
-// 戰情中心視窗：部門島（IslandView.swift）。10-12 Kang：原本的五欄看板拿掉，只留部門島。
+// 戰情中心視窗：3D 辦公室（OfficeWebScene，three.js）／3D 辦公大樓（OfficeView，SceneKit）。11-08 部門島拿掉。
 // 欄位分法（BoardColumn）照舊，是角色狀態的來源；P2 的自報＋審核、放行／退回／丟待辦、新任務、右上角帳號流量都還在。
 // 一般可縮放的視窗，記住位置；agent 沒有 Dock 圖示，打開時要 activate。
 
@@ -153,7 +153,7 @@ struct BoardView: View {
     @State private var dispatchCard: BoardCard?
     @State private var toCaptain = false
     @State private var toast: String?
-    /// 3D 辦公室／部門島（10-20 Kang：參考 IG 的 3D 辦公室做看板；部門島留著切換）
+    /// 檢視：office＝3D 辦公室、tower＝3D 辦公大樓（11-08 部門島拿掉；舊存檔 islands 當 office）
     @AppStorage("board.mode", store: UserDefaults(suiteName: "ai.okle42.showork")) private var view = "office"
 
     var body: some View {
@@ -171,20 +171,16 @@ struct BoardView: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            // 測試視窗可用 SHOWORK_TEST_VIEW=islands|office 指定檢視（只讀不寫，不會改到你存的選擇；10-20 審查）
-            if (BoardWindow.testMode ? ProcessInfo.processInfo.environment["SHOWORK_TEST_VIEW"] : nil) ?? view == "office" {
-                // 11-08 H5：改用共用的 three.js 網頁（單層開放式辦公室，跟 Windows 同一份）；SHOWORK_OFFICE_LEGACY=1 退回舊的 SceneKit 大樓
-                if ProcessInfo.processInfo.environment["SHOWORK_OFFICE_LEGACY"] == "1" {
+            // 測試視窗可用 SHOWORK_TEST_VIEW=office|tower 指定檢視（只讀不寫，不會改到你存的選擇；10-20 審查）
+            // 11-08 使用者：部門島拿掉；兩種檢視＝3D 辦公室（three.js 單層開放式，跟 Windows 同一份）／3D 辦公大樓（SceneKit 大樓剖面）。
+            // 舊存檔的 "islands" 當成 3D 辦公室
+            if ((BoardWindow.testMode ? ProcessInfo.processInfo.environment["SHOWORK_TEST_VIEW"] : nil) ?? view) == "tower" {
                     OfficeView(cards: model.cards, departments: model.departments, tower: model.tower, decor: model.decor, wander: model.wander, guardStatus: model.guardStatus, guardScanning: model.guardScanning, captainThread: model.captainThread, captainTasks: model.captainTasks, sessionThread: model.sessionThread, runs: model.runs, city: model.city, loaded: model.loaded,
                                reviewing: model.reviewing, onSendBack: { sendBackCard = $0 }, onPark: { parkCard = $0 },
                                onDispatch: { dispatchCard = $0 }, onToast: show)
-                } else {
-                    OfficeWebScene(onSendBack: { sendBackCard = $0 }, onPark: { parkCard = $0 },
-                                   onDispatch: { dispatchCard = $0 }, onToast: show)
-                }
             } else {
-                IslandsView(cards: model.cards, reviewing: model.reviewing, onSendBack: { sendBackCard = $0 }, onPark: { parkCard = $0 },
-                            onDispatch: { dispatchCard = $0 }, onToast: show)
+                OfficeWebScene(onSendBack: { sendBackCard = $0 }, onPark: { parkCard = $0 },
+                               onDispatch: { dispatchCard = $0 }, onToast: show)
             }
         }
         .padding(16)
@@ -215,7 +211,7 @@ struct BoardView: View {
     @ViewBuilder private func controls(short: Bool) -> some View {
         Picker("檢視", selection: $view) {
             Image(systemName: "cube").tag("office").help("3D 辦公室")
-            Image(systemName: "square.grid.2x2").tag("islands").help("部門島")
+            Image(systemName: "building.2").tag("tower").help("3D 辦公大樓")
         }
         .pickerStyle(.segmented).labelsHidden().fixedSize()
         Button { newTask = true } label: { Label(short ? "新任務" : "新任務⋯", systemImage: "plus") }
