@@ -389,12 +389,21 @@ export class OpenOfficeBuilder extends OfficeBuilder {
     }
     b.box(HW - x, WALL, 0.16, (x + HW) / 2, 0, cw, wallM);
     // 房間門（11-09 使用者：門不會動）：門軸在門洞左緣，有人走近就往房間裡推開，走過去關上
-    this.roomDoors = Object.values(Plan.doors).map(([dx, w]) => {
+    // 11-09 使用者：舊門是整塊黑板＋玻璃貼在同一面（閃條紋）→ 會議室、茶水間用細鋁框玻璃門；主管室、廁所用木門；都有把手
+    const doorGlassM = mat(0xBFD8E4, { opacity: 0.35, rough: 0.05 }), doorWoodM = mat(0xB98552, { rough: 0.8 }), handleM = mat(0xC9CED2, { rough: 0.3 });
+    const dbox = (p, w, h, d, x, y, z, m) => { const n = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); n.position.set(x, y, z); n.castShadow = m !== doorGlassM; p.add(n); };
+    this.roomDoors = Object.entries(Plan.doors).map(([k, [dx, w]]) => {
       const pivot = scnNode("room-door"); pivot.position.set(dx - w / 2, 0, cw);
-      for (const [g, m] of Props.parts("door")) {
-        const n = new THREE.Mesh(g.clone(), m); n.scale.x = w / PROPS.door.size[0]; n.position.x = w / 2; n.castShadow = true;
-        pivot.add(n);
+      const H = 2.2, s = 0.06;
+      if (k === "meeting" || k === "pantry") {
+        dbox(pivot, s, H, 0.045, s / 2, H / 2, 0, frameM); dbox(pivot, s, H, 0.045, w - s / 2, H / 2, 0, frameM);
+        dbox(pivot, w - 2 * s, 0.08, 0.045, w / 2, H - 0.04, 0, frameM); dbox(pivot, w - 2 * s, 0.16, 0.045, w / 2, 0.08, 0, frameM);
+        dbox(pivot, w - 2 * s, H - 0.24, 0.012, w / 2, 0.16 + (H - 0.24) / 2, 0, doorGlassM);
+      } else {
+        dbox(pivot, w - 0.01, H, 0.045, w / 2, H / 2, 0, doorWoodM);
+        dbox(pivot, w - 0.2, 0.12, 0.05, w / 2, 0.08, 0, handleM);          // 踢腳板
       }
+      for (const z of [0.05, -0.05]) dbox(pivot, 0.03, 0.42, 0.03, w - 0.13, 1.05, z, handleM);   // 兩面直把手
       root.add(pivot);
       return { pivot, x: dx, z: cw, ang: 0 };
     });
