@@ -93,3 +93,16 @@
 已知邊角：
 - /clear 之後 CaptainStore 記的還是把手 id，看板「誰是隊長」的判斷可能對不上。
 - H4 的 BoardActions 改動沒有自動測試（ShoWorkAgent 這個 target 沒有測試）。
+
+## 11-08 H5 完成（Alex）
+
+- 網頁端（d78af03、f5e8182）：`windows/ShoWork.Win/Board/Web/scene/openoffice.js`（`OpenOfficeBuilder extends OfficeBuilder`，只換大樓那一塊；城市、B1、燈光、天氣、名牌照舊）。
+  - 格局：跟原大樓同一塊地，人和家具縮成 0.68 倍。工位格子 8 欄 × 4 排，每個專案佔整欄（工作中／等你／卡住才坐桌子），用到的欄置中；
+    隊長在會議室、閒置／睡著在休息區、做完在茶水間、保全在前台（不巡邏）；位子不夠站前排走道。區域名稱貼在地上。
+  - 上方分頁（3D 區域左上）：總覽／走進去（第一人稱：拖曳轉頭、WASD 走、滾輪前後、Esc 回總覽）＋各區。
+  - 家具：Kenney Furniture Kit（CC0），載入後換成 VoxMat 純色材質、同材質合併；授權記在 `Web/assets/README.md`。GLTFLoader 是 three r170 官方 examples（MIT）。
+  - 左側索引列還是舊的大樓樓層名（點下去會飛到對應的區），沒改。
+- Mac 端（faca5ca，子代理）：`Sources/ShoWorkAgent/OfficeWebHost.swift`（WKWebView＋`showork://` scheme＋office2 推送＋全部動作接線），
+  `BoardWindow` 改用 `OfficeWebScene`；`SHOWORK_OFFICE_LEGACY=1` 退回 SceneKit 大樓。安裝腳本把整份 Web 資料夾（排除 bench、.md）放進 Resources/Web。
+- 驗證：`ShoWorkAgent --office-web-snap <png> [demo]`（螢幕外、測試時動作不送出），真資料與 demo 都畫得出來、沒有 JS 錯誤；swift test 264 項全過。
+- **SceneKit 舊程式（OfficeView／OfficeBuilder／OfficeTower／OfficeCity／OfficeBasement／OfficeVoxel…）還沒刪**：等使用者實際用過 Web 版、確定能取代再刪（目前是退回路線）。
