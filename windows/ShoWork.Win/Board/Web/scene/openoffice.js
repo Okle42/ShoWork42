@@ -356,8 +356,9 @@ export class OpenOfficeBuilder extends OfficeBuilder {
     b.box(0.2, WALL, HD - lz, -HW, 0, (lz + HD) / 2, wallM);
     const steelM = mat(0x9AA3AD, { metal: 0.6, rough: 0.35 }), ledM = mat(0x7DE3F4, { emit: 1.4 });
     for (const z of ELEV.zs) {                                                  // 門框（鋼）＋門楣一條燈
-      for (const dz of [-ELEV.halfGap - 0.04, ELEV.halfGap + 0.04]) b.box(0.26, ELEV.doorH + 0.08, 0.08, -HW, 0, z + dz, steelM);
-      b.box(0.26, 0.08, 2 * ELEV.halfGap + 0.16, -HW, ELEV.doorH, z, steelM);
+      // 11-09 使用者：門框內側面跟牆的斷面同一平面 → 閃虛線殘影；門框改成跨在牆邊上（一半蓋進門洞），門楣往下壓 4 公分
+      for (const dz of [-ELEV.halfGap, ELEV.halfGap]) b.box(0.26, ELEV.doorH + 0.04, 0.09, -HW, 0, z + dz, steelM);
+      b.box(0.26, 0.09, 2 * ELEV.halfGap + 0.11, -HW, ELEV.doorH - 0.045, z, steelM);
       b.box(0.03, 0.04, 2 * ELEV.halfGap - 0.1, -HW + 0.13, ELEV.doorH + 0.1, z, ledM);
     }
     wallRun(-HW, HD, Plan.entrance.x - 1.1, HD, 0.95, wallM);
