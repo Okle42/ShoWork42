@@ -10,7 +10,8 @@ import Foundation
 //   "headsetProjects": ["Secretary42"],       // 回訊息類專案：小人戴耳機
 //   "privateDataRepos": ["Secretary42"],      // 這些 repo 的 data/ 是私人內容，push 一律擋
 //   "winHosts": ["winbox"],                   // ssh 到這些遠端 Windows 的寫入動作要預告
-//   "noKickoffRepos": ["Secretary42"]         // 在這些 repo 裡的 session 不提醒發開工卡
+//   "noKickoffRepos": ["Secretary42"],        // 在這些 repo 裡的 session 不提醒發開工卡
+//   "captainHandoff": "~/Documents/交接.md"   // 隊長換哨提醒要它更新的交接文件（11-10；預設「隊長交接文件」）
 // }
 public struct LocalConfig: Codable, Sendable, Equatable {
     public var owner: String?
@@ -18,6 +19,7 @@ public struct LocalConfig: Codable, Sendable, Equatable {
     public var privateDataRepos: [String]?
     public var winHosts: [String]?
     public var noKickoffRepos: [String]?
+    public var captainHandoff: String? = nil
 
     public init(owner: String? = nil, headsetProjects: [String]? = nil, privateDataRepos: [String]? = nil,
                 winHosts: [String]? = nil, noKickoffRepos: [String]? = nil) {
@@ -39,6 +41,8 @@ public struct LocalConfig: Codable, Sendable, Equatable {
 
     /// 提示詞裡的使用者稱呼
     public var ownerName: String { owner.flatMap { $0.isEmpty ? nil : $0 } ?? "使用者" }
+    /// 隊長換哨要更新的交接文件（沒設＝通用說法）
+    public var captainHandoffName: String { captainHandoff.flatMap { $0.isEmpty ? nil : $0 } ?? "隊長交接文件" }
 
     /// 名字是否在清單裡（不分大小寫）
     static func has(_ list: [String]?, _ name: String) -> Bool {

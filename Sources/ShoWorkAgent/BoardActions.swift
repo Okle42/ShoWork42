@@ -346,7 +346,8 @@ final class CtxGuard {
             }
             // 後備：hook 沒接手（例如 session 開在 hook 裝好之前）、停了 60 秒以上、又在 tmux 裡才打字；
             // 打不進去就不記已送、不動剪貼簿，等下次停下來由 hook 收
-            if autoWrapUp, ContextGuard.shouldWrapUp(card: c, ctx: x, alreadySent: wasSent(c.sessionId)),
+            // 隊長不在這裡收尾（11-10：隊長改走 captain.ctxTokens 的【換哨提醒】，不自動 /clear）
+            if autoWrapUp, !c.captain, ContextGuard.shouldWrapUp(card: c, ctx: x, alreadySent: wasSent(c.sessionId)),
                let t = c.lastActivity, Date().timeIntervalSince(t) >= 60,
                BoardActions.tmuxPane(of: c.pid) != nil {
                 BoardActions.wrapUp(c)

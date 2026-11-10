@@ -498,7 +498,7 @@ final class BoardModel: ObservableObject {
         relayCards(s, captain: captain, cards: cards)
         let roster = Captain.roster(cards, captain: captain, now: Date())
         queue.async { CaptainStore.saveRoster(roster) }
-        captainAlarm(roster, captain: captain, now: Date())
+        captainAlarm(roster, captain: captain, cards: cards, now: Date())
         for c in cards where lastColumn[c.id] != c.column {
             if lastColumn[c.id] != nil || !c.id.contains("#") {
                 append(["ev": "column", "id": c.id, "project": c.project, "title": c.title, "column": c.column.rawValue, "reason": c.reason])
@@ -539,7 +539,8 @@ final class BoardModel: ObservableObject {
         guard Engine.current != nil,                                   // 只有正式 agent 送（測試視窗、截圖不送）
               UserDefaults(suiteName: OfficePrefs.suite)?.object(forKey: CardRelay.settingKey) as? Bool ?? true else { return }
         let project = Dictionary(cards.map { ($0.sessionId, $0.project) }, uniquingKeysWith: { a, _ in a })
-        let out = CardRelay.plan(reports: s.reports, captain: captain, captainLive: captain != nil, state: &relayState) { sid, r in
+        let policy = CardRelay.Policy.from(UserDefaults(suiteName: OfficePrefs.suite))     // 11-10：只推要隊長動手的卡、開工卡只進收件匣
+        let out = CardRelay.plan(reports: s.reports, captain: captain, captainLive: captain != nil, state: &relayState, policy: policy) { sid, r in
             CardRelay.text(name: s.nicknames[sid]?.name ?? project[sid] ?? String(sid.prefix(8)), project: project[sid], report: r)
         }
         let starts = Set(out.filter { s.reports[$0.sessionId]?.isStart == true }.map(\.sessionId))
@@ -581,21 +582,60 @@ final class BoardModel: ObservableObject {
         }
     }
 
-    /// 隊長鬧鐘：每 captain.alarmMinutes 分鐘（預設 30）送【巡檢時間】；名冊跟上次一樣只送「無變化」；沒有隊長不送
+    /// 隊長鬧鐘：每 captain.alarmMinutes 分鐘（預設 30）看一次【巡檢時間】；沒有隊長不送
+    ///   captain.alarmQuiet（預設 true，11-10）：只有要隊長處理的事、而且跟上次推的不一樣才推；「無變化」不推
+    ///   false＝舊行為：每次都推，名冊跟上次一樣只送「無變化」
     private var alarmAt = Date()            // 看板啟動算起，不一開就送
     private var alarmSig: String?
-    private func captainAlarm(_ roster: Roster, captain: String?, now: Date) {
+    private func captainAlarm(_ roster: Roster, captain: String?, cards: [BoardCard], now: Date) {
         guard Engine.current != nil, let cap = captain else { return }
-        let min = UserDefaults(suiteName: OfficePrefs.suite)?.object(forKey: CaptainLink.alarmKey) as? Double ?? 30
+        let d = UserDefaults(suiteName: OfficePrefs.suite)
+        captainShift(roster, captain: cap, defaults: d)
+        let min = d?.object(forKey: CaptainLink.alarmKey) as? Double ?? 30
         guard min > 0, now.timeIntervalSince(alarmAt) >= min * 60 else { return }
         alarmAt = now
-        let (full, sig) = CaptainLink.alarm(roster, pending: CaptainInbox.pending(now: now).count, now: now)
-        let text = sig == alarmSig ? CaptainLink.alarmUnchanged(crew: roster.entries.filter { !$0.captain }.count) : full
-        alarmSig = sig
+        let inbox = CaptainInbox.all()
+        let pending = inbox.filter { $0.acked == nil && now.timeIntervalSince($0.at) < 86400 && (!$0.delivered || ($0.kind == .block && $0.released == nil)) }
+        let (full, sig) = CaptainLink.alarm(roster, pending: pending.count, now: now)
+        let text: String
+        if d?.object(forKey: CaptainLink.alarmQuietKey) as? Bool ?? true {
+            let busy = Set(cards.filter { !$0.captain && !$0.tasks.isEmpty }.map(\.sessionId))
+            let act = CaptainLink.alarmActions(roster, openTaskSessions: busy, inbox: inbox, ctxLimit: ContextGuard.tokenLimit, now: now)
+            let last = alarmSig
+            alarmSig = act.sig
+            guard !act.reasons.isEmpty, act.sig != last else {
+                queue.async { CaptainInbox.prune(now: now) }
+                Log.note("ALARM quiet（\(act.reasons.isEmpty ? "沒有要處理的" : "跟上次一樣")）")
+                return
+            }
+            text = CaptainLink.alarmQuietText(reasons: act.reasons, full: full)
+        } else {
+            text = sig == alarmSig ? CaptainLink.alarmUnchanged(crew: roster.entries.filter { !$0.captain }.count) : full
+            alarmSig = sig
+        }
         queue.async {
             CaptainInbox.prune(now: now)
             guard let to = Peer.find(cap) else { return }
             Log.note("ALARM → \(to.name ?? cap) \(Peer.send(to: to, text: text, fromName: "AI工作戰情中心（巡檢）"))")
+        }
+    }
+
+    /// 隊長換哨提醒（11-10）：隊長 ctx 過 captain.ctxTokens（預設 750k）送一次【換哨提醒】；不自動 /clear 隊長。
+    /// 送過的隊長 sessionId 記在 board/captain-shift.json（看板重開不重送）
+    private var shiftFile: URL { BoardPaths.dir.appendingPathComponent("captain-shift.json") }
+    private lazy var shiftSent: Set<String> = (try? BoardJSON.decoder.decode(Set<String>.self, from: Data(contentsOf: shiftFile))) ?? []
+    private func captainShift(_ roster: Roster, captain cap: String, defaults d: UserDefaults?) {
+        let (text, sent) = CaptainLink.shiftReminder(roster, limit: CaptainLink.captainCtxLimit(d), sent: shiftSent)
+        guard sent != shiftSent else { return }
+        shiftSent = sent
+        if let d = try? BoardJSON.encoder.encode(sent) {
+            try? FileManager.default.createDirectory(at: BoardPaths.dir, withIntermediateDirectories: true)
+            try? d.write(to: shiftFile, options: .atomic)
+        }
+        guard let text else { return }
+        queue.async {
+            guard let to = Peer.find(cap) else { return }
+            Log.note("SHIFT → \(to.name ?? cap) \(Peer.send(to: to, text: text, fromName: "AI工作戰情中心（換哨）"))")
         }
     }
 

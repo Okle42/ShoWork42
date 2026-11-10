@@ -7,6 +7,9 @@ import Foundation
 //   • 節流：同一 session 60 秒內只送一次（期間的新卡等時間到送最後一張）；內容沒變不重送
 //   • 看板剛啟動時現有的卡當成已看過，不一次灌給隊長
 //   • 設定 captain.relayCards（預設開）
+//   • 11-10 隊長省額度（隊長一週被叫醒上千次、ctx 400–500k，燒掉 ≥37% 額度）：預設只推「要隊長動手」的卡
+//       - captain.relayActionableOnly（預設 true）：只推 status review／blocked、或帶 --ask 的卡；done／working 只記在看板（名冊看得到），不推
+//       - captain.relayStartCards（預設 false）：開工卡只進隊長收件匣（巡檢或 showork captain 看），不推；設 true 回到 1 分鐘內推
 
 public enum CardRelay {
     public static let settingKey = "captain.relayCards"
@@ -26,6 +29,28 @@ public enum CardRelay {
         }
     }
 
+    /// 推送規則（11-10）；預設＝新行為，兩個開關都可以用 UserDefaults 改回舊的
+    public struct Policy: Sendable, Equatable {
+        public var actionableOnly: Bool      // captain.relayActionableOnly
+        public var pushStart: Bool           // captain.relayStartCards
+        public init(actionableOnly: Bool, pushStart: Bool) { self.actionableOnly = actionableOnly; self.pushStart = pushStart }
+        public static let quiet = Policy(actionableOnly: true, pushStart: false)
+        public static let legacy = Policy(actionableOnly: false, pushStart: true)
+        public static let actionableKey = "captain.relayActionableOnly"
+        public static let startKey = "captain.relayStartCards"
+        /// 從設定讀（沒設過＝新行為）
+        public static func from(_ d: UserDefaults?) -> Policy {
+            Policy(actionableOnly: d?.object(forKey: actionableKey) as? Bool ?? true, pushStart: d?.object(forKey: startKey) as? Bool ?? false)
+        }
+    }
+
+    /// 這張卡要不要推給隊長（不算節流、迴圈這些）：要隊長動手的才推
+    public static func needsCaptain(_ r: SelfReport, policy: Policy) -> Bool {
+        if r.isStart { return policy.pushStart }
+        if !policy.actionableOnly { return true }
+        return r.status == .review || r.status == .blocked || r.ask != nil
+    }
+
     public struct Outgoing: Sendable, Equatable {
         public var sessionId: String
         public var text: String
@@ -41,7 +66,7 @@ public enum CardRelay {
 
     /// 這次刷新要送哪些。captain＝現任隊長 sessionId（nil 或不在線 ⇒ 不送，全部記成看過）
     public static func plan(reports: [String: SelfReport], captain: String?, captainLive: Bool,
-                            state: inout State, now: Date = Date(), text: (String, SelfReport) -> String) -> [Outgoing] {
+                            state: inout State, now: Date = Date(), policy: Policy = .quiet, text: (String, SelfReport) -> String) -> [Outgoing] {
         if !state.seeded {
             for (sid, r) in reports { state.sentKey[sid] = key(r) }
             state.seeded = true
@@ -54,7 +79,7 @@ public enum CardRelay {
             if state.sentKey[sid] == k { continue }
             // 派工單的做完／要你決定／卡住已經有【派工回報】（TaskRouter），不重複送（10-21 隊長審查建議）
             let routed = r.task != nil && r.status != .working
-            guard let cap = captain, captainLive, sid != cap, !routed, now.timeIntervalSince(r.at) < maxAge else {
+            guard let cap = captain, captainLive, sid != cap, !routed, now.timeIntervalSince(r.at) < maxAge, needsCaptain(r, policy: policy) else {
                 state.sentKey[sid] = k                     // 不送也不堆積
                 continue
             }
