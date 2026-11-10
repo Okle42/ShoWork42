@@ -1,4 +1,5 @@
 import AppKit
+import DiskArbitration
 import Network
 import ShoWorkCore
 
@@ -140,7 +141,8 @@ final class CityMonitor: @unchecked Sendable {
     private func disks() -> [CityDisk] {
         var out: [CityDisk] = []
         let keys: [URLResourceKey] = [.volumeNameKey, .volumeTotalCapacityKey, .volumeAvailableCapacityForImportantUsageKey,
-                                      .volumeAvailableCapacityKey, .volumeIsRootFileSystemKey, .volumeIsBrowsableKey, .volumeLocalizedFormatDescriptionKey]
+                                      .volumeAvailableCapacityKey, .volumeIsRootFileSystemKey, .volumeIsBrowsableKey, .volumeLocalizedFormatDescriptionKey,
+                                      .volumeIsReadOnlyKey]
         func disk(_ u: URL, name: String, isInt: Bool) -> CityDisk {
             guard let v = try? u.resourceValues(forKeys: Set(keys)) else { return CityDisk(name: name, isInternal: isInt, mountPath: u.path) }
             let plain = Int64(v.volumeAvailableCapacity ?? 0)
@@ -155,7 +157,10 @@ final class CityMonitor: @unchecked Sendable {
         for u in FileManager.default.mountedVolumeURLs(includingResourceValuesForKeys: keys, options: [.skipHiddenVolumes]) ?? [] {
             let v = try? u.resourceValues(forKeys: Set(keys))
             let name = v?.volumeName ?? u.lastPathComponent
-            guard CityParse.includeVolume(path: u.path, name: name, isRoot: v?.volumeIsRootFileSystem ?? false, browsable: v?.volumeIsBrowsable ?? true) else { continue }
+            // 10-28：.dmg 掛起來的安裝映像（唯讀＋Disk Image）、容量 0 的卷不算堆場（之前被畫成永遠 100% 亮紅燈）
+            let total = v?.volumeTotalCapacity.map(Int64.init)
+            guard CityParse.includeVolume(path: u.path, name: name, isRoot: v?.volumeIsRootFileSystem ?? false, browsable: v?.volumeIsBrowsable ?? true,
+                                          readOnly: v?.volumeIsReadOnly ?? false, isDiskImage: Self.isDiskImage(u), total: total) else { continue }
             out.append(disk(u, name: name, isInt: false))
             mounted.append(name)
         }
@@ -173,6 +178,18 @@ final class CityMonitor: @unchecked Sendable {
         }
         // 拔掉的外接碟不再留一座拉下鐵捲門的堆場（11-01 Kang：拔掉了就該消失）；known／seen 照記，插回來時排回原本的順序
         return out
+    }
+
+    /// 這個卷是不是磁碟映像（.dmg／.iso）掛出來的。
+    /// 10-28 實測（macOS 27）：DiskArbitration 的 DeviceModel＝「Disk Image」、DeviceProtocol＝「Virtual Interface」、
+    /// DevicePath 走 IOHDIXController；舊版才是 DeviceProtocol＝「Disk Image」（diskutil info 顯示的那個）。三個都看。
+    static func isDiskImage(_ url: URL) -> Bool {
+        guard let session = DASessionCreate(kCFAllocatorDefault),
+              let disk = DADiskCreateFromVolumePath(kCFAllocatorDefault, session, url as CFURL),
+              let desc = DADiskCopyDescription(disk) as? [String: Any] else { return false }
+        return CityParse.isDiskImage(model: desc[kDADiskDescriptionDeviceModelKey as String] as? String,
+                                     protocol: desc[kDADiskDescriptionDeviceProtocolKey as String] as? String,
+                                     devicePath: desc[kDADiskDescriptionDevicePathKey as String] as? String)
     }
 
     // MARK: 雲端（10-21：iCloud 用 brctl 讀得到剩餘額度與同步狀態；其他雲端只知道資料夾掛著）
