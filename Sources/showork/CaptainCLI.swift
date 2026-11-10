@@ -63,13 +63,8 @@ enum CaptainCLI {
             switch sub {
             case "add": return add(a, showork: showork)
             case "cancel":
-                guard let id = a.first, var t = CaptainStore.task(id) else { err("showork task cancel <單號>：找不到這張單"); return 1 }
-                t.state = .cancelled; t.updatedAt = Date(); CaptainStore.save(t)
-                let note = "【隊長取消 \(id)】這張派工不用做了：\(t.text.replacingOccurrences(of: "\n", with: " ").prefix(60))。已經做到一半的就停在安全的地方，回報目前狀態即可。"
-                switch Peer.find(t.toSession ?? t.to).map({ Peer.send(to: $0, text: note, fromName: "AI工作戰情中心") }) {
-                case .success?: out("已取消 \(id)，也通知 \(t.to) 不用做了")
-                default: out("已取消 \(id)；通知 \(t.to) 失敗，請用 SendMessage 告訴它不用做了")
-                }
+                guard let id = a.first, let (t, notified) = Captain.cancel(id) else { err("showork task cancel <單號>：找不到這張單"); return 1 }
+                out(notified ? "已取消 \(id)，也通知 \(t.to) 不用做了" : "已取消 \(id)；通知 \(t.to) 失敗，請用 SendMessage 告訴它不用做了")
                 return 0
             default: err("用法：showork task add --to <英文名，例如 Chris> --text \"…\"｜showork task cancel <單號>"); return 1
             }

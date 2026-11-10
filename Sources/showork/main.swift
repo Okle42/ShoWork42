@@ -10,6 +10,7 @@
 //   showork roster [--json]  名冊：每個 session 的名字、專案、在做什麼、重工警告
 //   showork task add --to <英文名，例如 Chris> --text "…"   建派工單，印出要用 SendMessage 送的全文
 //   showork task cancel <單號>    showork tasks [--all]
+//   showork web enable [--port N] | disable | status | rotate   網頁版戰情中心（只綁 Tailscale；要本人在終端機跑）
 //
 // Contract with the AI tools that call us (hooks): this must NEVER slow them down or fail them.
 //   • always exits 0, prints nothing on success
@@ -329,6 +330,10 @@ if args.first == "names" {
         print("\(n?.name ?? "（還沒取名）")\t\(r.name ?? "-")\t\(n?.doing ?? "（還沒報任務）")")
     }
     exit(0)
+}
+
+if args.first == "web" {
+    exit(WebCLI.run(args))
 }
 
 if args.first == "b1" {

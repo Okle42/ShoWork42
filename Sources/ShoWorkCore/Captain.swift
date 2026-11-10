@@ -229,6 +229,18 @@ public enum Captain {
         CaptainStore.save(t)
         return (t, result)
     }
+
+    /// 取消派工單＋通知對方不用做了（`showork task cancel` 與網頁版戰情中心共用）。
+    /// 回傳 (單子, 有沒有通知到)；找不到單號回 nil
+    public static func cancel(_ id: String, now: Date = Date()) -> (task: CaptainTask, notified: Bool)? {
+        guard var t = CaptainStore.task(id) else { return nil }
+        t.state = .cancelled; t.updatedAt = now; CaptainStore.save(t)
+        let note = "【隊長取消 \(id)】這張派工不用做了：\(t.text.replacingOccurrences(of: "\n", with: " ").prefix(60))。已經做到一半的就停在安全的地方，回報目前狀態即可。"
+        switch Peer.find(t.toSession ?? t.to).map({ Peer.send(to: $0, text: note, fromName: "AI工作戰情中心") }) {
+        case .success?: return (t, true)
+        default: return (t, false)
+        }
+    }
 }
 
 // MARK: - 讀寫（CLI 與 agent 共用）

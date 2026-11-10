@@ -348,6 +348,7 @@ MainActor.assumeIsolated {
     }
     Arranger.shared.start()
     BoardModel.shared.start()          // 戰情中心的資料（審核、ctx 收尾）視窗沒開也要跑
+    WebServer.shared.start()           // 網頁版戰情中心：預設關，showork web enable 才開、只綁 Tailscale IP（WebServer.swift）
     NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { _ in
         MainActor.assumeIsolated { BoardWindow.terminating = true }
     }

@@ -214,6 +214,7 @@ Kang 原話：「讓他工作超過 70% 以後就自動收尾…自己準備交�
 - **工作卡片自動轉送隊長（派工 T1021174030，ShoWorkCore/CardRelay.swift）**：任何 session 的 `showork card`（四種 status 都算）都由看板以【工作回報】Peer 直送給 `board/captain.json` 的隊長；內容含名字、專案、doing、狀態、完成度、信心、摘要、`--how`（這輪的方法與工具）、ask／options、報告、派工單號。隊長自己的卡不轉；隊長不在就不送也不堆積；同一 session 60 秒內只送一次（到時送最後一張）、內容沒變不重送；看板剛啟動時現有的卡不送；超過 10 分鐘的卡不送。只有正式 agent 送，設定 `captain.relayCards`（預設開）。
 - **選項**：`showork card --ask "…" --options "A|B"`（最多 4 個、每個 40 字；沒有 --ask 不收）。AI 沒給選項就用通用的「好，照你的建議做／先不要，等我想一下」。
 - **常駐隊長**：「交給隊長」找不到活著的隊長時，`BoardActions.askCaptain` 開 `claude --bg --model <captain.model，預設 claude-fable-5-1> -n 隊長 --permission-mode bypassPermissions`，第一句話是 `CaptainLaunch.bootstrap`（登記、守則、所有對使用者的話都走 showork card）。背景 session 也有收件匣，Peer 直送可以叫醒它（10-21 實測）。120 秒內不重開第二個。e2e：`ShoWorkAgent --board-act captain "<文字>"`。
+- **網頁版戰情中心（11-10，ShoWorkCore/WebBoard.swift＋WebPage.swift、ShoWorkAgent/WebServer.swift、showork/WebCLI.swift）**：給跑不動原生 App 的舊 Mac（macOS 13）／iPad／iPhone 用瀏覽器看與操作。伺服器放在 agent 裡（看板資料與 `BoardActions` 都在這個行程）。預設關；本人在自己的終端機跑 `showork web enable [--port 8742]`（Claude Code 裡跑會被拒）⇒ 寫 `web/config.json`、產生 `web/token`（64 hex，0600，資料夾 0700），印一次 `http://<Tailscale IP>:8742/?t=<token>`，發 `ai.okle42.showork.web` 通知 agent 重讀（不用重開）。`disable`／`status`／`rotate`（換 token，舊書籤失效）。只綁 Tailscale IPv4（getifaddrs 挑 100.64.0.0/10、utun 優先；找不到就不開，每 30 秒再找，絕不 0.0.0.0）；連線端不是 100.64.0.0/10、或是自己（Mac mini 繞 Tailscale 連自己）直接斷線。GET `/`（?t=）、GET `/api/board`、POST 動作都要 token（API 用 `X-ShoWork-Token` 標頭、固定時間比對）；POST 要 JSON、每個來源 IP 每分鐘 20 次／間隔 0.5 秒，每筆（含錯 token、限頻）寫 `web/audit.jsonl`（0600，時間＋來源 IP）。動作只有五種、都接既有的路：按選項＝`BoardActions.answer`（只收卡片列出的選項）；傳話＝`BoardActions.answer`（同 3D 辦公室「跟他說」），文字加前綴【使用者從網頁戰情中心】；派工＝`BoardActions.dispatch`（同看板派工，內文加同一前綴）；取消派工＝`Captain.cancel`（`showork task cancel` 也改用它）；隊長收件匣 ack＝`CaptainInbox.ack`（一次一張，不收 all）。權限對話框／AskUserQuestion／計畫確認／終端機選單只顯示、不能從網頁答。沒有跑指令、看檔案、關 session、改名字或設定。
 
 ## 電廠＝AI 額度（10-22）
 
@@ -255,6 +256,7 @@ Kang 分不出 `you-88`、`e1` 是誰，卡片標題又停在開場那件事，�
 | `agent.log` | `SHOWORK_DEBUG=1` 時的事件紀錄 |
 | `bin/` | 安裝後的 `showork`、`ShoWorkAgent` |
 | `board/` | 看板：`cards/` 自報、`reviews/` 審核、`decisions/`、`tasks/` 派工單、`names/` 英文名與任務、`captain.json`、`roster.json`、`history.jsonl` |
+| `web/` | 網頁版戰情中心：`config.json`（開關、port）、`token`、`audit.jsonl`（都 0600） |
 | `backup/` | 寫入 `settings.json`、偏好前的備份 |
 
 LaunchAgent：`~/Library/LaunchAgents/ai.okle42.showork.agent.plist`
