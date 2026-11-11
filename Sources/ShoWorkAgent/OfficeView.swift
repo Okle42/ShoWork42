@@ -172,7 +172,7 @@ struct OfficeView: View {
                        guard let c = talkingTo.flatMap({ i in cards.first { $0.id == i } }) else { return }
                        if OfficeDemo.mode != nil || BoardWindow.testMode { onToast("測試：不送出「\(text)」"); return }
                        answered[c.sessionId] = Date()
-                       onToast(BoardActions.answer(c, text: text))
+                       onToast(BoardActions.answer(c, text: text, resolvesAsk: false))   // 對話窗格是一般傳話，不算回答排隊的題
                    },
                    onBack: { talk(nil) }, runs: runs)
     }

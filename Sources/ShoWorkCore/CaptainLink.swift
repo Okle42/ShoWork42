@@ -546,10 +546,20 @@ extension CaptainInbox {
     static let deferrals = ["再說", "再決定", "再看", "再談", "再議", "明天", "後天", "下週", "下禮拜", "下次", "改天", "晚點", "晚一點", "回頭", "之後", "以後", "給我看", "還沒", "了沒", "考慮", "想想",
                             "嗎", "？", "?", "等", "之前", "已經", "如果", "要不要", "是否"]
 
-    /// 這則答案有沒有點名放行這條擋規則：按逗號、分號、句號、問號切成小句（標點留在小句尾），
+    /// 問句的字（11-11 BZW2R：使用者在看板問「開pr能幹嘛」被當成同意開 PR）。整則答案只要帶一個就不算同意，不分小句
+    static let questionMarkers = ["？", "?", "嗎", "嘛", "幹麻", "能幹嘛", "要幹嘛", "是什麼", "為什麼", "為何", "怎麼", "怎樣", "如何", "什麼意思", "什麼",
+                                  "可以嗎", "好嗎", "呢", "哪", "多少", "要不要", "是否", "對不對", "有沒有", "會不會", "能不能", "行不行", "可不可以"]
+    /// 這則答案是不是在問問題（問句永遠不算同意）
+    public static func isQuestion(_ answer: String) -> Bool {
+        let a = answer.lowercased()
+        return questionMarkers.contains { a.contains($0) }
+    }
+
+    /// 這則答案有沒有點名放行這條擋規則：整則是問句就不算；再按逗號、分號、句號、問號切成小句（標點留在小句尾），
     /// 有小句帶這個動作、而且帶動作的小句都沒有否定／延後字才算（「先開 PR，不通知」＝PR 算、LINE 不算）
     public static func authorizes(_ answer: String, rule: String) -> Bool {
         guard let ps = preapprovalActions.first(where: { rule.hasPrefix($0.rule) })?.patterns else { return false }
+        if isQuestion(answer) { return false }
         var clauses: [String] = [], cur = ""
         for ch in answer.lowercased() {
             cur.append(ch)

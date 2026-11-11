@@ -118,7 +118,7 @@ final class Reviewer {
         guard enabled else { return }
         for c in cards where !c.id.contains("#") && !running.contains(c.sessionId) && running.count < limit {
             guard CardRules.needsReview(column: c.column, review: reviews[c.sessionId], turn: c.lastActivity),
-                  c.reason != "等你回答" else { continue }      // 正在問你問題的不用審
+                  c.reason != "等你回答", !c.stillWorking else { continue }      // 正在問你問題的、問完還在做事的不用審
             let recent = (started[c.sessionId] ?? []).filter { $0.timeIntervalSinceNow > -3600 }
             started[c.sessionId] = recent
             if recent.count >= 3 { continue }
@@ -217,35 +217,46 @@ enum BoardActions {
 
     /// 3D 辦公室直接回答（10-20）：有 tmux 就打字送進輸入框；沒有（Kang 的 session 都直接開在 Ghostty）就走看板直送（Peer，跟派工同一條），
     /// 兩條都不通才退回拷貝。不先動剪貼簿（10-18：蓋掉他的剪貼簿）
-    static func answer(_ c: BoardCard, text: String) -> String {
-        let line = text.replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespaces)
-        defer { tellCaptain(c, answer: line) }
+    /// - Parameter resolvesAsk: 這是在回答排隊中最早那題 --ask（收件匣、回答卡）⇒ 送到了就從佇列拿掉；
+    ///   一般傳話（網頁「傳話」、右側對話窗格）不算回答，題目照樣留著（Asks.swift；11-11）
+    static func answer(_ c: BoardCard, text: String, resolvesAsk: Bool = true) -> String {
+        var line = text.replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespaces)
+        let ask = resolvesAsk ? c.asks.first : nil
+        let question = ask?.ask ?? c.report?.ask
+        let said = line
+        defer { tellCaptain(c, answer: said, question: question) }
+        // 同一個 AI 排了好幾題：答案後面註明答的是哪一題（不然它分不出來）
+        if let a = ask, c.asks.count > 1 { line += "（回答的是：\(a.ask.prefix(60))）" }
+        func delivered(_ msg: String) -> String {
+            if let a = ask { AskQueue.resolve(sid: c.sessionId, id: a.id) }
+            return msg
+        }
         // 10-31：戰情中心的回答本身就是使用者的決定 ⇒ 答「放行」直接放行這個 AI 等著的單；答案點名的對外動作記成事先放行（CaptainInbox.usePreapproval）
         if line.hasPrefix("放行") {
             _ = CaptainInbox.release(id: nil, target: c.sessionId, by: "戰情中心", byName: "使用者（戰情中心回答）", source: "戰情中心回答", now: Date())
         } else {
-            CaptainInbox.recordAnswer(sid: c.sessionId, answer: line, question: c.report?.ask, now: Date())
+            CaptainInbox.recordAnswer(sid: c.sessionId, answer: said, question: question, now: Date())   // 不含「回答的是」註記（題目的問號不能害答案被當問句）
         }
         if tmuxPane(of: c.pid) != nil {
-            if case .typed = sendBack(c, text: line) { return "已送進「\(c.title)」" }
+            if case .typed = sendBack(c, text: line) { return delivered("已送進「\(c.title)」") }
         }
         if let r = Peer.find(c.sessionId) {
             BoardModel.shared.append(["ev": "answer", "id": c.sessionId, "project": c.project, "text": line])
             switch Peer.send(to: r, text: "【使用者從戰情中心回答你的問題】\(line)", fromName: "AI工作戰情中心（使用者）") {
-            case .success: return "已送給「\(c.title)」"
+            case .success: return delivered("已送給「\(c.title)」")
             case .failure(let e): NSLog("answer peer failed: \(e.message)")
             }
         }
-        if case .copied(let m) = sendBack(c, text: line) { return m }
-        return "已送進「\(c.title)」"
+        if case .copied(let m) = sendBack(c, text: line) { return m }      // 只拷貝、還沒真的送到：題目留著
+        return delivered("已送進「\(c.title)」")
     }
 
     /// 使用者答了組員卡片的問題 ⇒ 轉隊長一則「【使用者已答】」、清掉隊長卡片上同一題（隊長 Penny 10-25：別再重複問 Kang）。
     /// 答的是隊長自己的卡片就不用轉
-    private static func tellCaptain(_ c: BoardCard, answer: String) {
+    private static func tellCaptain(_ c: BoardCard, answer: String, question q: String?) {
         guard let cap = CaptainStore.captain()?.sessionId, cap != c.sessionId else { return }
-        let q = c.report?.ask
         Answered.clearCaptainCard(sid: cap, question: q)
+        AskQueue.resolve(sid: cap, question: q)
         let name = NicknameStore.get(c.sessionId)?.name ?? c.title
         let text = Answered.relay(name: name, question: q, answer: answer)
         DispatchQueue.global().async {

@@ -131,7 +131,7 @@ AX 視窗 → CGWindowID 用私有 `_AXUIElementGetWindow`。
 
 ## 戰情中心 P2（10-08）：自報、AI 審核、你的決定、帳號流量
 
-- **自報**：安裝時加 SessionStart hook `showork brief`，把一段說明注入每個新 session；AI 每輪結束跑 `showork card --status review|done|blocked|working --progress --confidence --summary [--ask] [--report]`，存 `board/cards/<sessionId>.json`（sessionId 取 `CLAUDE_CODE_SESSION_ID`）。早於你最後一次送出訊息的自報不算。`claude -p` 無頭呼叫（`CLAUDE_CODE_ENTRYPOINT=sdk-*`，例如自動化腳本、審核員自己）不注入、不上看板。
+- **自報**：安裝時加 SessionStart hook `showork brief`，把一段說明注入每個新 session；AI 每輪結束跑 `showork card --status review|done|blocked|working --progress --confidence --summary [--ask] [--report]`，存 `board/cards/<sessionId>.json`（sessionId 取 `CLAUDE_CODE_SESSION_ID`）。早於你最後一次送出訊息的自報不算。帶 `--ask` 的另外排進 `board/asks/<sessionId>.json`，不受這條限制（見下方「等你回答排隊」）。`claude -p` 無頭呼叫（`CLAUDE_CODE_ENTRYPOINT=sdk-*`，例如自動化腳本、審核員自己）不注入、不上看板。
 - **審核**：卡片進「待審」（等你回答的除外）就請 `claude -p --model sonnet` 唯讀查證（Read／Grep／Glob／git status·diff·log·show），輸出完成度、信心度、pass／concern／fail、最多 3 條疑點，存 `board/reviews/`。同時最多 2 個；保險絲：同一 session 一小時最多自動審 3 次。實測一次約 20 秒、US$0.02。看板上有「AI 審核」開關。
 - **決定**：放行 → 完成；丟待辦（可加備註）→ 待辦；存 `board/decisions/`，該 session 一有新動靜就失效。退回＋補一句 → 用 tmux `send-keys` 打進那個 pane 並按 Enter（不在 tmux：拷貝到剪貼簿並跳到視窗）。新任務 → `claude --bg`（資料夾要先信任過）。
 - **帳號流量**：Claude Code 只把 `rate_limits` 交給 statusLine，所以由狀態列腳本存 `~/.claude/cache/rate_limits.json`，看板右上角顯示 5 小時／7 天用量與重置倒數（≥70% 橘、≥90% 紅）。**給別人用時要附一個會存這個檔的 statusLine**，不然右上角顯示「尚無資料」。
@@ -189,7 +189,7 @@ Kang 原話：「讓他工作超過 70% 以後就自動收尾…自己準備交�
 - agent 被 launchctl 停掉時收到的是 SIGTERM，不會觸發 `windowWillClose`，所以「看板開著」的紀錄會保留、重啟後自動打開，這是刻意的。每次重裝 agent，看板視窗都會關掉再開。
 
 ## 收件匣與常駐隊長（10-21）
-- **收件匣（InboxPanel，規則在 ShoWorkCore/Inbox.swift）**：所有「等你回答」的 AI 列在 3D 檢視右邊（視窗寬 ≥1300 固定顯示；窄的點「等你」才打開，佔掉樓層清單的位置——不疊在 SceneKit 上，圖層會透上來破圖）。「要你決定」可按選項或打字，走 `BoardActions.answer`（tmux 打字 → Peer 直送 → 拷貝）；權限對話框見下一條；AskUserQuestion 的選單只能跳到視窗。回答過、它還沒動的標「已送出」。
+- **收件匣（InboxPanel，規則在 ShoWorkCore/Inbox.swift）**：所有「等你回答」的 AI 列在 3D 檢視右邊（視窗寬 ≥1300 固定顯示；窄的點「等你」才打開，佔掉樓層清單的位置——不疊在 SceneKit 上，圖層會透上來破圖）。「要你決定」可按選項或打字，走 `BoardActions.answer`（tmux 打字 → Peer 直送 → 拷貝）；權限對話框見下一條；AskUserQuestion 的選單只能跳到視窗。回答過、它還沒動的標「已送出」。排隊中的 `--ask`（`board/asks/`）一次列最早那一題，答了就從佇列拿掉、換下一題（標「後面還有 N 題」）。
 - **權限允許（第 2 步，ShoWorkCore/Permit.swift＋`showork permit`）**：`PermissionRequest` hook 把要做的事寫成 `board/permits/<id>.json`，收件匣顯示「允許／一律允許（只帶 permission_suggestions 裡的 addRules，套成 `updatedPermissions`）／拒絕（可附一句話，AI 收得到）」，按下去寫 `<id>.answer.json`，hook 每 0.4 秒看一次，讀到就回 decision。10-21 用 2.1.306 在虛擬終端實測：
   - 終端機對話框和 hook **同時**出現；hook 晚 15 秒才回 allow 也照樣有效 ⇒ 兩邊都能按，先按的算。戰情中心按下到指令執行約 0.3 秒。
   - 終端機先按：hook 不會被砍，之後回的 decision 會被忽略 ⇒ hook 看 transcript：先找這次的 tool_use id（同名、同輸入，從後往前），它的 tool_result 一出現就收掉（實測約 1 秒）。AI 行程死掉、等超過 1 小時也收掉。
@@ -262,7 +262,7 @@ Kang 分不出 `you-88`、`e1` 是誰，卡片標題又停在開場那件事，�
 | `state.json` | 各 tty 狀態，agent 重啟後還原 |
 | `agent.log` | `SHOWORK_DEBUG=1` 時的事件紀錄 |
 | `bin/` | 安裝後的 `showork`、`ShoWorkAgent` |
-| `board/` | 看板：`cards/` 自報、`reviews/` 審核、`decisions/`、`tasks/` 派工單、`names/` 英文名與任務、`captain.json`、`roster.json`、`history.jsonl` |
+| `board/` | 看板：`cards/` 自報、`reviews/` 審核、`decisions/`、`tasks/` 派工單、`names/` 英文名與任務、`asks/` 排隊中還沒回答的 --ask、`captain.json`、`roster.json`、`history.jsonl` |
 | `web/` | 網頁版戰情中心：`config.json`（開關、port）、`token`、`audit.jsonl`（都 0600） |
 | `backup/` | 寫入 `settings.json`、偏好前的備份 |
 
@@ -288,3 +288,21 @@ LaunchAgent：`~/Library/LaunchAgents/ai.okle42.showork.agent.plist`
 ## 本機私人設定 LocalConfig（10-27）
 
 跟這台電腦、這個人有關的名字不寫進原始碼（repo 公開開發）。`~/Library/Application Support/ShoWork42/local.json`（不進 git；`SHOWORK_LOCAL_CONFIG` 換路徑）：`owner`（提示詞稱呼，預設「使用者」）、`headsetProjects`（戴耳機的專案）、`privateDataRepos`（data/ 一律擋 push）、`winHosts`（ssh 遠端 Windows 寫入要預告）、`noKickoffRepos`（不提醒開工卡）。沒有這個檔＝通用預設，功能照常。測試一律用 `LocalFixture`（假名），有沒有本機設定都要全過。
+
+## 等你回答排隊＋問句不算同意（11-11）
+
+使用者實際用時一直說「我根本就沒有按鈕」，查 `history.jsonl` 找到四個原因，一起修：
+
+1. **blocked 的 --ask 不在「等你回答」**：`CardRules.column` 把 `--status blocked` 一律放「卡住」。
+2. **新卡蓋掉舊題**：每個 session 只有一個 `board/cards/<sid>.json`，再發一張（或使用者又說話讓自報變舊）前一題就不見（例：某組員的一題）。
+3. **工作中事件把題目擠掉**：Puppy 01:05:34 發 --ask 進待審，01:05:39 下一個工具動作光暈變回工作中，`column` 看到 base 是 active 就忽略自報，題目離開「等你回答」。
+4. **問句被當同意**：使用者在看板問「開pr能幹嘛」，動作預告的自動放行（`CaptainInbox.authorizes`）比到「開pr」就把 `gh pr create` 放行（BZW2R）。
+
+做法：
+- **`ShoWorkCore/Asks.swift`（`AskQueue`）**：`showork card` 有 `--ask` 就排進 `board/asks/<sid>.json`（`PendingAsk`：Q＋4 碼編號、問題、選項、第一次問的時間）。同一題再問只更新選項、不重排；沒帶 --ask 的卡不動佇列。只有三種情況拿掉：使用者在戰情中心回答（收件匣按選項／打字、3D 回答卡、網頁按選項；`BoardActions.answer(resolvesAsk:)` 送到了才拿，只拷貝到剪貼簿不算；網頁「傳話」與右側對話窗格是一般傳話，不拿）、AI 撤回（`showork asks withdraw <編號|all>`；`showork asks` 列出自己的）、放超過 48 小時（`AskQueue.ttl`）。回答時順手把卡片檔上同一題的 `--ask` 清掉，免得舊自報又把題目帶回來；隊長卡片同一題（`Answered`）佇列也一起清。
+- **`Board.build(asks:)` → `CardRules.column(pending:)`**：有排隊中的題就放「待審／要你決定：<最早那題>」，蓋過工作中、卡住、blocked 自報與你的放行／丟待辦決定；只有終端機開著對話框（光暈 input）更優先。`BoardCard.asks` 帶整個佇列、`stillWorking`＝題目在等但它其實還在做事（審核員不開）。
+- **`Inbox.items`**：卡片有佇列就用最早那題（選項、`askId`、`more` 後面還有幾題），永遠是未回答（答了就出佇列）；沒有佇列才用舊的自報邏輯（相容舊卡片）。同一個 AI 排了兩題以上時，送過去的答案後面加「（回答的是：…）」。
+- **問句不算同意**：`CaptainInbox.isQuestion`——整則答案帶 ？／? 或「嗎、嘛、能幹嘛、要幹嘛、是什麼、為什麼、怎麼、什麼意思、可以嗎、好嗎、呢、哪、要不要、是否、有沒有、能不能⋯」任一個，`authorizes` 一律 false（不分小句；戰情中心回答與在終端機直接打的指令都走這條）。「開pr merge」「部署」仍算；「發」本身沒點名任何擋規則，跟以前一樣不放行任何擋單。
+- 說明文字：`CardRules.brief`（--ask 會一直排著、用 `showork asks withdraw all` 撤回）、`showork captain` 守則第 9、12 條。
+- 測試：`AskQueueTests`（四個 bug 各一組，含 Puppy 的「發卡→工作中」重播）、`QuestionConsentTests`。
+

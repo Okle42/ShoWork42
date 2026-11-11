@@ -2,6 +2,7 @@
 //   showork emit <working|done|input|clear> [--agent claude] [--tty /dev/ttysNNN] [--pid N]
 //   showork brief          SessionStart hook：印出給 AI 的戰情中心說明
 //   showork card --status … AI 每輪自報（完成度／信心度／要你決定的事），存給戰情中心
+//   showork asks [withdraw <編號|all>]  這個 session 排在「等你回答」的 --ask；使用者已在終端機答了／不用問了就撤回
 //   showork names          活著的 session：英文名、SendMessage 地址、正在做的任務
 //   showork title [--done]  hook：回傳 terminalSequence，把視窗標題改成「英文名-任務」
 //   showork permit         PermissionRequest hook：等你在戰情中心收件匣按允許／拒絕（會讀 stdin、最久等 1 小時）
@@ -67,6 +68,7 @@ if args.first == "card" {
         guard let d = try? e.encode(r), (try? d.write(to: dir.appendingPathComponent(sid + ".json"), options: .atomic)) != nil else {
             FileHandle.standardError.write(Data("showork card：寫不進 \(dir.path)\n".utf8)); exit(1)
         }
+        AskQueue.record(sid: sid, report: r)      // --ask 另外排隊：後來的卡片不會蓋掉還沒回答的題（Asks.swift）
         if let id = r.task {
             if var t = CaptainStore.task(id) { t.apply(r); CaptainStore.save(t) }
             else { FileHandle.standardError.write(Data("showork card：找不到派工單 \(id)（自報已存）\n".utf8)) }
@@ -319,6 +321,24 @@ if args.first == "permit" {
         usleep(400_000)
     }
     Permit.remove(req.id)
+    exit(0)
+}
+
+// 排隊中的 --ask（Asks.swift）：列出／撤回。只看得到、撤得掉自己這個 session 的
+if args.first == "asks" {
+    guard let sid = ProcessInfo.processInfo.environment["CLAUDE_CODE_SESSION_ID"], !sid.isEmpty else {
+        FileHandle.standardError.write(Data("showork asks：找不到 CLAUDE_CODE_SESSION_ID（要在 Claude Code 裡跑）\n".utf8)); exit(1)
+    }
+    if args.count >= 2, args[1] == "withdraw" {
+        guard args.count >= 3 else { FileHandle.standardError.write(Data("用法：showork asks withdraw <編號|all>\n".utf8)); exit(1) }
+        let n = AskQueue.withdraw(sid: sid, id: args[2])
+        print(n == 0 ? "沒有撤掉任何題（showork asks 看編號）" : "已撤回 \(n) 題")
+        exit(0)
+    }
+    let xs = AskQueue.live(AskQueue.load(sid), now: Date())
+    if xs.isEmpty { print("（沒有排隊中的問題）") }
+    let f = DateFormatter(); f.dateFormat = "MM-dd HH:mm"
+    for q in xs { print("\(q.id)\t\(f.string(from: q.at))\t\(q.ask)") }
     exit(0)
 }
 

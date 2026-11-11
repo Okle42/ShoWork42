@@ -145,7 +145,7 @@ final class WebServer {
             // 跟 3D 辦公室「跟他說」同一條（OfficeView onPersonSend → BoardActions.answer），前面加網頁前綴
             return WebSnapshot.target(id, cards: cards).map { c in
                 answered[c.sessionId] = Date()
-                return BoardActions.answer(c, text: WebSnapshot.sendPrefix + Inbox.message(text))
+                return BoardActions.answer(c, text: WebSnapshot.sendPrefix + Inbox.message(text), resolvesAsk: false)
             }
         case .dispatch(let id, let text):
             // 跟看板「派工」（DispatchSheet）同一條：BoardActions.dispatch → Captain.dispatch（建單＋直送）

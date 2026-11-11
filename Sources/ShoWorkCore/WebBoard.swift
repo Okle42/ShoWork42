@@ -261,7 +261,7 @@ public struct WebSnapshot: Codable, Sendable, Equatable {
                            columnTitle: columnTitle(c.column), reason: c.reason, doing: c.report?.doing,
                            summary: summary.map { String($0.prefix(400)) },
                            idleSeconds: c.lastActivity.map { max(0, Int(now.timeIntervalSince($0))) }, captain: c.captain,
-                           question: it?.question, options: it?.kind == .reply ? it!.options : [],
+                           question: it.map { $0.more > 0 ? $0.question + "（答完後面還有 \($0.more) 題）" : $0.question }, options: it?.kind == .reply ? it!.options : [],
                            canAnswer: it?.kind == .reply, answeredAt: it?.answered)
         }.sorted { a, b in
             let ra = a.question != nil ? 0 : rank[BoardColumn(rawValue: a.column) ?? .todo] ?? 9
