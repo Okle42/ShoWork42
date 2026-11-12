@@ -174,10 +174,13 @@ struct BoardView: View {
             // 測試視窗可用 SHOWORK_TEST_VIEW=office|tower 指定檢視（只讀不寫，不會改到你存的選擇；10-20 審查）
             // 11-08 使用者：部門島拿掉；兩種檢視＝3D 辦公室（three.js 單層開放式，跟 Windows 同一份）／3D 辦公大樓（SceneKit 大樓剖面）。
             // 舊存檔的 "islands" 當成 3D 辦公室
-            if ((BoardWindow.testMode ? ProcessInfo.processInfo.environment["SHOWORK_TEST_VIEW"] : nil) ?? view) == "tower" {
+            // 11-13 使用者：第三個分頁「小島村莊」（學弟 PR #1）。小島和大樓是同一個 OfficeView、各自指定場景；
+            // .id 讓切分頁時整個換掉重建（不留另一個場景的節點）。沒選到的分頁不存在、不畫、不耗資源。
+            if let scene = Self.scene(for: (BoardWindow.testMode ? ProcessInfo.processInfo.environment["SHOWORK_TEST_VIEW"] : nil) ?? view) {
                     OfficeView(cards: model.cards, departments: model.departments, tower: model.tower, decor: model.decor, wander: model.wander, guardStatus: model.guardStatus, guardScanning: model.guardScanning, captainThread: model.captainThread, captainTasks: model.captainTasks, sessionThread: model.sessionThread, runs: model.runs, city: model.city, loaded: model.loaded,
                                reviewing: model.reviewing, onSendBack: { sendBackCard = $0 }, onPark: { parkCard = $0 },
-                               onDispatch: { dispatchCard = $0 }, onToast: show)
+                               onDispatch: { dispatchCard = $0 }, onToast: show, forcedScene: scene)
+                    .id(scene)
             } else {
                 OfficeWebScene(onSendBack: { sendBackCard = $0 }, onPark: { parkCard = $0 },
                                onDispatch: { dispatchCard = $0 }, onToast: show)
@@ -207,11 +210,17 @@ struct BoardView: View {
 
     private var captainCard: BoardCard? { model.cards.first { $0.captain } }
 
+    /// 分頁 → SceneKit 場景；nil＝3D 辦公室（three.js）
+    static func scene(for view: String) -> OfficeScene3D? {
+        switch view { case "tower": .tower; case "island": .island; default: nil }
+    }
+
     /// 工具列按鈕與開關；`short` 時用短標籤（完整說明在 help）。fixedSize：寧可換排也不壓字
     @ViewBuilder private func controls(short: Bool) -> some View {
         Picker("檢視", selection: $view) {
             Image(systemName: "cube").tag("office").help("3D 辦公室")
             Image(systemName: "building.2").tag("tower").help("3D 辦公大樓")
+            Image(systemName: "tree").tag("island").help("小島村莊")
         }
         .pickerStyle(.segmented).labelsHidden().fixedSize()
         Button { newTask = true } label: { Label(short ? "新任務" : "新任務⋯", systemImage: "plus") }

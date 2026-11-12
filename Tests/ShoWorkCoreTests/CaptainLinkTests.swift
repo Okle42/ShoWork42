@@ -28,9 +28,9 @@ struct CaptainLinkTests {
         #expect(t.hasPrefix("【開工】小明（專案A）：改按鈕") && t.contains("會動到：專案A/View.swift") && t.contains("對外動作：無"))
         var st = CardRelay.State(); st.seeded = true
         let work = SelfReport(status: .working, summary: "前一張", at: t0)
-        #expect(CardRelay.plan(reports: ["a": work], captain: "c", captainLive: true, state: &st, now: t0) { _, r in r.summary ?? "" }.count == 1)
+        #expect(CardRelay.plan(reports: ["a": work], captain: "c", captainLive: true, state: &st, now: t0, policy: .legacy) { _, r in r.summary ?? "" }.count == 1)
         var start = s; start.at = t0 + 5
-        let out = CardRelay.plan(reports: ["a": start], captain: "c", captainLive: true, state: &st, now: t0 + 5) { _, r in CardRelay.text(name: "小明", project: nil, report: r) }
+        let out = CardRelay.plan(reports: ["a": start], captain: "c", captainLive: true, state: &st, now: t0 + 5, policy: .legacy) { _, r in CardRelay.text(name: "小明", project: nil, report: r) }
         #expect(out.count == 1 && out[0].text.hasPrefix("【開工】"))
     }
 
@@ -251,8 +251,8 @@ struct CaptainLinkTests {
         var st = CardRelay.State(); st.seeded = true
         func start(_ d: String, _ s: String, _ at: Date) -> SelfReport { SelfReport(status: .working, summary: s, doing: d, kind: "start", at: at) }
         let txt: (String, SelfReport) -> String = { _, r in r.summary ?? "" }
-        #expect(CardRelay.plan(reports: ["a": start("改按鈕", "1", t0)], captain: "c", captainLive: true, state: &st, now: t0, text: txt).count == 1)
-        #expect(CardRelay.plan(reports: ["a": start("改按鈕", "2", t0 + 60)], captain: "c", captainLive: true, state: &st, now: t0 + 60, text: txt).isEmpty)
-        #expect(CardRelay.plan(reports: ["a": start("換新任務", "3", t0 + 70)], captain: "c", captainLive: true, state: &st, now: t0 + 70, text: txt).count == 1)
+        #expect(CardRelay.plan(reports: ["a": start("改按鈕", "1", t0)], captain: "c", captainLive: true, state: &st, now: t0, policy: .legacy, text: txt).count == 1)
+        #expect(CardRelay.plan(reports: ["a": start("改按鈕", "2", t0 + 60)], captain: "c", captainLive: true, state: &st, now: t0 + 60, policy: .legacy, text: txt).isEmpty)
+        #expect(CardRelay.plan(reports: ["a": start("換新任務", "3", t0 + 70)], captain: "c", captainLive: true, state: &st, now: t0 + 70, policy: .legacy, text: txt).count == 1)
     }
 }

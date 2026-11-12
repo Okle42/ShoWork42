@@ -31,6 +31,7 @@ public struct Islander: Sendable, Equatable, Identifiable {
     public var mood: Mood
     public var accessory: Accessory?
     public var id: String { card.id }
+    public init(card: BoardCard, mood: Mood, accessory: Accessory? = nil) { self.card = card; self.mood = mood; self.accessory = accessory }
 }
 
 public struct Island: Sendable, Equatable, Identifiable {

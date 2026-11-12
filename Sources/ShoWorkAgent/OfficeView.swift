@@ -16,6 +16,7 @@ import ShoWorkCore
 /// 關窗時整個畫面會拆掉（10-24 Kang 選 C：關著時 SwiftUI＋3D 不再跟著資料更新），重開要回到原樣的東西記在這裡
 @MainActor enum OfficeMemory {
     static var camera: (transform: SCNMatrix4, target: SCNVector3)?   // 只有你動過視角才記（沒動過就照預設取景）
+    static var cameraIsland: Bool?                                  // 記的那個視角是小島還是大樓（換場景就不接回去）
     static var selectedFloor: String?
     static var boardOpen = false
     static var boardTop: Int?                                       // 交流互動板捲到哪一則（最上面那則的編號）
@@ -41,6 +42,8 @@ struct OfficeView: View {
     let onPark: (BoardCard) -> Void
     let onDispatch: (BoardCard) -> Void
     let onToast: (String) -> Void
+    /// 11-13 使用者：小島和大樓各是工具列一個分頁 ⇒ 由分頁指定場景，右上選單不再列「場景」（nil＝舊行為，選單切換）
+    var forcedScene: OfficeScene3D? = nil
 
     @State private var hovered: String?           // 卡片 id 或 "guard"、城市建築 "city:⋯"
     @State private var hoverPoint = CGPoint.zero  // 滑鼠剛停上去的位置（3D 區域左上角為原點）：城市懸停卡浮在旁邊
@@ -81,6 +84,16 @@ struct OfficeView: View {
         Binding(get: { style }, set: { v in if BoardWindow.testMode { testStyle = v } else { styleRaw = v.rawValue } })
     }
     @AppStorage(OfficePrefs.guardPatrolKey, store: OfficeView.prefsStore) private var patrol = false
+    // 11-12 場景：小島村莊（預設）／大樓；測試視窗 SHOWORK_OFFICE_SCENE=island|tower 覆寫、改了也不寫回
+    @AppStorage(OfficeScene3D.key, store: OfficeView.prefsStore) private var sceneRaw = OfficeScene3D.island.rawValue
+    @State private var testScene = OfficeView.testEnv("SHOWORK_OFFICE_SCENE").flatMap(OfficeScene3D.init(rawValue:))
+    private var scene3D: OfficeScene3D { forcedScene ?? testScene ?? OfficeScene3D(rawValue: sceneRaw) ?? .island }
+    private var sceneBinding: Binding<OfficeScene3D> {
+        Binding(get: { scene3D }, set: { v in
+            selectedFloor = nil; OfficeMemory.selectedFloor = nil
+            if BoardWindow.testMode { testScene = v } else { sceneRaw = v.rawValue }
+        })
+    }
     // 測試視窗：SHOWORK_OFFICE_LIGHTING 覆寫，選單改的也只放在這裡，不寫回你的設定
     @State private var testLighting = OfficeView.testEnv("SHOWORK_OFFICE_LIGHTING").flatMap(OfficeLighting.init(rawValue:))
     @State private var testPatrol = false
@@ -114,10 +127,19 @@ struct OfficeView: View {
         let moods = Dictionary(grouping: islands.flatMap { i in i.people.map { (i.project.lowercased(), $0.mood) } }, by: \.0).mapValues { $0.map(\.1) }
         let rows = TowerIndex.rows(towerShown, decor: decorShown, moods: moods)
         let alerts = city.alerts
+        let island = scene3D == .island
         HStack(alignment: .top, spacing: 8) {
             // 窄視窗：收件匣打開時佔掉樓層清單的位置（不疊在 3D 上：SceneKit 圖層會透上來破圖）
             if !wide && inboxOpen {
                 inbox(cards, close: { inboxOpen = false }).frame(width: 300)
+            } else if Self.railOn && island {
+                VillageRail(plan: VillageStore.plan(cards.filter { !$0.id.contains("#") }), selected: selectedFloor, alerts: VillageSigns.alerts(city),
+                            onPlace: focusFloor, onPerson: { id in
+                                selectedFloor = nil
+                                camRequest = CamRequest(tick: camRequest.tick + 1, target: .person(id))
+                                click(id)
+                            })
+                    .frame(width: 196)
             } else if Self.railOn {
                 FloorRail(rows: rows, selected: selectedFloor, guardLevel: guardShown.level, cityAlerts: alerts.count, idleOpen: $idleOpen,
                           onFloor: focusFloor, onHover: { railHover = $0 }, onGuard: { focusFloor("lobby"); answeringId = nil; guardOpen = true })
@@ -128,10 +150,10 @@ struct OfficeView: View {
                              onWaiting: { if !wide { inboxOpen = true }; focusAttention(attention.waiting, answer: true) },
                              onStuck: { focusAttention(attention.stuck, answer: false) },
                              onFinished: { focusAttention(attention.finished, answer: false) }) {
-                    controls(towerShown: towerShown, decorShown: decorShown, night: night, lightLabel: lighting.label(at: now, site: site))
+                    controls(towerShown: towerShown, decorShown: decorShown, night: night, lightLabel: lighting.label(at: now, site: site), island: island)
                 }
                 scene(islands: islands, towerShown: towerShown, decorShown: decorShown, wanderShown: wanderShown,
-                      guardShown: guardShown, night: night, look: look, answering: answering, cards: cards)
+                      guardShown: guardShown, night: night, look: look, answering: answering, cards: cards, island: island)
             }
             if wide { inbox(cards, close: nil).frame(width: 320) }
         }
@@ -172,7 +194,7 @@ struct OfficeView: View {
                        guard let c = talkingTo.flatMap({ i in cards.first { $0.id == i } }) else { return }
                        if OfficeDemo.mode != nil || BoardWindow.testMode { onToast("測試：不送出「\(text)」"); return }
                        answered[c.sessionId] = Date()
-                       onToast(BoardActions.answer(c, text: text))
+                       onToast(BoardActions.answer(c, text: text, resolvesAsk: false))   // 對話窗格是一般傳話，不算回答排隊的題
                    },
                    onBack: { talk(nil) }, runs: runs)
     }
@@ -186,8 +208,14 @@ struct OfficeView: View {
     }
 
     /// 右上那組控制（10-20 UI/UX 優化：移到「需要你」列右邊；原本那行灰字操作說明改成 ? 按鈕）
-    @ViewBuilder private func controls(towerShown: TowerPlan, decorShown: [String: FloorDecor], night: Bool, lightLabel: String) -> some View {
+    @ViewBuilder private func controls(towerShown: TowerPlan, decorShown: [String: FloorDecor], night: Bool, lightLabel: String, island: Bool) -> some View {
         SwiftUI.Menu {
+            if forcedScene == nil {
+                Picker("場景", selection: sceneBinding) {
+                    ForEach(OfficeScene3D.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.inline)
+            }
             Picker("燈光", selection: lightingBinding) {
                 ForEach(OfficeLighting.allCases, id: \.self) { l in
                     Text(l == .auto ? "自動（跟著\(weather.main.title)日出日落）" : l.title).tag(l)
@@ -207,6 +235,7 @@ struct OfficeView: View {
         .menuStyle(.borderlessButton).fixedSize()
         .help("燈光：白天／夜晚（吊燈與螢幕發光）／自動（依這台電腦的時間）")
         WeatherStrip(weather: weather)
+        if !island {
         SwiftUI.Menu {
             let floors = towerShown.projectFloors.compactMap(\.project)
             if floors.isEmpty { Text("現在沒有專案樓層") }
@@ -216,6 +245,7 @@ struct OfficeView: View {
         } label: { Label("重新裝潢", systemImage: "paintbrush") }
         .menuStyle(.borderlessButton).fixedSize()
         .help("請 AI 依這層最近在做的事重新挑主題（有次數與成本上限：24 小時最多 8 次）")
+        }
         Button { selectedFloor = nil; OfficeMemory.selectedFloor = nil; OfficeMemory.camera = nil; resetTick += 1 } label: { Label("重設視角", systemImage: "scope") }
             .buttonStyle(.borderless).fixedSize()
         Button { helpOpen.toggle() } label: { Image(systemName: "questionmark.circle") }
@@ -224,10 +254,10 @@ struct OfficeView: View {
     }
 
     @ViewBuilder private func scene(islands: [Island], towerShown: TowerPlan, decorShown: [String: FloorDecor], wanderShown: WanderPlan,
-                                    guardShown: GuardStatus, night: Bool, look: SkyLook, answering: BoardCard?, cards: [BoardCard]) -> some View {
+                                    guardShown: GuardStatus, night: Bool, look: SkyLook, answering: BoardCard?, cards: [BoardCard], island: Bool) -> some View {
         OfficeScene(islands: islands, tower: towerShown, decor: decorShown, wander: wanderShown,
                     guardStatus: guardShown, guardScanning: guardScanning, city: city,
-                    night: night, look: look, weather: weather.look, style: style, loaded: loaded, resetTick: resetTick, camRequest: camRequest, railHover: railHover,
+                    night: night, look: look, weather: weather.look, style: style, island: island, loaded: loaded, resetTick: resetTick, camRequest: camRequest, railHover: railHover,
                     cardSize: answering != nil ? CGSize(width: 464, height: 290) : guardOpen ? CGSize(width: 484, height: 640)
                         : cityOpen != nil ? CGSize(width: 464, height: 300)
                         : boardOpen ? CGSize(width: 484, height: 560)
@@ -320,7 +350,9 @@ struct OfficeView: View {
     }
 
     /// 停在城市建築上的不算「人」（不開左下角的人物卡、不擋左下角的名牌）
-    private var personHover: String? { hovered.flatMap { Self.isCity($0) ? nil : $0 } }
+    private var personHover: String? { hovered.flatMap { Self.isCity($0) || Self.isVillageThing($0) ? nil : $0 } }
+    /// 小島上不是人的東西（小狗、家、地點）：不開人物卡
+    static func isVillageThing(_ id: String) -> Bool { id == "boss" || id.hasPrefix("home:") || id.hasPrefix("place:") || id.hasPrefix("car:") }
     static func isCity(_ id: String) -> Bool { id.hasPrefix("city:") || id.hasPrefix("ship:") }
 
     /// 城市懸停卡（10-21 第二輪）：浮在滑鼠右下（放不下就換到左邊／上面），夾在 3D 區域裡、不吃滑鼠；
@@ -400,6 +432,15 @@ struct OfficeView: View {
         if id.hasPrefix("city:") { answeringId = nil; guardOpen = false; cityOpen = id; return }
         cityOpen = nil
         if id == "guard" { answeringId = nil; guardOpen = true; return }
+        // 小島（11-12）：點主人（橘色小人）＝打開他旁邊（或最早在等你）那位的回答卡；點家＝他下班回家了；點地點＝鏡頭飛過去
+        if id == "boss" {
+            let target = VillageStore.plan(shown.filter { !$0.id.contains("#") }).dogTarget
+            if let t = target { click(t) } else { onToast("現在沒有人在等你回答") }
+            return
+        }
+        if id.hasPrefix("car:") { onToast(VillageStore.carText(id) ?? "🚗"); return }
+        if id.hasPrefix("home:") { onToast("\(id.dropFirst(5)) 下班回家了（離線）"); return }
+        if id.hasPrefix("place:") { focusFloor(id); return }
         guard let c = shown.first(where: { $0.id == id }) else { return }
         guardOpen = false
         answeringId = Mood.of(c) == .waiting ? id : nil
@@ -695,6 +736,8 @@ struct OfficeHelp: View {
                 Text("・右鍵角色：放行、退回、派工、重新裝潢⋯")
                 Text("・左邊樓層列：點一下鏡頭對準那層，再點一次回到預設")
                 Text("・上面「需要你」：依時間先後輪流飛過去")
+                Text("・小島：點地面＝小狗（你）走過去；有人頭上冒「！」小狗會自己跑過去，點牠或那位島民就開回答卡")
+                Text("・右上角燈光選單「場景」可以切回大樓")
             }
             .font(.callout)
         }
@@ -1370,6 +1413,7 @@ struct OfficeScene: NSViewRepresentable {
     var look: SkyLook? = nil         // 10-21 日出日落：有給就用連續天色，沒給照 night 二分
     var weather = WeatherLook.clear  // 10-21 台北真實天氣：雨、閃電（天色已疊在 look 裡）
     var style = OfficeStyle.voxel     // 10-22 畫面風格
+    var island = true                 // 11-12 小島村莊（false＝大樓）
     let loaded: Bool            // 看板讀過一次了（還沒讀到前卡片是空的，不能當成「第一次載入」）
     let resetTick: Int
     var camRequest = CamRequest()
@@ -1411,6 +1455,9 @@ struct OfficeScene: NSViewRepresentable {
             MainActor.assumeIsolated { guard let v else { return }; v.builder.setNeuralGraph(g); v.playFor(0.2) }
         }
         if ProcessInfo.processInfo.environment["SHOWORK_OFFICE_STATS"] != nil { v.showsStatistics = true }
+        // 小島（11-12）：走路、閒晃要播幾秒；閒晃只在看得到、不熱的時候排
+        v.builder.village.onPlay = { [weak v] s in v?.playFor(s) }
+        v.builder.village.canAnimate = { [weak v] in (v?.canAnimate ?? false) && !HeatGate.shared.paused }
         // 螢幕空間標籤（10-20 UI/UX 優化）：CALayer 疊在 3D 上；位置在渲染回呼裡更新（不另開 timer）
         if ProcessInfo.processInfo.environment["SHOWORK_OFFICE_LABELS"] != "off" {     // off：量效能時比較用
             v.labels.view.frame = v.bounds
@@ -1423,6 +1470,7 @@ struct OfficeScene: NSViewRepresentable {
 
     func updateNSView(_ v: OfficeSCNView, context: Context) {
         v.onHover = onHover; v.onHoverPoint = onHoverPoint; v.onClick = onClick; v.menuFor = menu
+        if v.builder.setIslandMode(island) { v.framed = false; v.userMoved = false; v.playFor(0.4) }
         v.builder.setWeather(weather)
         if v.style != style { v.applyStyle(style) }
         let nightChanged = v.builder.setLook(look ?? (night ? .night : .day))
@@ -1497,6 +1545,7 @@ final class OfficeSCNView: SCNView {
         var specs: [LabelSpec] = []
         for p in ps.sorted(by: { $0.id < $1.id }) {
             if p.id == "guard" { specs.append(OfficeLabels.guardSpec(guardStatus, scanning: scanning, anchor: p.anchor)) }
+            else if p.id == "boss" { specs.append(OfficeLabels.bossSpec(anchor: p.anchor, text: VillageStore.config?.ownerTitle ?? "你")) }
             else if let c = p.card { specs.append(OfficeLabels.spec(c, mood: p.mood, anchor: p.anchor, floor: p.floor)) }
         }
         for c in builder.cityLabelTargets() { specs.append(OfficeLabels.citySpec(id: c.id, text: c.text, alert: c.alert, anchor: c.anchor)) }
@@ -1519,7 +1568,8 @@ final class OfficeSCNView: SCNView {
             if probing { print("office camera →", id); fflush(stdout) }
         case .city(let id):
             userMoved = true
-            if let p = builder.city.point(id) { fly(toPoint: p, distance: 26) } else { builder.frameCity(self); camMoved(0.7) }
+            if builder.islandMode { if let p = builder.village.point(id) { fly(toPoint: p, distance: 22) } else { builder.frameCity(self); camMoved(0.7) } }
+            else if let p = builder.city.point(id) { fly(toPoint: p, distance: 26) } else { builder.frameCity(self); camMoved(0.7) }
         case .floor("city"):
             builder.frameCity(self)
             userMoved = true
@@ -1562,7 +1612,7 @@ final class OfficeSCNView: SCNView {
         framed = true
         builder.frameCamera(self)
         // 關窗重開（10-24 C）：你動過的視角接回去
-        if let m = OfficeMemory.camera, !userMoved {
+        if let m = OfficeMemory.camera, !userMoved, OfficeMemory.cameraIsland == builder.islandMode {
             builder.camera.transform = m.transform; pointOfView = builder.camera; builder.weatherFX.follow(builder.camera)
             defaultCameraController.target = m.target
             userMoved = true
@@ -1576,6 +1626,7 @@ final class OfficeSCNView: SCNView {
         followRain()
         if userMoved, !BoardWindow.testMode || ProcessInfo.processInfo.environment["SHOWORK_TEST_REOPEN"] != nil, let pov = pointOfView {
             OfficeMemory.camera = (pov.presentation.transform, defaultCameraController.target)
+            OfficeMemory.cameraIsland = builder.islandMode
         }
         let wasUnder = builder.underground
         if builder.updateLOD(camera: pointOfView?.presentation.worldPosition ?? SCNVector3Zero, target: defaultCameraController.target) {
@@ -1680,7 +1731,8 @@ final class OfficeSCNView: SCNView {
         if len < 0.001 { dir = SCNVector3(0.37, 0.15, 0.92) } else { dir = SCNVector3(dir.x / len, dir.y / len, dir.z / len) }
         // 保全：從大廳正面偏右看進去（看得到櫃台旁的保全和後面的監控螢幕）
         if guardView { dir = SCNVector3(0.35, 0.16, 0.92) }
-        let h = max(0.001, hypot(dir.x, dir.z)), y = OfficeBuilder.style == .diorama ? 0.26 : min(max(dir.y, 0.06), 0.24), k = sqrt(1 - y * y) / h
+        // 小島（11-12）：沒有上一層樓板擋，從高一點的地方看（俯角約 25–40°）
+        let h = max(0.001, hypot(dir.x, dir.z)), y = builder.islandMode ? min(max(dir.y, 0.42), 0.64) : OfficeBuilder.style == .diorama ? 0.26 : min(max(dir.y, 0.06), 0.24), k = sqrt(1 - y * y) / h
         dir = SCNVector3(dir.x * k, y, dir.z * k)
         if dir.z < 0.2 { dir.z = 0.2 }      // 從背後看：後牆擋住，轉到前半圈
         let dist = distance ?? min(max(len, 6), 10)
@@ -1913,6 +1965,9 @@ final class OfficeSCNView: SCNView {
                 DispatchQueue.main.asyncAfter(deadline: .now() + (Double(env["SHOWORK_OFFICE_HOVER_DELAY"] ?? "") ?? 1.5)) { [self] in
                     var pt: NSPoint?
                     if onLabel, let r = labels.rect(id) { pt = NSPoint(x: r.midX, y: r.midY) }      // 名牌框跟 label(at:) 同一個座標系（這個 view 的）
+                    if pt == nil, builder.islandMode, let c = builder.village.point(id) {      // 小島：設施的點（11-12）
+                        let q = projectPoint(c); pt = NSPoint(x: q.x, y: q.y)
+                    }
                     if pt == nil, let c = builder.city.hitCenter(id) {
                         let q = projectPoint(c); pt = NSPoint(x: q.x, y: q.y)
                     }
@@ -1956,6 +2011,7 @@ final class OfficeSCNView: SCNView {
                 if let s = x.name {
                     if s.hasPrefix("p:") { return String(s.dropFirst(2)) }
                     if s.hasPrefix("city:") { return s }
+                    if s == "boss" || s.hasPrefix("home:") || s.hasPrefix("place:") || s.hasPrefix("car:") { return builder.islandMode ? s : nil }   // 小島：小狗、家、地點
                     if s == "guard" { return "guard" }
                     if s == "b1-board" { return builder.underground ? s : nil }      // 地上時 B1 藏著，點不到
                 }
@@ -1976,6 +2032,10 @@ final class OfficeSCNView: SCNView {
         if let d = downAt, hypot(d.x - e.locationInWindow.x, d.y - e.locationInWindow.y) < 4 {
             let p = convert(e.locationInWindow, from: nil)
             if let id = pick(p) { onClick?(id) }
+            else if builder.islandMode, let g = groundPoint(p) {
+                // 小島：點地面 ⇒ 小狗走過去
+                playFor(builder.village.walkDog(to: g))
+            }
             else if let proj = neuralProject(at: p) {
                 // 10-22 Kang：點地下室中間那團神經網路 ⇒ 開那個專案的 Graphify 互動圖譜（OfficeView.click 處理 "neural:" 開頭）
                 builder.basement.flash(); playFor(0.8)
@@ -1983,6 +2043,15 @@ final class OfficeSCNView: SCNView {
             }
         }
         downAt = nil
+    }
+
+    /// 小島：畫面上這一點對到地面（y＝0）的哪裡；太遠（海上很遠）＝nil
+    func groundPoint(_ p: NSPoint) -> VPoint? {
+        let a = unprojectPoint(SCNVector3(p.x, p.y, 0)), b = unprojectPoint(SCNVector3(p.x, p.y, 1))
+        guard a.y > 0, b.y < a.y else { return nil }
+        let t = a.y / (a.y - b.y)
+        let q = VPoint(Double(a.x + (b.x - a.x) * t), Double(a.z + (b.z - a.z) * t))
+        return hypot(q.x, q.z) < VillageLayout.radius + 4 ? q : nil
     }
 
     /// 鏡頭在地下室時，這一點有沒有點到中間那團神經網路（點到 ⇒ 最近的節點屬於哪個專案）。地上一律 nil（不影響點人物、點樓層）

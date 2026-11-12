@@ -68,7 +68,7 @@ if argv.count == 2, argv[1] == "--board-dump" {
     let s = BoardReader().read()
     let fm = FileManager.default
     let cards = Board.build(sessions: s.sessions, transcripts: s.transcripts, glows: s.glows, teams: s.teams, inbox: s.inbox,
-                            reports: s.reports, reviews: s.reviews, decisions: s.decisions, contexts: s.contexts, nicknames: s.nicknames,
+                            reports: s.reports, reviews: s.reviews, decisions: s.decisions, contexts: s.contexts, nicknames: s.nicknames, asks: s.asks,
                             now: Date(), home: BoardPaths.home, isRepo: { fm.fileExists(atPath: $0 + "/.git") })
     let e = JSONEncoder(); e.outputFormatting = [.prettyPrinted, .sortedKeys]; e.dateEncodingStrategy = .iso8601
     FileHandle.standardOutput.write(try! e.encode(cards)); print()
@@ -89,7 +89,7 @@ if argv.count == 2, argv[1] == "--office-dump" {
     let s = r.read()
     let fm = FileManager.default
     let cards = Board.build(sessions: s.sessions, transcripts: s.transcripts, glows: s.glows, teams: s.teams, inbox: s.inbox,
-                            reports: s.reports, reviews: s.reviews, decisions: s.decisions, contexts: s.contexts, nicknames: s.nicknames,
+                            reports: s.reports, reviews: s.reviews, decisions: s.decisions, contexts: s.contexts, nicknames: s.nicknames, asks: s.asks,
                             now: Date(), home: BoardPaths.home, isRepo: { fm.fileExists(atPath: $0 + "/.git") })
     let deps = OfficeDepartments.build(residents: s.residents.map(\.name), cards: cards)
     let df = ISO8601DateFormatter(); df.timeZone = .current
@@ -161,7 +161,7 @@ if argv.count >= 3, argv[1] == "--decor-pick" {
     let s = BoardReader().read()
     let fm = FileManager.default
     let cards = Board.build(sessions: s.sessions, transcripts: s.transcripts, glows: s.glows, teams: s.teams, inbox: s.inbox,
-                            reports: s.reports, reviews: s.reviews, decisions: s.decisions, contexts: s.contexts, nicknames: s.nicknames,
+                            reports: s.reports, reviews: s.reviews, decisions: s.decisions, contexts: s.contexts, nicknames: s.nicknames, asks: s.asks,
                             now: Date(), home: BoardPaths.home, isRepo: { fm.fileExists(atPath: $0 + "/.git") })
     let mine = cards.filter { $0.project.caseInsensitiveCompare(name) == .orderedSame && !$0.id.contains("#") }
     let dir = keep ? BoardPaths.dir : fm.temporaryDirectory.appendingPathComponent("showork-decor-\(UUID().uuidString)")
@@ -383,7 +383,7 @@ if argv.count >= 3, argv[1] == "--board-act" {
         let s = BoardReader().read()
         let fm = FileManager.default
         let cards = Board.build(sessions: s.sessions, transcripts: s.transcripts, glows: s.glows, teams: s.teams, inbox: s.inbox,
-                                reports: s.reports, reviews: s.reviews, decisions: s.decisions, contexts: s.contexts, nicknames: s.nicknames,
+                                reports: s.reports, reviews: s.reviews, decisions: s.decisions, contexts: s.contexts, nicknames: s.nicknames, asks: s.asks,
                                 now: Date(), home: BoardPaths.home, isRepo: { fm.fileExists(atPath: $0 + "/.git") })
         guard argv.count >= 4, let c = cards.first(where: { $0.id == argv[3] }) else { print("no such card"); exit(1) }
         let text = argv.count >= 5 ? argv[4] : ""
@@ -453,6 +453,7 @@ MainActor.assumeIsolated {
     }
     Arranger.shared.start()
     BoardModel.shared.start()          // 戰情中心的資料（審核、ctx 收尾）視窗沒開也要跑
+    WebServer.shared.start()           // 網頁版戰情中心：預設關，showork web enable 才開、只綁 Tailscale IP（WebServer.swift）
     NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { _ in
         MainActor.assumeIsolated { BoardWindow.terminating = true }
     }
