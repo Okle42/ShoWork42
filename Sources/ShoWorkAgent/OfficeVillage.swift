@@ -192,11 +192,18 @@ final class VillageBuilder {
             let look = "\(isl.mood.rawValue)|\(isl.accessory?.rawValue ?? "")|\(c.activity.rawValue)|\(r.needsAnswer)|\(c.subagents.count)"
             if var old = persons[r.id] {
                 let moved = old.spot != r.spot || old.goal.dist(goal) > 0.05
-                // 走路時一定站著；到了營火才坐下（走完再換成坐姿）
-                let seatNow = canSit && !(moved && animate)
+                // 走路時一定站著；到了營火才坐下（走完再換成坐姿）。還在路上的人刷新時不能就地坐下（11-12 實機：走到一半坐在草地上）
+                let walking = old.node.action(forKey: "walk") != nil
+                let seatNow = canSit && !(moved && animate) && !walking
                 if old.look != look || old.seated != seatNow {
                     old.node = replaceNode(old.node, isl, r, seated: seatNow, intro: old.resident.mood != r.mood)
                     old.look = look; old.seated = seatNow
+                    // 換外觀會停掉走路：還沒到就接著走
+                    if walking && !moved {
+                        let t = walk(old.node, to: goal, face: face, speed: Self.walkSpeed, animate: animate)
+                        bump(t)
+                        if canSit { sitLater(r.id, after: t) }
+                    }
                 }
                 if moved {
                     let t = walk(old.node, to: goal, face: face, speed: Self.walkSpeed, animate: animate)
@@ -273,7 +280,7 @@ final class VillageBuilder {
     private func sitLater(_ id: String, after t: TimeInterval) {
         DispatchQueue.main.asyncAfter(deadline: .now() + t + 0.05) { [weak self] in
             MainActor.assumeIsolated {
-                guard let self, var p = self.persons[id], p.spot == .plaza, !p.seated else { return }
+                guard let self, var p = self.persons[id], p.spot == .plaza, !p.seated, p.node.action(forKey: "walk") == nil else { return }
                 p.node = self.replaceNode(p.node, p.isl, p.resident, seated: true, intro: false)
                 p.node.simdPosition = SIMD3(Float(p.goal.x), 0, Float(p.goal.z)); p.node.eulerAngles.y = CGFloat(p.face)
                 p.seated = true
