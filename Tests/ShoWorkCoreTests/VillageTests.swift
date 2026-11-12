@@ -65,8 +65,11 @@ struct VillageTests {
         #expect(p.shopName == "小明的店")
         #expect(r("f").home == nil)                                  // 隊長住鎮公所，不另外蓋家
         #expect(p.homes.count == 5)
-        // 家：店屋的人住西邊（序號小）、公司住東邊（序號大）
-        #expect(r("a").home! < r("d").home! && r("d").home! < r("c").home!)
+        // 家：店屋的人住店屋後面（北邊中間）、公司住東邊、個人住西邊
+        #expect(VillageLayout.homePrefer[.shop]!.prefix(2).contains(r("a").home!))
+        #expect(VillageLayout.homePrefer[.company]!.contains(r("c").home!))
+        #expect(VillageLayout.homePrefer[.personal]!.contains(r("d").home!))
+        #expect(Set(p.homes.map(\.index)).count == p.homes.count)
     }
 
     @Test("同一個地點的人分到不同位置；廣場的人也是")
@@ -128,7 +131,12 @@ struct VillageTests {
         s.grid = CityGrid(fiveUsed: 97, sevenUsed: 40, stage: .flicker)
         #expect(VillageSigns.alerts(s).map(\.id) == ["city:power"])
         s.grid = CityGrid(fiveUsed: 10, sevenUsed: 96, stage: .normal)
-        #expect(VillageSigns.alerts(s).first?.text.contains("7 天") == true)
+        #expect(VillageSigns.alerts(s).map(\.id) == ["city:fuel"])          // 7 天＝海
+        #expect(VillageSigns.alerts(s).first?.text.contains("退潮") == true)
+        #expect(abs(VillageSigns.tide(s.grid) - 0.04) < 0.001)
+        s.grid = CityGrid(fiveUsed: 10, sevenUsed: 20, stage: .normal)
+        #expect(abs(VillageSigns.tide(s.grid) - 0.8) < 0.001)
+        #expect(VillageSigns.tide(CityGrid()) == 0.6)
         s.grid = CityGrid(fiveUsed: 100, sevenUsed: 40, stage: .blackout)
         #expect(VillageSigns.water(s.grid) == 0)
         s.grid = CityGrid()
@@ -149,7 +157,8 @@ struct VillageTests {
         for i in VillageLayout.homes.indices { pts.append(VillageLayout.homeDoor(i)) }
         for p in pts { #expect(VillageLayout.walkable(p, obstacles: obs, pad: 0.1), "\(p) 擋住了") }
         // 障礙物彼此不重疊（房子不疊在一起）
-        let solid = [VillageLayout.townhall, VillageLayout.shop, VillageLayout.company, VillageLayout.shopCar, VillageLayout.warehouse]
+        let solid = [VillageLayout.shop, VillageLayout.company, VillageLayout.warehouse, VRect(VillageLayout.campfire.x, VillageLayout.campfire.z, 1.4, 1.4)]
+            + VillageLayout.carSpots.values.flatMap { $0 }.map { VRect($0.x, $0.z, VillageLayout.carSize.w, VillageLayout.carSize.d) }
             + VillageLayout.stalls + VillageLayout.homes.map { VRect($0.x, $0.z, VillageLayout.homeSize, VillageLayout.homeSize) }
         for (i, a) in solid.enumerated() { for b in solid[(i + 1)...] {
             #expect(abs(a.cx - b.cx) >= (a.w + b.w) / 2 || abs(a.cz - b.cz) >= (a.d + b.d) / 2, "\(a) 跟 \(b) 疊在一起")
@@ -170,5 +179,44 @@ struct VillageTests {
         // 點到海裡：走到最近的岸邊
         let sea = VillagePath.route(from: VPoint(0, 8), to: VPoint(0, 24.5), obstacles: obs)
         #expect(hypot(sea.last!.x, sea.last!.z) <= VillageLayout.walkRadius + 0.01)
+    }
+
+    @Test("車：設定決定車型、顏色、停哪；沒設定一台白色休旅車；格子滿了不畫")
+    func cars() throws {
+        #expect(VillageCars.list(nil) == [VillageCar(model: .suv, color: VillageCarModel.suv.color, owner: nil, zone: .shop, slot: 0)])
+        let c = VillageConfig(cars: [VillageCarConfig(model: "suv", place: "shop", owner: "A"), VillageCarConfig(model: "MPV", place: "shop", owner: "B"),
+                                     VillageCarConfig(model: "coupe", place: "company", color: "#123456"), VillageCarConfig(model: "tank", place: "shop"),
+                                     VillageCarConfig(model: "suv", place: "shop")])
+        let l = VillageCars.list(c)
+        #expect(l.map(\.model) == [.suv, .mpv, .coupe])
+        #expect(l.map(\.slot) == [0, 1, 0])
+        #expect(l[2].color == 0x123456 && l[1].color == VillageCarModel.mpv.color && l[1].owner == "B")
+        let j = #"{"cars":[{"model":"mpv","place":"shop","owner":"X"}]}"#
+        let d = try JSONDecoder().decode(VillageConfig.self, from: Data(j.utf8))
+        #expect(VillageCars.list(d).first?.model == .mpv)
+    }
+
+    @Test("隊長的子 agent 不畫、名牌不掛子 agent")
+    func captainSubagents() {
+        var c = card("cap", "P", .active, name: "Cap", captain: true)
+        c.subagents = [SubagentInfo(description: "背景")]; c.activity = .delegating
+        var w = card("w", "P", .active, name: "W")
+        w.subagents = [SubagentInfo(description: "子")]
+        let p = Village.plan(cards: [c, w], config: cfg)
+        #expect(p.residents.first { $0.id == "cap" }?.card?.subagents.isEmpty == true)
+        #expect(p.residents.first { $0.id == "cap" }?.card?.activity == AIActivity.none)
+        #expect(p.residents.first { $0.id == "w" }?.card?.subagents.count == 1)
+        #expect(p.residents.count == 2)
+    }
+
+    @Test("小狗＝本機設定的那位島民（名牌「小白（名字）」）；主人名牌沒設＝你")
+    func pet() {
+        let c = VillageConfig(petName: "puppy", petLabel: "小白", ownerLabel: "老大")
+        let p = Village.plan(cards: [card("a", "P", .active, name: "Puppy"), card("b", "P", .active, name: "Ben")], config: c)
+        #expect(p.residents.first { $0.name == "Puppy" }?.pet == true)
+        #expect(p.residents.first { $0.name == "Ben" }?.pet == false)
+        #expect(c.petTitle("Puppy") == "小白（Puppy）")
+        #expect(VillageConfig(petName: "x").petTitle("x") == "x")
+        #expect(c.ownerTitle == "老大" && VillageConfig().ownerTitle == "你")
     }
 }

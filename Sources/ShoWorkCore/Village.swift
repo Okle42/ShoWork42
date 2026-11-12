@@ -12,7 +12,7 @@ public enum VillageZone: String, Codable, Sendable, CaseIterable {
     case shop       // 自家店屋（本機設定的店名；奶油／橄欖／金、門口停休旅車）
     case company    // 公司小屋（Okle42；黑底金色 42）
     case personal   // 個人：散在島上的小攤
-    case townhall   // 鎮公所（隊長）
+    case townhall   // 隊長（11-12 第二輪：鎮公所併進中間的店屋，隊長站在店屋門口）
 }
 
 /// 本機設定（local.json 的 "village"）：
@@ -21,8 +21,73 @@ public struct VillageConfig: Codable, Sendable, Equatable {
     public var shopName: String?
     public var zones: [String: String]?
     public var shopKeywords: [String]?
-    public init(shopName: String? = nil, zones: [String: String]? = nil, shopKeywords: [String]? = nil) {
-        self.shopName = shopName; self.zones = zones; self.shopKeywords = shopKeywords
+    /// 停在島上的車（11-12 第二輪）：車型＋停哪（shop／company）＋顏色（"#RRGGBB"，沒寫＝車型預設色）＋車主（點車時顯示）
+    public var cars: [VillageCarConfig]? = nil
+    /// 畫成小狗的島民（戰情中心名字，不分大小寫）＋小狗名牌上的名字（例如「小白」）
+    public var petName: String? = nil
+    public var petLabel: String? = nil
+    /// 主人（看板使用者）那個角色的名牌；沒寫＝「你」
+    public var ownerLabel: String? = nil
+    public init(shopName: String? = nil, zones: [String: String]? = nil, shopKeywords: [String]? = nil, cars: [VillageCarConfig]? = nil,
+                petName: String? = nil, petLabel: String? = nil, ownerLabel: String? = nil) {
+        self.shopName = shopName; self.zones = zones; self.shopKeywords = shopKeywords; self.cars = cars
+        self.petName = petName; self.petLabel = petLabel; self.ownerLabel = ownerLabel
+    }
+    /// 小狗名牌：「小白（Puppy）」；沒設 petLabel＝名字本身
+    public func petTitle(_ name: String) -> String {
+        guard let l = petLabel, !l.isEmpty, l != name else { return name }
+        return "\(l)（\(name)）"
+    }
+    public var ownerTitle: String { ownerLabel.flatMap { $0.isEmpty ? nil : $0 } ?? "你" }
+}
+
+/// 車型（只有造型特徵，不畫品牌標誌）
+public enum VillageCarModel: String, Codable, Sendable, CaseIterable {
+    case suv        // 方正休旅、車頂架
+    case mpv        // 高大方盒 MPV、大水箱罩
+    case coupe      // 低矮四門轎跑、斜背
+    /// 預設顏色
+    public var color: UInt32 { switch self { case .suv: 0xF2F2EE; case .mpv: 0x17191C; case .coupe: 0x8E9297 } }
+    public var title: String { switch self { case .suv: "休旅車"; case .mpv: "MPV"; case .coupe: "四門轎跑" } }
+}
+
+public struct VillageCarConfig: Codable, Sendable, Equatable {
+    public var model: String
+    public var place: String
+    public var color: String?
+    public var owner: String?
+    public init(model: String, place: String, color: String? = nil, owner: String? = nil) {
+        self.model = model; self.place = place; self.color = color; self.owner = owner
+    }
+}
+
+/// 一台要畫的車（已決定停哪一格）
+public struct VillageCar: Sendable, Equatable {
+    public var model: VillageCarModel
+    public var color: UInt32
+    public var owner: String?
+    public var zone: VillageZone
+    public var slot: Int
+}
+
+public enum VillageCars {
+    /// 沒設定＝店屋門口一台白色休旅車
+    public static let fallback = [VillageCarConfig(model: "suv", place: "shop")]
+
+    /// 設定 → 要畫的車：車型認不得跳過；同一地點依序排格子，格子滿了不畫
+    public static func list(_ cfg: VillageConfig?) -> [VillageCar] {
+        var out: [VillageCar] = []
+        var used: [VillageZone: Int] = [:]
+        for c in cfg?.cars ?? fallback {
+            guard let m = VillageCarModel(rawValue: c.model.lowercased()), let z = VillageZone(rawValue: c.place.lowercased()),
+                  let spots = VillageLayout.carSpots[z] else { continue }
+            let i = used[z, default: 0]
+            guard i < spots.count else { continue }
+            used[z] = i + 1
+            let col = c.color.flatMap { h -> UInt32? in UInt32(h.trimmingCharacters(in: CharacterSet(charactersIn: "# ")), radix: 16) } ?? m.color
+            out.append(VillageCar(model: m, color: col, owner: c.owner, zone: z, slot: i))
+        }
+        return out
     }
 }
 
@@ -63,7 +128,7 @@ public enum VillageZones {
 /// 島民現在在哪
 public enum VillageSpot: String, Sendable, Equatable {
     case work       // 在自己的工作位置（店屋前、公司小屋前、自己的小攤、鎮公所）
-    case plaza      // 廣場晃
+    case plaza      // 沒事：圍著營火坐（11-12 第二輪；原本在廣場晃）
     case home       // 離線：回家（人不畫，家門關、燈暗）
 }
 
@@ -78,6 +143,7 @@ public struct VillageResident: Sendable, Equatable, Identifiable {
     public var slot: Int                // 在那個地點的第幾個位置（work：同地點序號；plaza：廣場序號）
     public var stall: Int?              // 個人區：第幾個小攤
     public var home: Int?               // 住第幾間家（VillageLayout.homes 的序號；名額滿了＝nil）
+    public var pet = false              // 畫成小狗（本機設定 petName）
     public var online: Bool { card != nil }
     /// 頭上冒「！」：等你回答／要你決定、或終端機開著權限對話框
     public var needsAnswer: Bool { mood == .waiting || card?.permit != nil }
@@ -157,10 +223,13 @@ public enum Village {
         }
         var workCount: [String: Int] = [:]
         var plazaCount = 0
-        for c in live.sorted(by: { $0.id < $1.id }) {
+        for var c in live.sorted(by: { $0.id < $1.id }) {
+            // 隊長的子 agent（背景 Agent）不另外畫成島民、名牌也不掛「子 agent N」（11-12 第二輪：疊在隊長名牌上）
+            if c.captain { c.subagents = []; if c.activity == .delegating { c.activity = .none } }
             let zone = VillageZones.zone(project: c.project, captain: c.captain, config: config)
             let mood = Mood.of(c)
             var r = VillageResident(id: c.id, name: name(c), project: c.project, zone: zone, card: c, mood: mood, spot: .work, slot: 0)
+            r.pet = config?.petName.map { $0.caseInsensitiveCompare(r.name) == .orderedSame } ?? false
             let needs = r.needsAnswer
             // 隊長一律在鎮公所；工作中／等你／卡住在自己位置；做完／休息／睡著到廣場
             let atWork = c.captain || needs || mood == .working || mood == .stuck
@@ -181,15 +250,17 @@ public enum Village {
             let zone = VillageZones.zone(project: e.project, config: config)
             plan.residents.append(VillageResident(id: "home:\(n)", name: n, project: e.project, zone: zone, card: nil, mood: nil, spot: .home, slot: 0))
         }
-        // 家：隊長住鎮公所不另外蓋；店屋的人住西邊、個人住北邊、公司住東邊（VillageLayout.homes 由西繞北到東）
-        let order: [VillageZone] = [.shop, .personal, .company]
+        // 家：隊長住店屋不另外蓋；店屋的人住北邊（店屋後面）、公司住東邊、個人住西邊；偏好的位置滿了就挑最近的空位
+        let order: [VillageZone] = [.shop, .company, .personal]
         let homeless = plan.residents.filter { $0.zone != .townhall }
             .sorted { (order.firstIndex(of: $0.zone) ?? 9, $0.name) < (order.firstIndex(of: $1.zone) ?? 9, $1.name) }
-        var seen = Set<String>()
+        var seen = Set<String>(), taken = Set<Int>()
         for r in homeless where !seen.contains(r.name) {
             seen.insert(r.name)
-            guard plan.homes.count < maxHomes else { break }
-            plan.homes.append(VillageHome(name: r.name, zone: r.zone, online: r.online, index: plan.homes.count))
+            guard let i = (VillageLayout.homePrefer[r.zone] ?? Array(VillageLayout.homes.indices)).first(where: { !taken.contains($0) })
+                    ?? VillageLayout.homes.indices.first(where: { !taken.contains($0) }) else { break }
+            taken.insert(i)
+            plan.homes.append(VillageHome(name: r.name, zone: r.zone, online: r.online, index: i))
         }
         let homeOf = Dictionary(plan.homes.map { ($0.name, $0.index) }, uniquingKeysWith: { a, _ in a })
         for i in plan.residents.indices { plan.residents[i].home = homeOf[plan.residents[i].name] }
@@ -210,15 +281,16 @@ public struct VillageSign: Sendable, Equatable {
 }
 
 public enum VillageSigns {
-    /// 風車＝這台 Mac 的溫度（cool42）、水井＝AI 額度（5 小時／7 天）、熱氣球＝iCloud、倉庫小屋＝內建碟。
-    /// 只在到門檻時回傳（cool42 hot 以上、額度吃緊／停電或 7 天剩 ≤5%、iCloud 卡住或空間不足、內建碟 ≥90%）
+    /// 風車＝這台 Mac 的溫度（cool42）、水塔＝5 小時額度、海＝7 天額度、熱氣球＝iCloud、倉庫小屋＝內建碟。
+    /// 只在到門檻時回傳（cool42 hot 以上、5 小時額度吃緊／停電、7 天剩 ≤5%、iCloud 卡住或空間不足、內建碟 ≥90%）
     public static func alerts(_ s: CityState) -> [VillageSign] {
         var out: [VillageSign] = []
         if s.power.alert { out.append(.init(id: "city:cooler", text: "風車轉不動：這台 Mac 太熱（\(s.power.level ?? "hot")）")) }
         if s.grid.alert {
-            out.append(.init(id: "city:power", text: s.grid.stage == .blackout ? "水井乾了：AI 額度用完" : "水井快乾了：額度剩不到 5%"))
-        } else if let l = s.grid.sevenLeft, s.grid.known, l <= 5 {
-            out.append(.init(id: "city:power", text: "水井快乾了：7 天額度剩 \(Int(l.rounded()))%"))
+            out.append(.init(id: "city:power", text: s.grid.stage == .blackout ? "水塔乾了：AI 額度用完" : "水塔快見底：5 小時額度剩不到 5%"))
+        }
+        if let l = s.grid.sevenLeft, s.grid.known, l <= 5 {
+            out.append(.init(id: "city:fuel", text: "海退潮了：7 天額度剩 \(Int(l.rounded()))%"))
         }
         if let c = s.clouds.first(where: { $0.isICloud && $0.alert }) { out.append(.init(id: c.id, text: "熱氣球漏氣：" + CityText.cloud(c))) }
         if let d = s.disks.first(where: { $0.isInternal && $0.alert }) {
@@ -227,7 +299,13 @@ public enum VillageSigns {
         return out
     }
 
-    /// 水井水位（0–1）：5 小時額度剩多少；讀不到＝半滿
+    /// 海的潮位（0＝退潮露出沙灘、1＝滿潮）：7 天額度剩多少；讀不到＝中間
+    public static func tide(_ g: CityGrid) -> Double {
+        guard let l = g.sevenLeft, g.known else { return 0.6 }
+        return max(0, min(1, l / 100))
+    }
+
+    /// 水塔水位（0–1）：5 小時額度剩多少；讀不到＝半滿
     public static func water(_ g: CityGrid) -> Double {
         guard let l = g.fiveLeft else { return 0.5 }
         return g.stage == .blackout ? 0 : max(0, min(1, l / 100))
@@ -255,14 +333,21 @@ public enum VillageLayout {
     /// 可以走的範圍（離海邊留 1.5）
     public static let walkRadius = radius - 1.5
 
-    public static let townhall = VRect(0, -10, 7, 5)
-    public static let shop = VRect(-12, -4, 7, 5.5)
+    /// 自家店屋在島中間北邊（11-12 第二輪：原本的鎮公所位置；隊長也在這）
+    public static let shop = VRect(0, -10, 7, 5.5)
+    public static var townhall: VRect { shop }
     public static let company = VRect(12, -4, 5.6, 4.6)
-    public static let shopCar = VRect(-17.4, 1.3, 2.1, 4.2)       // 門口那台休旅車（車頭朝 +z）
+    /// 停車格（車頭朝 +z）：店屋西側兩格並排、公司小屋東側一格
+    public static let carSpots: [VillageZone: [VPoint]] = [.shop: [VPoint(-5.3, -9.0), VPoint(-7.6, -9.0)], .company: [VPoint(16.6, -4.0)]]
+    /// 每區偏好住哪幾間（VillageLayout.homes 的序號，前面的先住）
+    public static let homePrefer: [VillageZone: [Int]] = [.shop: [5, 6, 4, 7, 3, 8], .company: [9, 10, 11, 8], .personal: [0, 1, 2, 3, 11, 10]]
+    public static let carSize = (w: 2.1, d: 4.8)
+    /// 營火（沒事的島民圍著坐）：廣場西南邊的草地
+    public static let campfire = VPoint(-9, 17)
     public static let plaza = VPoint(0, 3)
     public static let plazaRadius = 4.6
     public static let fountain = VRect(0, 3, 2.2, 2.2)
-    public static let well = VPoint(6.2, 6.4)
+    public static let well = VPoint(6.2, 6.4)        // 水塔（11-12 第二輪：水井改高架水塔）
     public static let windmill = VPoint(18.5, 9.5)
     public static let warehouse = VRect(-18.2, 11.6, 3.6, 3.0)
     public static let balloonTether = VPoint(-9, -19.5)
@@ -274,9 +359,9 @@ public enum VillageLayout {
                                          VPoint(-9.6, -16.6), VPoint(-4.6, -18.4), VPoint(4.6, -18.4), VPoint(9.6, -16.6),
                                          VPoint(15.2, -13.6), VPoint(19.2, -8.6), VPoint(21.4, -0.6), VPoint(21.2, 5.6)]
     public static let homeSize = 2.6
-    public static let trees: [VPoint] = [VPoint(-6.5, -5.5), VPoint(6.5, -5.5), VPoint(-17, -3), VPoint(-5.2, 9.6), VPoint(-11, 15.5),
+    public static let trees: [VPoint] = [VPoint(-6.5, -5.5), VPoint(6.5, -5.5), VPoint(-17, -3), VPoint(-13.5, -5.5), VPoint(-10.4, -2.6), VPoint(-12.6, -8.4), VPoint(-5.2, 9.6), VPoint(-15.5, 15.8),
                                          VPoint(11, 15.5), VPoint(17, 1), VPoint(0, -15.5), VPoint(-14, 2.6), VPoint(4.5, -13.5),
-                                         VPoint(-5, 18.5), VPoint(5.5, 18.6), VPoint(16, -18.5), VPoint(-16, 18)]
+                                         VPoint(-3.6, 21.2), VPoint(5.5, 18.6), VPoint(16, -18.5), VPoint(-16, 18)]
 
     /// 家的大門朝向（面向島中心）：繞 y 軸的角度（0＝朝 +z）
     public static func homeFacing(_ i: Int) -> Double {
@@ -293,11 +378,14 @@ public enum VillageLayout {
     public static func workSpot(zone: VillageZone, stall: Int?, slot: Int) -> (VPoint, Double) {
         switch zone {
         case .townhall:
-            let xs = [0.0, -1.4, 1.4, -2.8, 2.8]
-            return (VPoint(xs[slot % xs.count], townhall.cz + townhall.d / 2 + 1.3 + Double(slot / xs.count) * 1.2), 0)
-        case .shop, .company:
-            let b = zone == .shop ? shop : company
-            let perRow = zone == .shop ? 4 : 3
+            // 店屋正門口（店屋的人站在兩側，中間留給隊長）
+            return (VPoint(shop.cx, shop.cz + shop.d / 2 + 1.25 + Double(slot % 2) * 1.4), 0)
+        case .shop:
+            let xs = [-2.9, -1.6, 1.6, 2.9], row = (slot / xs.count) % 2
+            return (VPoint(shop.cx + xs[slot % xs.count] + (row == 1 ? 0.3 : 0), shop.cz + shop.d / 2 + 1.2 + Double(row) * 1.4), 0)
+        case .company:
+            let b = company
+            let perRow = 3
             let row = (slot / perRow) % 2, col = slot % perRow
             let span = b.w - 1.4, x0 = b.cx - span / 2
             let x = perRow == 1 ? b.cx : x0 + span * Double(col) / Double(perRow - 1) + (row == 1 ? 0.6 : 0)
@@ -309,19 +397,20 @@ public enum VillageLayout {
         }
     }
 
-    /// 廣場上的位置：繞噴水池一圈（第二圈更外面），面向噴水池
+    /// 營火旁的座位：第一圈 8 個、第二圈 12 個，面向火（第三圈之後跟第二圈同位置，疊著也比不見好）
     public static func plazaSpot(_ slot: Int) -> (VPoint, Double) {
-        let per = [7, 10, 12], ring = slot < 7 ? 0 : slot < 17 ? 1 : 2, k = slot - [0, 7, 17][ring]
-        let r = 2.9 + Double(ring) * 1.5
-        let a = Double(k % per[ring]) / Double(per[ring]) * 2 * .pi + Double(ring) * 0.3 + 0.2
-        let p = VPoint(plaza.x + sin(a) * r, plaza.z + cos(a) * r)
-        return (p, atan2(plaza.x - p.x, plaza.z - p.z))
+        let per = [8, 12], ring = slot < 8 ? 0 : 1, k = ring == 0 ? slot : (slot - 8) % 12
+        let r = ring == 0 ? 2.4 : 3.6
+        let a = Double(k) / Double(per[ring]) * 2 * .pi + (ring == 0 ? 0.39 : 0.0)
+        let p = VPoint(campfire.x + sin(a) * r, campfire.z + cos(a) * r)
+        return (p, atan2(campfire.x - p.x, campfire.z - p.z))
     }
 
     /// 地上擋路的東西（找路、點地面時避開）。stallCount＝現在有畫幾個小攤
     public static func obstacles(stallCount: Int = stalls.count) -> [VRect] {
-        var o = [townhall, shop, company, shopCar, fountain, warehouse,
-                 VRect(well.x, well.z, 1.6, 1.6), VRect(windmill.x, windmill.z, 2.4, 2.4), VRect(balloonTether.x, balloonTether.z, 0.8, 0.8)]
+        var o = [townhall, shop, company, fountain, warehouse, VRect(campfire.x, campfire.z, 1.4, 1.4),
+                 VRect(well.x, well.z, 2.2, 2.2), VRect(windmill.x, windmill.z, 2.4, 2.4), VRect(balloonTether.x, balloonTether.z, 0.8, 0.8)]
+        o += carSpots.values.flatMap { $0 }.map { VRect($0.x, $0.z, carSize.w, carSize.d) }
         o += stalls.prefix(stallCount)
         o += homes.map { VRect($0.x, $0.z, homeSize, homeSize) }
         o += trees.map { VRect($0.x, $0.z, 1.0, 1.0) }
