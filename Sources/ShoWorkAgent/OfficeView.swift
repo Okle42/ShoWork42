@@ -348,7 +348,7 @@ struct OfficeView: View {
     /// 停在城市建築上的不算「人」（不開左下角的人物卡、不擋左下角的名牌）
     private var personHover: String? { hovered.flatMap { Self.isCity($0) || Self.isVillageThing($0) ? nil : $0 } }
     /// 小島上不是人的東西（小狗、家、地點）：不開人物卡
-    static func isVillageThing(_ id: String) -> Bool { id == "dog" || id.hasPrefix("home:") || id.hasPrefix("place:") }
+    static func isVillageThing(_ id: String) -> Bool { id == "boss" || id.hasPrefix("home:") || id.hasPrefix("place:") || id.hasPrefix("car:") }
     static func isCity(_ id: String) -> Bool { id.hasPrefix("city:") || id.hasPrefix("ship:") }
 
     /// 城市懸停卡（10-21 第二輪）：浮在滑鼠右下（放不下就換到左邊／上面），夾在 3D 區域裡、不吃滑鼠；
@@ -428,12 +428,13 @@ struct OfficeView: View {
         if id.hasPrefix("city:") { answeringId = nil; guardOpen = false; cityOpen = id; return }
         cityOpen = nil
         if id == "guard" { answeringId = nil; guardOpen = true; return }
-        // 小島（11-12）：點小狗＝打開牠旁邊（或最早在等你）那位的回答卡；點家＝他下班回家了；點地點＝鏡頭飛過去
-        if id == "dog" {
+        // 小島（11-12）：點主人（橘色小人）＝打開他旁邊（或最早在等你）那位的回答卡；點家＝他下班回家了；點地點＝鏡頭飛過去
+        if id == "boss" {
             let target = VillageStore.plan(shown.filter { !$0.id.contains("#") }).dogTarget
-            if let t = target { click(t) } else { onToast("🐾 現在沒有人在等你回答") }
+            if let t = target { click(t) } else { onToast("現在沒有人在等你回答") }
             return
         }
+        if id.hasPrefix("car:") { onToast(VillageStore.carText(id) ?? "🚗"); return }
         if id.hasPrefix("home:") { onToast("\(id.dropFirst(5)) 下班回家了（離線）"); return }
         if id.hasPrefix("place:") { focusFloor(id); return }
         guard let c = shown.first(where: { $0.id == id }) else { return }
@@ -1519,7 +1520,7 @@ final class OfficeSCNView: SCNView {
         var specs: [LabelSpec] = []
         for p in ps.sorted(by: { $0.id < $1.id }) {
             if p.id == "guard" { specs.append(OfficeLabels.guardSpec(guardStatus, scanning: scanning, anchor: p.anchor)) }
-            else if p.id == "dog" { specs.append(OfficeLabels.dogSpec(anchor: p.anchor)) }
+            else if p.id == "boss" { specs.append(OfficeLabels.bossSpec(anchor: p.anchor, text: VillageStore.config?.ownerTitle ?? "你")) }
             else if let c = p.card { specs.append(OfficeLabels.spec(c, mood: p.mood, anchor: p.anchor, floor: p.floor)) }
         }
         for c in builder.cityLabelTargets() { specs.append(OfficeLabels.citySpec(id: c.id, text: c.text, alert: c.alert, anchor: c.anchor)) }
@@ -1982,7 +1983,7 @@ final class OfficeSCNView: SCNView {
                 if let s = x.name {
                     if s.hasPrefix("p:") { return String(s.dropFirst(2)) }
                     if s.hasPrefix("city:") { return s }
-                    if s == "dog" || s.hasPrefix("home:") || s.hasPrefix("place:") { return builder.islandMode ? s : nil }   // 小島：小狗、家、地點
+                    if s == "boss" || s.hasPrefix("home:") || s.hasPrefix("place:") || s.hasPrefix("car:") { return builder.islandMode ? s : nil }   // 小島：小狗、家、地點
                     if s == "guard" { return "guard" }
                     if s == "b1-board" { return builder.underground ? s : nil }      // 地上時 B1 藏著，點不到
                 }

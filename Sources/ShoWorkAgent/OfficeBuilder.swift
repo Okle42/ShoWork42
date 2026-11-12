@@ -318,6 +318,7 @@ final class OfficeBuilder {
         if on { _ = setUnderground(false); village.buildIfNeeded() }
         world.isHidden = on
         village.root.isHidden = !on
+        CityDetail.island = on
         villageFramed = false
         omniDirty = true; lodDirty = true; cutSig = ""
         applyLights()
@@ -341,7 +342,7 @@ final class OfficeBuilder {
                 guardStatus: GuardStatus, scanning: Bool, animate: Bool, now: Date = Date()) -> Reframe {
         if islandMode {
             guardLevel = guardStatus.level
-            bump(village.update(islands.flatMap(\.people), animate: animate, now: now))
+            bump(village.update(islands.flatMap(\.people), animate: animate, raining: weatherFX.raining, now: now))
             looping = !Look.reduceMotion && (weatherFX.raining || village.looping)
             if !villageFramed { villageFramed = true; return .layout }
             return .none

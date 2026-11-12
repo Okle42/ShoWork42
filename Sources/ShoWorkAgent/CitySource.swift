@@ -121,7 +121,7 @@ final class CityMonitor: @unchecked Sendable {
     }
 
     // MARK: 電廠＝AI 額度（statusLine 存的 rate_limits.json；每次 tick 讀一個小檔，換格才算變）
-    // 測試：SHOWORK_CITY_GRID=dim|flicker|blackout 換成假數字
+    // 測試：SHOWORK_CITY_GRID=dim|flicker|blackout|<5 小時已用 %> 換成假數字（SHOWORK_CITY_GRID_7D＝7 天已用 %）
 
     private func grid(old: CityGrid, now: Date) -> CityGrid {
         let g = Self.fakeGrid(now: now) ?? CityRules.grid(BoardStore.rateLimits(), now: now)
@@ -130,9 +130,11 @@ final class CityMonitor: @unchecked Sendable {
 
     static func fakeGrid(now: Date) -> CityGrid? {
         guard let v = ProcessInfo.processInfo.environment["SHOWORK_CITY_GRID"] else { return nil }
-        let five: Double = ["dim": 86, "flicker": 97, "blackout": 100][v] ?? 40
+        // 11-12：也可以直接給數字（SHOWORK_CITY_GRID=30）；SHOWORK_CITY_GRID_7D＝7 天已用 %（小島的潮位截圖用）
+        let five: Double = ["dim": 86, "flicker": 97, "blackout": 100][v] ?? Double(v) ?? 40
+        let seven = ProcessInfo.processInfo.environment["SHOWORK_CITY_GRID_7D"].flatMap(Double.init) ?? 58
         let r = RateLimits(fiveHour: .init(used: five, resetsAt: now.addingTimeInterval(80 * 60)),
-                           sevenDay: .init(used: 58, resetsAt: now.addingTimeInterval(3 * 86400)))
+                           sevenDay: .init(used: seven, resetsAt: now.addingTimeInterval(3 * 86400)))
         return CityRules.grid(r, now: now)
     }
 

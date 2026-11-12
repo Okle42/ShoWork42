@@ -19,14 +19,13 @@ struct VillageRail: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
                     header("地點")
-                    place("place:townhall", "building.columns", "鎮公所", sub: "隊長")
-                    place("place:shop", "house", plan.shopName, sub: count(.shop))
+                    place("place:shop", "house", plan.shopName, sub: count(.shop) == "沒有人" ? "隊長" : "隊長＋" + count(.shop))
                     place("place:company", "building", "Okle42 小屋", sub: count(.company))
                     ForEach(Array(plan.stalls.enumerated()), id: \.offset) { i, s in
                         place("place:stall:\(i)", "storefront", s, sub: "小攤")
                     }
-                    place("place:plaza", "fountain", "廣場", sub: plazaCount)
-                    place("place:facility", "wind", "風車・水井・熱氣球・倉庫", sub: alerts.isEmpty ? "一切正常" : alerts.map(\.text).joined(separator: "、"),
+                    place("place:campfire", "flame", "營火", sub: plazaCount)
+                    place("place:facility", "wind", "風車・水塔・海・熱氣球・倉庫", sub: alerts.isEmpty ? "一切正常" : alerts.map(\.text).joined(separator: "、"),
                           alert: !alerts.isEmpty)
                     header("島民 \(plan.residents.filter(\.online).count)")
                     ForEach(people, id: \.id) { r in person(r) }
@@ -53,7 +52,7 @@ struct VillageRail: View {
     }
     private var plazaCount: String {
         let n = plan.residents.filter { $0.spot == .plaza }.count
-        return n == 0 ? "沒有人在晃" : "\(n) 位在晃"
+        return n == 0 ? "沒有人" : "\(n) 位圍著營火"
     }
 
     private func header(_ t: String) -> some View {
@@ -79,20 +78,20 @@ struct VillageRail: View {
 
     private func where_(_ r: VillageResident) -> String {
         guard r.online else { return "回家了（離線）" }
-        if r.zone == .townhall { return "在鎮公所" }
+        if r.zone == .townhall { return "在\(plan.shopName)門口（隊長）" }
         let at: String = switch r.zone {
         case .shop: plan.shopName
         case .company: "Okle42 小屋"
         case .personal: r.stall.flatMap { $0 < plan.stalls.count ? plan.stalls[$0] + " 小攤" : nil } ?? "小攤"
-        case .townhall: "鎮公所"
+        case .townhall: plan.shopName
         }
         if r.needsAnswer { return "等你回答・\(at)" }
         switch r.mood {
         case .working: return "在\(at)忙"
         case .stuck: return "卡住了・\(at)"
-        case .finished: return "做完了，在廣場等你看"
-        case .asleep: return "在廣場打瞌睡"
-        default: return "在廣場晃"
+        case .finished: return "做完了，在營火旁等你看"
+        case .asleep: return "在營火旁打瞌睡"
+        default: return "在營火旁休息"
         }
     }
 
@@ -108,7 +107,7 @@ struct VillageRail: View {
                 Circle().fill(dot(r)).frame(width: 9, height: 9)
                 VStack(alignment: .leading, spacing: 1) {
                     HStack(spacing: 4) {
-                        Text(r.name).font(.system(size: 14, weight: .semibold)).lineLimit(1)
+                        Text(r.pet ? (VillageStore.config?.petTitle(r.name) ?? r.name) : r.name).font(.system(size: 14, weight: .semibold)).lineLimit(1)
                         if r.needsAnswer { Text("！").font(.system(size: 13, weight: .heavy)).foregroundStyle(Self.red) }
                         if r.zone == .townhall { Image(systemName: "crown.fill").font(.system(size: 10)).foregroundStyle(.yellow) }
                     }

@@ -1093,7 +1093,16 @@ struct CityDetail: View {
     let city: CityState
     var compact = false
 
-    static func title(_ id: String, _ city: CityState) -> String {
+    /// 小島模式（11-12）：同一組資料，名字換成島上的東西
+    @MainActor static var island = false
+    @MainActor static func title(_ id: String, _ city: CityState) -> String {
+        if island {
+            if id == "city:power" { return "🗼 水塔・AI 額度（5 小時）" }
+            if id == "city:fuel" { return "🌊 海・AI 額度（7 天，潮位）" }
+            if id == "city:cooler" { return "🌬 風車・這台 Mac 的溫度" }
+            if let c = city.clouds.first(where: { $0.id == id }) { return "🎈 熱氣球・" + c.name }
+            if let d = city.disks.first(where: { $0.id == id }), d.isInternal { return "🛖 倉庫小屋・\(CityText.diskName(d))" }
+        }
         if let d = city.disks.first(where: { $0.id == id }) { return "📦 貨櫃堆場・\(CityText.diskName(d))" }
         if let c = city.clouds.first(where: { $0.id == id }) { return (CityBuilder.airshipStyle == 4 ? "🛸 飛碟・" : "🎈 飛艇・") + c.name }
         if let s = city.servers.first(where: { $0.id == id }) { return "🏢 分公司・\(s.alias)" }

@@ -26,6 +26,14 @@ enum VillageStore {
         return cfg.0
     }
 
+    /// 點車時的字（車主寫在本機設定）
+    static func carText(_ id: String) -> String? {
+        let cars = VillageCars.list(config)
+        guard id.hasPrefix("car:"), let i = Int(id.dropFirst(4)), i < cars.count else { return nil }
+        let c = cars[i]
+        return c.owner.map { "🚗 \($0) 的車（\(c.model.title)）" } ?? "🚗 \(c.model.title)"
+    }
+
     static func plan(_ cards: [BoardCard], now: Date = Date()) -> VillagePlan {
         Village.plan(cards: cards, memory: memory, config: config, now: now)
     }
@@ -61,13 +69,17 @@ final class VillageBuilder {
     private var built = false
     private var lamps: [SCNNode] = []
 
-    struct Person { var node: SCNNode; var look: String; var goal: VPoint; var face: Double; var spot: VillageSpot; var resident: VillageResident }
+    struct Person { var node: SCNNode; var look: String; var goal: VPoint; var face: Double; var spot: VillageSpot; var resident: VillageResident
+        var seated = false; var isl: Islander }
+    private var seatOf: [String: Int] = [:]
     private var persons: [String: Person] = [:]
     private var homeNodes: [SCNNode] = []
     private var homeSig = ""
     private var stallNode: SCNNode?
     private var stallSig = ""
     private var wellNode: SCNNode?
+    private var seaNode: SCNNode?
+    private var seaTide = 0.6
     private var wellSig = ""
     private var facilityIds: [String: String] = [:]      // 設施種類 → 城市 id（點了開哪張細節卡）
     private var signs: [VillageSign] = []
@@ -104,21 +116,23 @@ final class VillageBuilder {
             if pick { OfficeBuilder.pickable(n) }
             root.addChildNode(n)
         }
-        add(VillageArt.sea())
+        let sea = VillageArt.sea()
+        sea.position.y = CGFloat(VillageArt.seaOffset(seaTide))
+        seaNode = sea
+        add(sea, pick: true)
         add(VillageArt.terrain())
-        add(VillageArt.townhall(), pick: true)
         add(VillageArt.company(), pick: true)
         for (k, n) in [("windmill", VillageArt.windmill()), ("balloon", VillageArt.balloon()), ("warehouse", VillageArt.warehouse())] {
             facilityNodes[k] = n; add(n, pick: true)
         }
         // 夜晚：廣場、店屋、公司小屋三盞暖燈（強度跟著天色／停電，setLamps）
-        for p in [SCNVector3(0, 4.5, 3), SCNVector3(-12, 4.2, 1), SCNVector3(12, 4.2, 1), SCNVector3(0, 4.5, -6.5)] {
+        for p in [SCNVector3(0, 4.5, 3), SCNVector3(-5, 4.2, -5), SCNVector3(12, 4.2, 1), SCNVector3(0, 4.5, -5.5)] {
             let l = SCNNode(); l.light = SCNLight(); l.light!.type = .omni
             l.light!.color = VoxMat.color(0xFFD9A0); l.light!.attenuationStartDistance = 2; l.light!.attenuationEndDistance = 15
             l.position = p; l.isHidden = true
             root.addChildNode(l); lamps.append(l)
         }
-        dog = VillageArt.dog()
+        dog = VillageArt.boss()
         dogPos = Self.dogRest
         dog.simdPosition = SIMD3(Float(dogPos.x), 0, Float(dogPos.z))
         root.addChildNode(dog)
@@ -140,12 +154,14 @@ final class VillageBuilder {
     /// 夜晚燈（0＝白天、1＝夜晚全亮；已乘停電）
     func setLamps(_ k: CGFloat) {
         for l in lamps { l.isHidden = k < 0.01; l.light!.intensity = 520 * k }
+        lampK = k
+        setFireLight()
     }
 
     // MARK: 更新（看板刷新時）
 
     /// 回傳要播幾秒（走路、跳一下）
-    func update(_ islanders: [Islander], animate: Bool, now: Date = Date()) -> TimeInterval {
+    func update(_ islanders: [Islander], animate: Bool, raining: Bool = false, now: Date = Date()) -> TimeInterval {
         buildIfNeeded()
         let cards = islanders.map(\.card)
         VillageStore.remember(cards, now: now)
@@ -153,42 +169,56 @@ final class VillageBuilder {
         let first = persons.isEmpty && plan.residents.isEmpty
         plan = p
         updateShop(p.shopName)
+        updateCars(VillageCars.list(VillageStore.config))
         updateStalls(p.stalls)
         updateHomes(p.homes)
         obstacles = VillageLayout.obstacles(stallCount: p.stalls.count)
         let acc = Dictionary(islanders.map { ($0.id, $0.accessory) }, uniquingKeysWith: { a, _ in a })
         var seen = Set<String>()
+        // 營火座位：坐著的人留在原位，新來的坐最小的空位（不要每次有人進出就全部起來換位子）
+        let campers = Set(p.residents.filter { $0.spot == .plaza && $0.online }.map(\.id))
+        seatOf = seatOf.filter { campers.contains($0.key) }
+        for id in campers.sorted() where seatOf[id] == nil {
+            let used = Set(seatOf.values)
+            seatOf[id] = (0...).first { !used.contains($0) }!
+        }
         for r in p.residents where r.spot != .home {
             guard let c = r.card else { continue }
             seen.insert(r.id)
-            let (goal, face) = r.spot == .work ? VillageLayout.workSpot(zone: r.zone, stall: r.stall, slot: r.slot) : VillageLayout.plazaSpot(r.slot)
+            let wantSeat = r.spot == .plaza
+            let canSit = wantSeat && !r.pet          // 小狗不坐坐墩，站在旁邊
+            let (goal, face) = wantSeat ? VillageLayout.plazaSpot(seatOf[r.id] ?? 0) : VillageLayout.workSpot(zone: r.zone, stall: r.stall, slot: r.slot)
             let isl = Islander(card: c, mood: r.mood ?? .idle, accessory: acc[r.id] ?? nil)
             let look = "\(isl.mood.rawValue)|\(isl.accessory?.rawValue ?? "")|\(c.activity.rawValue)|\(r.needsAnswer)|\(c.subagents.count)"
             if var old = persons[r.id] {
-                if old.look != look {
-                    let n = makeNode(isl, r, intro: old.resident.mood != r.mood)
-                    n.position = old.node.position; n.eulerAngles = old.node.eulerAngles
-                    let halo = old.node.childNode(withName: "halo", recursively: false)?.isHidden ?? true
-                    n.childNode(withName: "halo", recursively: false)?.isHidden = halo
-                    old.node.removeFromParentNode(); root.addChildNode(n)
-                    old.node = n; old.look = look
+                let moved = old.spot != r.spot || old.goal.dist(goal) > 0.05
+                // 走路時一定站著；到了營火才坐下（走完再換成坐姿）
+                let seatNow = canSit && !(moved && animate)
+                if old.look != look || old.seated != seatNow {
+                    old.node = replaceNode(old.node, isl, r, seated: seatNow, intro: old.resident.mood != r.mood)
+                    old.look = look; old.seated = seatNow
                 }
-                // 換地點才走；在廣場晃的人留在晃到的地方（不要每次刷新都走回原位）
-                let moved = old.spot != r.spot || (r.spot == .work && old.goal.dist(goal) > 0.05)
                 if moved {
-                    bump(walk(old.node, to: goal, face: face, speed: Self.walkSpeed, animate: animate))
+                    let t = walk(old.node, to: goal, face: face, speed: Self.walkSpeed, animate: animate)
+                    bump(t)
+                    if canSit && !seatNow { sitLater(r.id, after: t) }
                     old.goal = goal; old.face = face; old.spot = r.spot
                 }
-                old.resident = r
+                old.resident = r; old.isl = isl
                 persons[r.id] = old
             } else {
-                let n = makeNode(isl, r, intro: !first)
-                root.addChildNode(n)
                 // 剛上線：從自己家門口走出來（第一次載入直接到位）
                 let start = !first && animate ? r.home.map(VillageLayout.homeDoor) ?? goal : goal
+                let seatNow = canSit && start == goal
+                let n = makeNode(isl, r, seated: seatNow, intro: !first)
+                root.addChildNode(n)
                 n.simdPosition = SIMD3(Float(start.x), 0, Float(start.z)); n.eulerAngles.y = CGFloat(face)
-                if start != goal { bump(walk(n, to: goal, face: face, speed: Self.walkSpeed, animate: animate)) }
-                persons[r.id] = Person(node: n, look: look, goal: goal, face: face, spot: r.spot, resident: r)
+                if start != goal {
+                    let t = walk(n, to: goal, face: face, speed: Self.walkSpeed, animate: animate)
+                    bump(t)
+                    if canSit { sitLater(r.id, after: t) }
+                }
+                persons[r.id] = Person(node: n, look: look, goal: goal, face: face, spot: r.spot, resident: r, seated: seatNow, isl: isl)
             }
         }
         // 下線的人：走回家門口再消失（不能播就直接拿掉）
@@ -203,6 +233,8 @@ final class VillageBuilder {
             } else { n.removeFromParentNode() }
         }
         updateDog(animate: animate)
+        updateCampfire(stools: max(8, min(20, seatOf.values.max().map { $0 + 1 } ?? 0)), raining: raining)
+        if bongHolder.map({ persons[$0]?.spot != .plaza }) ?? true { passBong(puff: false) }
         if !ambientStarted { ambientStarted = true; scheduleAmbient() }
         defer { transient = 0 }
         return transient
@@ -210,9 +242,51 @@ final class VillageBuilder {
 
     var looping: Bool { persons.values.contains { $0.resident.mood == .working && $0.resident.card?.activity == .editing } }
 
-    private func makeNode(_ isl: Islander, _ r: VillageResident, intro: Bool) -> SCNNode {
+    /// 畫成小狗的島民（本機設定 petName）：狀態照一般島民，等你回答一樣冒「！」
+    private func makePet(_ isl: Islander, _ r: VillageResident) -> SCNNode {
+        let n = VillageArt.dog()
+        n.name = "p:\(r.id)"
+        if r.needsAnswer {
+            let bang = VillageArt.bang(); bang.name = "bang"
+            bang.position = SCNVector3(0, 2.1, 0); bang.scale = SCNVector3(1.2, 1.2, 1.2)
+            n.addChildNode(bang)
+            n.childNode(withName: "anchor", recursively: false)?.position.y = 3.3
+        }
+        if isl.mood == .waiting, !Look.reduceMotion, let b = n.childNode(withName: "body", recursively: false) { b.runAction(OfficeBuilder.hop(0.18, times: 3)); bump(2.0) }
+        OfficeBuilder.pickable(n)
+        return n
+    }
+
+    /// 換外觀（狀態變了、坐下／站起來）：同位置同方向、滑鼠停著的光圈照舊
+    private func replaceNode(_ old: SCNNode, _ isl: Islander, _ r: VillageResident, seated: Bool, intro: Bool) -> SCNNode {
+        let n = makeNode(isl, r, seated: seated, intro: intro)
+        n.position = old.position; n.eulerAngles = old.eulerAngles
+        let halo = old.childNode(withName: "halo", recursively: false)?.isHidden ?? true
+        n.childNode(withName: "halo", recursively: false)?.isHidden = halo
+        if let b = old.childNode(withName: "bong", recursively: true) { b.removeFromParentNode() }
+        old.removeAllActions(); old.removeFromParentNode(); root.addChildNode(n)
+        if bongHolder == r.id { bongHolder = nil }
+        return n
+    }
+
+    /// 走到營火後坐下（那時還在營火才坐）
+    private func sitLater(_ id: String, after t: TimeInterval) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + t + 0.05) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, var p = self.persons[id], p.spot == .plaza, !p.seated else { return }
+                p.node = self.replaceNode(p.node, p.isl, p.resident, seated: true, intro: false)
+                p.node.simdPosition = SIMD3(Float(p.goal.x), 0, Float(p.goal.z)); p.node.eulerAngles.y = CGFloat(p.face)
+                p.seated = true
+                self.persons[id] = p
+                self.onPlay?(0.2)
+            }
+        }
+    }
+
+    private func makeNode(_ isl: Islander, _ r: VillageResident, seated: Bool = false, intro: Bool) -> SCNNode {
         guard let o = owner else { return SCNNode() }
-        let n = o.makePerson(isl, seated: false, atDesk: false, intro: intro)
+        if r.pet { return makePet(isl, r) }
+        let n = o.makePerson(isl, seated: seated, atDesk: false, intro: intro)
         // 島比樓層大很多：島民放大一點，遠看也認得出來（錨點、點擊盒跟著放大）
         let k = CGFloat(Self.personScale)
         for c in n.childNodes where c.name != "anchor" { c.scale = SCNVector3(c.scale.x * k, c.scale.y * k, c.scale.z * k); c.position = SCNVector3(c.position.x * k, c.position.y * k, c.position.z * k) }
@@ -336,25 +410,122 @@ final class VillageBuilder {
                     t = max(t, walk(dog, to: q, face: face, speed: Self.dogSpeed, animate: true))
                 }
             } else {
-                let a = Double.random(in: 0..<(2 * .pi)), r = Double.random(in: 3.0...6.5)
-                let q = VPoint(VillageLayout.plaza.x + sin(a) * r, VillageLayout.plaza.z + cos(a) * r)
+                // 沒事：廣場附近晃，或去營火旁邊站一下
+                let fire = Bool.random()
+                let c = fire ? VillageLayout.campfire : VillageLayout.plaza
+                let a = Double.random(in: 0..<(2 * .pi)), r = fire ? Double.random(in: 4.6...5.6) : Double.random(in: 3.0...6.5)
+                let q = VPoint(c.x + sin(a) * r, c.z + cos(a) * r)
                 if VillageLayout.walkable(q, obstacles: obstacles) {
                     t = max(t, walk(dog, to: q, face: Double.random(in: -1.5...1.5), speed: Self.dogSpeed * 0.6, animate: true))
                 }
             }
         }
-        if let id = persons.filter({ $0.value.spot == .plaza && $0.value.node.action(forKey: "walk") == nil }).keys.randomElement(), var p = persons[id] {
-            let a = Double.random(in: 0..<(2 * .pi)), r = Double.random(in: 2.2...VillageLayout.plazaRadius + 1.5)
-            let q = VPoint(VillageLayout.plaza.x + sin(a) * r, VillageLayout.plaza.z + cos(a) * r)
-            if VillageLayout.walkable(q, obstacles: obstacles), !persons.values.contains(where: { $0.goal.dist(q) < 1.0 }) {
-                let face = Double.random(in: -.pi...(.pi))
-                t = max(t, walk(p.node, to: q, face: face, speed: Self.walkSpeed * 0.7, animate: true))
-                p.goal = q; p.face = face; persons[id] = p
-            }
-        }
+        // 營火：水煙壺傳給下一位，吸一口冒一點煙（只有這幾秒在畫，平常不重畫）
+        t = max(t, passBong(puff: true))
         if t > 0 { onPlay?(t) }
     }
 
+    // MARK: 營火、水煙壺（11-12 第二輪：沒事的島民圍著營火坐，輪流拿水煙壺）
+
+    private var fireNode: SCNNode?, fireLight: SCNNode?
+    private var fireSig = ""
+    private var stoolNode: SCNNode?
+    private var stoolCount = 0
+    private var lampK: CGFloat = 0
+    private var raining = false
+    private(set) var bongHolder: String?
+
+    private func updateCampfire(stools: Int, raining rain: Bool) {
+        if stools != stoolCount {
+            stoolCount = stools
+            stoolNode?.removeFromParentNode()
+            let n = VillageArt.stools(stools)
+            n.enumerateHierarchy { c, _ in c.categoryBitMask |= 1 | OfficeBuilder.outdoorMask }
+            root.addChildNode(n); stoolNode = n
+        }
+        let sig = "\(rain)"
+        if sig != fireSig {
+            fireSig = sig; raining = rain
+            fireNode?.removeFromParentNode()
+            let n = VillageArt.campfire(small: rain)
+            n.enumerateHierarchy { c, _ in c.categoryBitMask |= 1 | OfficeBuilder.outdoorMask }
+            root.addChildNode(n); fireNode = n
+            if fireLight == nil {
+                let l = SCNNode(); l.light = SCNLight(); l.light!.type = .omni
+                l.light!.color = VoxMat.color(0xFF9A3C); l.light!.attenuationStartDistance = 1; l.light!.attenuationEndDistance = 9
+                l.position = SCNVector3(VillageLayout.campfire.x, 1.6, VillageLayout.campfire.z)
+                root.addChildNode(l); fireLight = l
+            }
+            setFireLight()
+        }
+    }
+    /// 火光：白天一點點、晚上照亮周圍；下雨變小
+    private func setFireLight() {
+        guard let l = fireLight?.light else { return }
+        l.intensity = (90 * VoxMat.power + 700 * lampK) * (raining ? 0.35 : 1)
+    }
+
+    /// 營火旁坐著的人（座位順序）
+    private var campers: [String] {
+        seatOf.filter { persons[$0.key]?.seated == true }.sorted { $0.value < $1.value }.map(\.key)
+    }
+
+    /// 把水煙壺交給下一位（puff＝吸一口冒煙）；回傳要播幾秒
+    @discardableResult
+    private func passBong(puff: Bool) -> TimeInterval {
+        let list = campers
+        let next: String? = list.isEmpty ? nil : bongHolder.flatMap { h in list.firstIndex(of: h).map { list[($0 + 1) % list.count] } } ?? list.first
+        for p in persons.values { p.node.childNode(withName: "bong", recursively: false)?.removeFromParentNode() }
+        bongHolder = next
+        guard let id = next, let p = persons[id] else { return 0 }
+        let k = CGFloat(Self.personScale)
+        let b = VillageArt.bong()
+        b.name = "bong"
+        b.scale = SCNVector3(k, k, k)
+        b.position = SCNVector3(0.5 * k, CGFloat(TowerSpec.seatTop) * k + 0.05, 0.45 * k)
+        p.node.addChildNode(b)
+        guard puff, !Look.reduceMotion else { return 0.2 }
+        // 吸一口：頭往後仰一下，頭頂冒三團煙往上飄、變淡、消失
+        if let body = p.node.childNode(withName: "body", recursively: true), !body.hasActions {
+            body.runAction(.sequence([.rotateBy(x: -0.12, y: 0, z: 0, duration: 0.4), .wait(duration: 0.5), .rotateBy(x: 0.12, y: 0, z: 0, duration: 0.4)]))
+        }
+        let head = p.node.childNode(withName: "anchor", recursively: false)?.position.y ?? 1.6
+        for i in 0..<3 {
+            let c = SCNNode(geometry: SCNBox(width: 0.32, height: 0.32, length: 0.32, chamferRadius: 0.04))
+            c.geometry!.firstMaterial = VillageArt.smoke
+            c.position = SCNVector3(p.node.position.x, head - 0.3, p.node.position.z)
+            c.opacity = 0; c.categoryBitMask |= 1 | OfficeBuilder.outdoorMask
+            root.addChildNode(c)
+            let dx = CGFloat.random(in: -0.4...0.4), dz = CGFloat.random(in: -0.4...0.4)
+            c.runAction(.sequence([.wait(duration: 0.8 + Double(i) * 0.35),
+                                   .group([.fadeOpacity(to: 0.85, duration: 0.25), .scale(to: 1.3, duration: 0.25)]),
+                                   .group([.moveBy(x: dx, y: 1.6, z: dz, duration: 1.8), .fadeOut(duration: 1.8), .scale(to: 2.2, duration: 1.8)]),
+                                   .removeFromParentNode()]))
+        }
+        return 3.4
+    }
+
+    // MARK: 車（11-12 第二輪：車型、顏色、停哪寫在本機設定；車主點了才看到）
+
+    private var carNodes: [SCNNode] = []
+    private var carSig = ""
+    private(set) var cars: [VillageCar] = []
+    private func updateCars(_ list: [VillageCar]) {
+        let sig = list.map { "\($0.model.rawValue)|\($0.color)|\($0.zone.rawValue)|\($0.slot)" }.joined(separator: ",")
+        cars = list
+        guard sig != carSig else { return }
+        carSig = sig
+        carNodes.forEach { $0.removeFromParentNode() }
+        carNodes = list.enumerated().compactMap { i, c in
+            guard let at = VillageLayout.carSpots[c.zone]?[c.slot] else { return nil }
+            let n = VillageArt.car(c.model, color: c.color, at: at)
+            n.name = "car:\(i)"
+            n.enumerateHierarchy { x, _ in x.categoryBitMask |= 1 | OfficeBuilder.outdoorMask }
+            OfficeBuilder.pickable(n)
+            root.addChildNode(n)
+            return n
+        }
+    }
     // MARK: 小攤、家、設施
 
     private func updateStalls(_ list: [String]) {
@@ -391,12 +562,21 @@ final class VillageBuilder {
         facilityIds["balloon"] = s.clouds.first(where: \.isICloud)?.id ?? "city:cloud:iCloud"
         facilityIds["warehouse"] = s.disks.first(where: \.isInternal)?.id ?? "city:disk:內建碟"
         for (k, n) in facilityNodes { n.name = facilityIds[k] }
+        // 海的潮位＝7 天額度剩多少（剩越多潮越高；快用完退潮、外圈沙灘露出來）
+        let tide = VillageSigns.tide(s.grid)
+        if let sea = seaNode, abs(tide - seaTide) > 0.02 {
+            seaTide = tide
+            let y = CGFloat(VillageArt.seaOffset(tide))
+            if canAnimate() && abs(sea.position.y - y) > 0.01 {
+                sea.runAction(.move(to: SCNVector3(0, y, 0), duration: 2.0)); onPlay?(2.1)
+            } else { sea.position.y = y }
+        }
         let lv = Int((VillageSigns.water(s.grid) * 10).rounded())
         let sig = "\(lv)"
         if sig != wellSig {
             wellSig = sig
             wellNode?.removeFromParentNode()
-            let w = VillageArt.well(level: Float(lv) / 10)
+            let w = VillageArt.waterTower(level: Float(lv) / 10)
             w.name = "city:power"
             w.enumerateHierarchy { c, _ in c.categoryBitMask |= 1 | OfficeBuilder.outdoorMask }
             OfficeBuilder.pickable(w)
@@ -421,28 +601,34 @@ final class VillageBuilder {
     func labelPeople() -> [OfficeBuilder.LabelPerson] {
         var out = persons.compactMap { id, p -> OfficeBuilder.LabelPerson? in
             guard let a = p.node.childNode(withName: "anchor", recursively: true) else { return nil }
-            return OfficeBuilder.LabelPerson(id: id, anchor: a, card: p.resident.card, mood: p.resident.mood ?? .idle, floor: "village")
+            var card = p.resident.card
+            if p.resident.pet, let cfg = VillageStore.config, let t = card?.title {
+                let rest = t.split(separator: "-", maxSplits: 1).dropFirst().first.map(String.init) ?? ""
+                card?.title = cfg.petTitle(p.resident.name) + "-" + rest
+            }
+            return OfficeBuilder.LabelPerson(id: id, anchor: a, card: card, mood: p.resident.mood ?? .idle, floor: "village")
         }
         if let a = dog.childNode(withName: "anchor", recursively: true) {
-            out.append(OfficeBuilder.LabelPerson(id: "dog", anchor: a, card: nil, mood: .idle, floor: "village"))
+            out.append(OfficeBuilder.LabelPerson(id: "boss", anchor: a, card: nil, mood: .idle, floor: "village"))
         }
         return out
     }
 
-    func peopleNodes() -> [(String, SCNNode)] { persons.map { ($0.key, $0.value.node) } + [("dog", dog)] }
-    func personNode(_ id: String) -> SCNNode? { id == "dog" ? dog : persons[id]?.node }
+    func peopleNodes() -> [(String, SCNNode)] { persons.map { ($0.key, $0.value.node) } + [("boss", dog)] }
+    func personNode(_ id: String) -> SCNNode? { id == "boss" ? dog : persons[id]?.node }
 
     func highlight(_ id: String?) {
         func set(_ n: SCNNode?, _ h: Bool) { if let n, n.isHidden != h { n.isHidden = h } }
         for (pid, p) in persons { set(p.node.childNode(withName: "halo", recursively: false), pid != id) }
-        set(dog.childNode(withName: "halo", recursively: false), id != "dog")
+        set(dog.childNode(withName: "halo", recursively: false), id != "boss")
     }
 
     /// 城市 id／地點 → 島上的點（鏡頭飛過去、警告牌錨點）
     func point(_ id: String) -> SCNVector3? {
         func v(_ p: VPoint, _ y: Double) -> SCNVector3 { SCNVector3(p.x, y, p.z) }
         if id == "city:cooler" || id == facilityIds["windmill"] { return v(VillageLayout.windmill, 7.2) }
-        if id == "city:power" || id == "city:fuel" { return v(VillageLayout.well, 3.0) }
+        if id == "city:power" { return v(VillageLayout.well, 5.4) }
+        if id == "city:fuel" { return SCNVector3(0, 0, VillageLayout.radius + 4.5) }
         if id.hasPrefix("city:cloud:") { return SCNVector3(VillageLayout.balloonTether.x + 1.5, 9.5, VillageLayout.balloonTether.z + 2.5) }
         if id.hasPrefix("city:disk:") { return v(VPoint(VillageLayout.warehouse.cx, VillageLayout.warehouse.cz), 4.2) }
         return nil
@@ -453,10 +639,11 @@ final class VillageBuilder {
         let key = id.hasPrefix("place:") ? String(id.dropFirst(6)) : id
         func r(_ b: VRect, _ k: Double = 1.6) -> (SIMD3<Double>, Double) { (SIMD3(b.cx, 1.6, b.cz + 1.5), max(b.w, b.d) * k) }
         switch key {
-        case "townhall": return r(VillageLayout.townhall)
+        case "townhall": return r(VillageLayout.shop)
         case "shop": return r(VillageLayout.shop)
         case "company": return r(VillageLayout.company)
         case "plaza": return (SIMD3(VillageLayout.plaza.x, 1, VillageLayout.plaza.z), 11)
+        case "campfire": return (SIMD3(VillageLayout.campfire.x, 1, VillageLayout.campfire.z), 10)
         case "facility": return (SIMD3(0, 2, 2), 34)
         default:
             if key.hasPrefix("stall:"), let i = Int(key.dropFirst(6)), i < VillageLayout.stalls.count { return r(VillageLayout.stalls[i], 3.2) }
@@ -529,18 +716,43 @@ enum VillageArt {
 
     // MARK: 海、島、廣場、路、樹
 
+    /// 海（7 天額度＝潮位）：整片海一起升降（seaOffset）。島底下挖空（點地面不會點到海、海升起來也不會從島中間冒出來）；
+    /// 近岸一圈淺灘顏色亮一階
+    static let seaTop: Float = -0.58
+    static func seaOffset(_ tide: Double) -> Float { (-1.05 + 0.7 * Float(tide)) - seaTop }
     static func sea() -> SCNNode {
         let m = VoxelMesh(), k = Kit(m: m)
-        k.b(.identity, 0, -1.6, 0, 420, 1.0, 420, VoxMat.dayNight(0x4E9FC4, 0x1A3049))
-        // 淺灘：比海面亮一階的一圈
-        let R = F(VillageLayout.radius) + 6
-        var z = -R
-        while z <= R {
-            let hw = (R * R - z * z).squareRoot()
-            if hw > 0.5 { k.b(.identity, 0, -0.7, z, hw * 2, 0.12, 1.02, VoxMat.dayNight(0x7CC7DA, 0x274766)) }
+        let deep = VoxMat.dayNight(0x4E9FC4, 0x1A3049), shallow = VoxMat.dayNight(0x7CC7DA, 0x274766)
+        let R = F(VillageLayout.radius), hole = R + 1.5, near = R + 6, H: Float = 70, far: Float = 220
+        func seg(_ x0: Float, _ x1: Float, _ z: Float, _ mat: SCNMaterial, top: Float) {
+            guard x1 - x0 > 0.01 else { return }
+            for sgn: Float in [-1, 1] { k.b(.identity, sgn * (x0 + x1) / 2, top - 1.0, z, x1 - x0, 1.0, 1.02, mat) }
+        }
+        var z = -H + 0.5
+        while z < H {
+            let inner = abs(z) < hole ? (hole * hole - z * z).squareRoot() : 0
+            let outer = abs(z) < near ? (near * near - z * z).squareRoot() : 0
+            if inner == 0 && outer == 0 { k.b(.identity, 0, seaTop - 1.02, z, 2 * H, 1.0, 1.02, deep) }
+            else {
+                if inner == 0 { k.b(.identity, 0, seaTop + 0.02 - 1.0, z, 2 * outer, 1.0, 1.02, shallow) }
+                else { seg(inner, outer, z, shallow, top: seaTop + 0.02) }
+                seg(max(inner, outer), H, z, deep, top: seaTop)
+            }
             z += 1
         }
-        return m.node(name: "sea")
+        k.b(.identity, 0, seaTop - 1, H + (far - H) / 2, 2 * far, 1.0, far - H, deep)
+        k.b(.identity, 0, seaTop - 1, -H - (far - H) / 2, 2 * far, 1.0, far - H, deep)
+        k.b(.identity, H + (far - H) / 2, seaTop - 1, 0, far - H, 1.0, 2 * H, deep)
+        k.b(.identity, -H - (far - H) / 2, seaTop - 1, 0, far - H, 1.0, 2 * H, deep)
+        // 小木船（碼頭東邊）：船身、座板、船槳；船底在海面下一點
+        let bx: Float = 2.8, bz = F(VillageLayout.radius) + 5.5, wl = seaTop - 0.15
+        let hull = TM.f(0x9C6B43), rim = TM.f(0x6E4A2E)
+        k.b(.identity, bx, wl, bz, 1.2, 0.35, 2.6, hull)
+        k.b(.identity, bx, wl + 0.05, bz + 1.45, 0.7, 0.3, 0.35, hull)
+        k.b(.identity, bx, wl + 0.35, bz, 1.3, 0.08, 2.7, rim)
+        k.b(.identity, bx, wl + 0.36, bz + 0.3, 1.1, 0.06, 0.3, TM.f(0xE2C28E))
+        k.b(Xf(x: bx, y: 0, z: bz, a: 0.3), 0.7, wl + 0.3, 0, 0.08, 0.06, 1.8, rim)
+        return m.node(name: "city:fuel")
     }
 
     /// 島（一排一排疊成圓，邊緣有一點起伏）、沙灘、廣場石板、泥土小路、樹、花、碼頭、路燈
@@ -563,6 +775,18 @@ enum VillageArt {
                 m.box(.identity, SIMD3(0, -0.6, z), SIMD3(hw * 2, 1.2, 1.0), side, top: grass, bottom: dirt, uv: .sideFit(1))
             }
             z += 1
+        }
+        // 退潮才露出來的濕沙灘（潮位低於 −0.95 才看得到）
+        let flat = VoxMat.dayNight(0xCDB78A, 0x5C5442)
+        var tz = -R - 5
+        while tz <= R + 5 {
+            let ro = R + 5, ri = R + 1.5
+            if ro * ro - tz * tz > 0.25 {
+                let o = (ro * ro - tz * tz).squareRoot(), i = abs(tz) < ri ? (ri * ri - tz * tz).squareRoot() : 0
+                if i == 0 { k.b(.identity, 0, -1.25, tz, 2 * o, 0.3, 1.0, flat) }
+                else { for sg: Float in [-1, 1] { k.b(.identity, sg * (i + o) / 2, -1.25, tz, o - i, 0.3, 1.0, flat) } }
+            }
+            tz += 1
         }
         // 廣場：石板圓
         let P = VillageLayout.plaza, pr = F(VillageLayout.plazaRadius)
@@ -587,9 +811,9 @@ enum VillageArt {
             k.b(Xf(x: F((a.x + b.x) / 2), y: 0, z: F((a.z + b.z) / 2), a: ang), 0, 0, 0, w, 0.03, d, path)
         }
         lane(VPoint(0, -1.6), VPoint(0, -7.4))
-        lane(VPoint(-4.4, 2.2), VPoint(-12, 0.6)); lane(VPoint(-12, 0.6), VPoint(-12, -1.2), w: 2.2)
         lane(VPoint(4.4, 2.2), VPoint(12, 0.4)); lane(VPoint(12, 0.4), VPoint(12, -1.6), w: 2.0)
         lane(VPoint(-2.4, 7.0), VPoint(-8.5, 10.2)); lane(VPoint(2.4, 7.0), VPoint(8.5, 10.2))
+        lane(VPoint(-3.4, 7.2), VPoint(-7.6, 15.6), w: 1.1)
         lane(VPoint(0, 7.6), VPoint(0, 13.0)); lane(VPoint(0, 13.0), VPoint(0, 25.5), w: 1.1)
         // 樹
         let leaf = VoxMat.tex("leaf", tint: nil), trunk = VoxMat.tex("darkplank")
@@ -616,8 +840,7 @@ enum VillageArt {
         for zz in [VillageLayout.radius + 1.5, VillageLayout.radius + 4, VillageLayout.radius + 6.6] {
             for x: Float in [-0.9, 0.9] { k.b(.identity, x, -1.5, F(zz), 0.25, 1.4, 0.25, TM.f(woodDark)) }
         }
-        let bx: Float = 2.6, bz = F(VillageLayout.radius) + 5.5
-        k.b(.identity, bx, -0.8, bz, 1.3, 0.4, 3.0, TM.f(0xE7E2D6)); k.b(.identity, bx, -0.45, bz, 1.0, 0.1, 2.6, TM.f(0xB8463A))
+        // 小船在海（city:fuel）那個節點裡，跟著潮位一起升降（11-12：原本固定在地形上，滿潮時只剩紅色甲板浮在海上像破圖）
         // 路燈（夜晚亮、停電跟著熄）
         let lamp = TM.glow(0xFFC95A, 0.0, 2.0), pole = TM.f(0x3B3B3B)
         for p in [VPoint(-4.2, -1.0), VPoint(4.2, -1.0), VPoint(-4.2, 7.0), VPoint(4.2, 7.0), VPoint(-8.0, 0.3), VPoint(8.0, 0.2), VPoint(-1.6, 18), VPoint(-1.4, 24.4)] {
@@ -645,35 +868,6 @@ enum VillageArt {
 
     // MARK: 建築
 
-    static func townhall() -> SCNNode {
-        let b = VillageLayout.townhall
-        let m = VoxelMesh(ao: 0), k = Kit(m: m), xf = Xf(x: F(b.cx), y: 0, z: F(b.cz))
-        let w = F(b.w), d = F(b.d), zf = d / 2
-        let wall = VoxMat.dayNight(0xF4EEE2, 0x8C887F), trim = TM.f(0xC8B48A), roofM = VoxMat.dayNight(0x4C6A8C, 0x26364A)
-        k.b(xf, 0, 0, 0, w + 0.5, 0.3, d + 0.5, TM.f(stone))
-        k.b(xf, 0, 0.3, 0, w, 3.2, d, wall)
-        k.b(xf, 0, 3.5, 0, w + 0.1, 0.18, d + 0.1, trim)
-        roof(k, xf, y0: 3.68, w: w, d: d, steps: 5, roofM)
-        // 鐘塔
-        k.b(xf, 0, 4.6, -0.4, 1.7, 1.8, 1.7, wall)
-        k.b(xf, 0, 5.6, 0.46, 1.0, 1.0, 0.02, TM.glow(0xFFF6DD, 0.25, 1.2))
-        k.b(xf, 0, 6.06, 0.48, 0.06, 0.42, 0.02, TM.f(ink)); k.b(xf, 0.15, 6.06, 0.48, 0.32, 0.06, 0.02, TM.f(ink))
-        roof(k, xf.at(0, 0, -0.4), y0: 6.4, w: 1.6, d: 1.6, steps: 3, rise: 0.3, inset: 0.35, roofM)
-        // 旗子
-        k.b(xf, 0, 7.3, -0.4, 0.07, 1.4, 0.07, TM.f(0x5A5A5A)); k.b(xf, 0.4, 8.2, -0.4, 0.75, 0.45, 0.04, TM.f(0x4CAF50))
-        // 門、柱、台階、窗
-        k.b(xf, 0, 0.3, zf + 0.02, 1.3, 2.1, 0.08, TM.f(woodDark))
-        k.b(xf, 0, 0, zf + 0.5, 2.6, 0.15, 0.8, TM.f(stone))
-        for x: Float in [-1.1, 1.1] { k.b(xf, x, 0.3, zf + 0.35, 0.36, 3.2, 0.36, TM.f(0xFFFFFF)) }
-        k.b(xf, 0, 3.3, zf + 0.35, 3.0, 0.24, 0.7, trim)
-        for x: Float in [-2.6, -1.9, 1.9, 2.6] { k.b(xf, x, 1.3, zf + 0.02, 0.5, 0.9, 0.06, window) }
-        for x: Float in [-2.3, 2.3] { k.b(xf, x, 2.5, zf + 0.02, 1.2, 0.6, 0.06, window) }
-        let n = m.node(name: "place:townhall")
-        n.addChildNode(sign(board("鎮公所", w: 2.0, h: 0.5, bg: 0x2F4A68, fg: 0xFFF3D6, rim: 0xD4AF4F), w: 2.0, h: 0.5,
-                            at: SCNVector3(b.cx, 2.75, b.cz + Double(zf) + 0.42), back: 0x2F4A68))
-        return n
-    }
-
     /// 自家店屋：奶油色牆、橄欖綠屋頂、金色邊；屋上招牌＝店名；門口停一台休旅車
     static func shop(_ name: String) -> SCNNode {
         let b = VillageLayout.shop
@@ -696,26 +890,54 @@ enum VillageArt {
         let n = m.node(name: "place:shop")
         n.addChildNode(sign(board(name, w: 3.6, h: 0.8, bg: 0x56632C, fg: 0xF0D27A, rim: gold, glow: (0.35, 1.0)), w: 3.6, h: 0.8,
                             at: SCNVector3(b.cx, 3.85, b.cz + Double(zf) + 0.5), back: 0x3F4920))
-        n.addChildNode(suv())
         return n
     }
 
-    /// 休旅車（深灰、車頭朝 +z）
-    static func suv() -> SCNNode {
-        let c = VillageLayout.shopCar
-        let m = VoxelMesh(ao: 0), k = Kit(m: m), xf = Xf(x: F(c.cx), y: 0, z: F(c.cz))
-        let body = TM.f(0x3C4248), glass = TM.f(0x1F2B35), tire = TM.f(0x161616), rim = TM.f(0xB0B4B8)
-        k.b(xf, 0, 0.32, 0, 1.95, 0.78, 4.1, body)
-        k.b(xf, 0, 1.1, -0.25, 1.8, 0.72, 2.9, body)
-        k.b(xf, 0, 1.18, -0.25, 1.84, 0.54, 2.6, glass)
-        k.b(xf, 0, 1.18, 1.06, 1.7, 0.5, 0.06, glass)
-        k.b(xf, 0, 1.84, -0.25, 1.5, 0.08, 2.4, TM.f(0x222222))           // 車頂架
-        for (x, z) in [(-0.92, 1.3), (0.92, 1.3), (-0.92, -1.35), (0.92, -1.35)] as [(Float, Float)] {
-            k.b(xf, x, 0, z, 0.32, 0.68, 0.68, tire); k.b(xf, x + (x > 0 ? 0.17 : -0.17), 0.2, z, 0.02, 0.28, 0.28, rim)
+    /// 車（車頭朝 +z，停在 at）：只做車型特徵，不畫品牌標誌
+    static func car(_ model: VillageCarModel, color: UInt32, at: VPoint) -> SCNNode {
+        let m = VoxelMesh(ao: 0), k = Kit(m: m), xf = Xf(x: F(at.x), y: 0, z: F(at.z))
+        let body = TM.f(color), glass = TM.f(0x1E2830), tire = TM.f(0x151515), rim = TM.f(0xB4B8BC), trim = TM.f(0x2A2C2F)
+        let chrome = TM.f(0xC9CCD0), head = TM.glow(0xFFFBEA, 0.3, 1.8), tail = TM.glow(0xD7263D, 0.3, 1.2)
+        func wheels(_ zf: Float, _ zb: Float, w: Float, r: Float = 0.68) {
+            for (x, z) in [(-w, zf), (w, zf), (-w, zb), (w, zb)] {
+                k.b(xf, x, 0, z, 0.32, r, r, tire); k.b(xf, x + (x > 0 ? 0.17 : -0.17), r * 0.28, z, 0.02, r * 0.42, r * 0.42, rim)
+            }
         }
-        for x: Float in [-0.65, 0.65] { k.b(xf, x, 0.72, 2.06, 0.42, 0.18, 0.04, TM.glow(0xFFFBEA, 0.3, 1.8)); k.b(xf, x, 0.76, -2.06, 0.36, 0.16, 0.04, TM.glow(0xD7263D, 0.3, 1.2)) }
-        k.b(xf, 0, 0.45, 2.06, 0.9, 0.2, 0.04, TM.f(0x8A8F94))
-        return m.node(name: "suv")
+        switch model {
+        case .suv:
+            // 方正休旅：方的車身、黑色輪拱飾板、平車頂＋車頂架
+            k.b(xf, 0, 0.34, 0, 1.9, 0.78, 4.5, body)
+            for x: Float in [-0.96, 0.96] { k.b(xf, x, 0.28, 0, 0.04, 0.32, 4.3, trim) }
+            k.b(xf, 0, 1.12, -0.2, 1.78, 0.66, 2.9, body)
+            k.b(xf, 0, 1.18, -0.2, 1.82, 0.48, 2.6, glass); k.b(xf, 0, 1.18, 1.27, 1.66, 0.46, 0.05, glass)
+            for x: Float in [-0.7, 0.7] { k.b(xf, x, 1.78, -0.2, 0.08, 0.1, 2.5, trim) }
+            k.b(xf, 0, 1.88, -0.2, 1.5, 0.05, 0.08, trim); k.b(xf, 0, 1.88, -1.1, 1.5, 0.05, 0.08, trim)
+            k.b(xf, 0, 0.62, 2.26, 1.1, 0.22, 0.04, trim)
+            for x: Float in [-0.68, 0.68] { k.b(xf, x, 0.86, 2.26, 0.44, 0.12, 0.04, head); k.b(xf, x, 0.86, -2.26, 0.36, 0.14, 0.04, tail) }
+            wheels(1.45, -1.45, w: 0.92)
+        case .mpv:
+            // 高大方盒 MPV：很高的車廂、整片大水箱罩、側滑門線
+            k.b(xf, 0, 0.3, 0, 1.96, 0.8, 4.8, body)
+            k.b(xf, 0, 1.1, -0.1, 1.92, 1.1, 4.1, body)
+            k.b(xf, 0, 1.3, -0.1, 1.96, 0.62, 3.7, glass); k.b(xf, 0, 1.3, 1.96, 1.76, 0.66, 0.05, glass)
+            k.b(xf, 0, 0.36, 2.41, 1.3, 0.78, 0.05, chrome)
+            for i in 0..<5 { k.b(xf, 0, 0.44 + Float(i) * 0.14, 2.44, 1.2, 0.05, 0.02, trim) }
+            for x: Float in [-0.99, 0.99] { k.b(xf, x, 0.5, -0.2, 0.02, 1.4, 0.03, trim) }
+            for x: Float in [-0.78, 0.78] { k.b(xf, x, 0.98, 2.41, 0.32, 0.12, 0.04, head); k.b(xf, x, 1.0, -2.41, 0.12, 0.7, 0.04, tail) }
+            wheels(1.55, -1.55, w: 0.95)
+        case .coupe:
+            // 低矮四門轎跑：低車身、車頂往後一路斜下去（斜背）
+            k.b(xf, 0, 0.3, 0, 1.84, 0.56, 4.7, body)
+            k.b(xf, 0, 0.86, 1.95, 1.78, 0.05, 0.8, body)
+            for (i, (z, d, h)) in [(0.75, 1.0, 0.48), (-0.15, 0.8, 0.44), (-0.85, 0.6, 0.34), (-1.4, 0.5, 0.22), (-1.85, 0.4, 0.12)].enumerated() {
+                k.b(xf, 0, 0.86, Float(z), 1.62 - Float(i) * 0.04, Float(h), Float(d), body)
+            }
+            k.b(xf, 0, 0.9, 0.5, 1.66, 0.36, 1.6, glass); k.b(xf, 0, 0.9, 1.31, 1.5, 0.34, 0.05, glass)
+            k.b(xf, 0, 0.42, 2.36, 1.2, 0.16, 0.04, chrome)
+            for x: Float in [-0.66, 0.66] { k.b(xf, x, 0.66, 2.36, 0.46, 0.1, 0.04, head); k.b(xf, x, 0.7, -2.36, 0.5, 0.1, 0.04, tail) }
+            wheels(1.5, -1.5, w: 0.9, r: 0.62)
+        }
+        return m.node()
     }
 
     /// 公司小屋（Okle42）：黑底、金邊，招牌沿用大樓的 Okle42（42 金色）
@@ -801,20 +1023,92 @@ enum VillageArt {
         return n
     }
 
-    /// 水井（AI 額度）：石圈、木頂、水位＝5 小時額度剩多少
-    static func well(level: Float) -> SCNNode {
+    /// 高架水塔（5 小時額度）：四腳木架、透明水箱、正面刻度，水位＝剩多少（滿＝還很多）
+    static func waterTower(level: Float) -> SCNNode {
         let c = VillageLayout.well
         let m = VoxelMesh(ao: 0), k = Kit(m: m), xf = Xf(x: F(c.x), y: 0, z: F(c.z))
-        let st = VoxMat.tex("cobble")
-        k.b(xf, 0, 0, 0.62, 1.5, 0.8, 0.26, st); k.b(xf, 0, 0, -0.62, 1.5, 0.8, 0.26, st)
-        k.b(xf, 0.62, 0, 0, 0.26, 0.8, 1.0, st); k.b(xf, -0.62, 0, 0, 0.26, 0.8, 1.0, st)
-        k.b(xf, 0, 0, 0, 1.0, 0.05 + 0.7 * level, 1.0, level > 0.02 ? TM.glow(0x4FA6E0, 0.2, 0.6) : TM.f(0x6B5A44))
-        for x: Float in [-0.62, 0.62] { k.b(xf, x, 0.8, 0, 0.14, 1.3, 0.14, TM.f(woodDark)) }
-        k.b(xf, 0, 2.1, 0, 0.14, 0.14, 1.4, TM.f(woodDark))
-        roof(k, xf, y0: 2.15, w: 1.6, d: 1.3, steps: 3, rise: 0.22, inset: 0.3, TM.f(0x8A4B32))
-        k.b(xf, 0.1, 1.35, 0, 0.26, 0.28, 0.26, TM.f(wood))       // 水桶
-        return m.node(name: "city:power")
+        let wd = TM.f(woodDark), y0: Float = 3.2, s: Float = 1.9
+        for x: Float in [-0.85, 0.85] { for z: Float in [-0.85, 0.85] { k.b(xf, x, 0, z, 0.2, y0, 0.2, wd) } }
+        for y: Float in [1.1, 2.3] { k.b(xf, 0, y, 0.85, 1.9, 0.12, 0.12, wd); k.b(xf, 0, y, -0.85, 1.9, 0.12, 0.12, wd)
+            k.b(xf, 0.85, y, 0, 0.12, 0.12, 1.9, wd); k.b(xf, -0.85, y, 0, 0.12, 0.12, 1.9, wd) }
+        for y: Float in stride(from: 0.2, to: y0, by: 0.4) { k.b(xf, 0.6, y, 0.98, 0.5, 0.06, 0.06, TM.f(wood)) }       // 梯子
+        k.b(xf, 0, y0, 0, s + 0.3, 0.14, s + 0.3, wd)
+        // 水（發一點光，晚上也看得到水位）
+        if level > 0.01 { k.b(xf, 0, y0 + 0.14, 0, s - 0.1, (s - 0.1) * level, s - 0.1, TM.glow(0x3E9BE0, 0.25, 0.8)) }
+        // 箱框（四根角柱＋上下框）
+        for x: Float in [-s / 2, s / 2] { for z: Float in [-s / 2, s / 2] { k.b(xf, x, y0 + 0.14, z, 0.1, s, 0.1, TM.f(0x5A3A22)) } }
+        k.b(xf, 0, y0 + 0.14 + s, 0, s + 0.12, 0.1, s + 0.12, TM.f(0x5A3A22))
+        // 刻度：正面 4 格（25% 一格），50% 那條長一點
+        for i in 1...4 {
+            let w: Float = i == 2 ? 0.5 : 0.28
+            k.b(xf, -s / 2 + 0.06 + w / 2, y0 + 0.14 + (s - 0.1) * Float(i) / 4, s / 2 + 0.03, w, 0.05, 0.02, TM.f(0xF4EEE2))
+        }
+        roof(k, xf, y0: y0 + 0.24 + s, w: s, d: s, steps: 4, rise: 0.22, inset: 0.32, TM.f(0x8A4B32), ridgeAlongX: false)
+        let n = m.node(name: "city:power")
+        // 透明水箱壁（不寫深度，看得到裡面的水）
+        let g = SCNNode(geometry: SCNBox(width: CGFloat(s), height: CGFloat(s), length: CGFloat(s), chamferRadius: 0))
+        g.geometry!.firstMaterial = TM.glass(0.28, 0xCFEFFF)
+        g.position = SCNVector3(c.x, Double(y0 + 0.14 + s / 2), c.z)
+        n.addChildNode(g)
+        return n
     }
+
+    /// 營火旁的木頭坐墩（n 個，照 VillageLayout.plazaSpot 的座位）
+    static func stools(_ n: Int) -> SCNNode {
+        let m = VoxelMesh(ao: 0), k = Kit(m: m)
+        let h = Float(TowerSpec.seatTop) * Float(VillageBuilder.personScale)
+        for i in 0..<n {
+            let (p, a) = VillageLayout.plazaSpot(i)
+            let xf = Xf(x: F(p.x), y: 0, z: F(p.z), a: F(a))
+            k.b(xf, 0, 0, 0, 0.66, h - 0.04, 0.66, VoxMat.tex("darkplank"))
+            k.b(xf, 0, h - 0.04, 0, 0.6, 0.04, 0.6, TM.f(0xE2C28E))
+        }
+        return m.node(name: "stools")
+    }
+
+    /// 營火：石圈、交叉的柴、火焰（發光）；下雨＝只剩小火苗和炭
+    static func campfire(small: Bool) -> SCNNode {
+        let c = VillageLayout.campfire
+        let m = VoxelMesh(ao: 0), k = Kit(m: m), xf = Xf(x: F(c.x), y: 0, z: F(c.z))
+        for i in 0..<8 {
+            let a = Float(i) / 8 * 2 * .pi
+            k.b(xf, sin(a) * 0.7, 0, cos(a) * 0.7, 0.32, 0.24, 0.32, TM.f(stone))
+        }
+        k.b(Xf(x: F(c.x), y: 0, z: F(c.z), a: 0.6), 0, 0.05, 0, 0.18, 0.16, 1.0, VoxMat.tex("darkplank"))
+        k.b(Xf(x: F(c.x), y: 0, z: F(c.z), a: -0.6), 0, 0.1, 0, 0.18, 0.16, 1.0, VoxMat.tex("darkplank"))
+        k.b(xf, 0, 0.02, 0, 0.6, 0.08, 0.6, TM.glow(0xC2401A, 0.6, 1.6))       // 炭火
+        if small {
+            k.b(xf, 0.05, 0.12, 0, 0.18, 0.22, 0.18, TM.glow(0xFF7A1A, 0.8, 1.8))
+        } else {
+            let orange = TM.glow(0xFF7A1A, 1.0, 2.2), yellow = TM.glow(0xFFD23A, 1.0, 2.4)
+            k.b(xf, 0, 0.12, 0, 0.5, 0.4, 0.5, orange)
+            k.b(xf, 0.08, 0.5, -0.05, 0.36, 0.36, 0.36, orange)
+            k.b(xf, -0.05, 0.2, 0.05, 0.3, 0.5, 0.3, yellow)
+            k.b(xf, 0, 0.84, 0, 0.18, 0.26, 0.18, yellow)
+            k.b(xf, 0.22, 0.3, 0.18, 0.16, 0.22, 0.16, yellow)
+        }
+        return m.node(name: "campfire")
+    }
+
+    /// 水煙壺（卡通版）：圓肚玻璃瓶、裡面一點水、長頸、側邊小碗
+    static func bong() -> SCNNode {
+        let m = VoxelMesh()
+        let glass = TM.glass(0.55, 0xA8E6CF), water = TM.glow(0x6EC3E8, 0.2, 0.6), bowl = TM.f(0x3B3B3B)
+        m.box(.identity, SIMD3(0, 0.1, 0), SIMD3(0.22, 0.2, 0.22), glass)
+        m.box(.identity, SIMD3(0, 0.06, 0), SIMD3(0.18, 0.1, 0.18), water)
+        m.box(.identity, SIMD3(0, 0.36, 0), SIMD3(0.09, 0.34, 0.09), glass)
+        m.box(.identity, SIMD3(0, 0.55, 0), SIMD3(0.13, 0.05, 0.13), glass)
+        m.box(.identity, SIMD3(0.12, 0.15, 0.06), SIMD3(0.12, 0.04, 0.04), glass)
+        m.box(.identity, SIMD3(0.19, 0.19, 0.06), SIMD3(0.08, 0.06, 0.08), bowl)
+        return m.node(name: "bong")
+    }
+
+    /// 煙（吸一口時冒的那幾團）
+    static let smoke: SCNMaterial = {
+        let m = SCNMaterial(); m.diffuse.contents = VoxMat.color(0xEDEBF2); m.lightingModel = .lambert
+        m.emission.contents = VoxMat.color(0x6A6870)
+        return m
+    }()
 
     /// 風車（這台 Mac 的溫度）：塔身＋四片扇葉（不一直轉：持續動畫會一直重畫，耗電）
     static func windmill() -> SCNNode {
@@ -894,7 +1188,57 @@ enum VillageArt {
         return n
     }
 
-    /// 小狗（主人）：奶茶色身體、白胸口、深色耳朵、翹尾巴、金色項圈；四條腿各自一個節點（走路會擺）。面向 +z
+    /// 主人（看板的使用者）：原創的矮圓小人，暖橘色、圓滾滾（方塊疊出圓角）、大眼睛＋腮紅、頭頂一株綠芽。面向 +z
+    static func boss() -> SCNNode {
+        let root = SCNNode(); root.name = "boss"
+        let body = SCNNode(); body.name = "body"
+        root.addChildNode(body)
+        let skin = VoxMat.flat(0xD97757, emit: (0.05, 0.35)), shade = VoxMat.flat(0xB85F42), ink = VoxMat.flat(0x2A1D18)
+        let white = VoxMat.flat(0xFFFFFF), blush = VoxMat.flat(0xF2A07F), leaf = VoxMat.flat(0x5DBB63, emit: (0.1, 0.5))
+        let m = VoxelMesh()
+        // 圓滾滾的身體：中間最寬、上下各縮一圈
+        m.box(.identity, SIMD3(0, 0.62, 0), SIMD3(0.86, 0.5, 0.76), skin)
+        m.box(.identity, SIMD3(0, 0.95, 0), SIMD3(0.72, 0.18, 0.64), skin)
+        m.box(.identity, SIMD3(0, 1.08, 0), SIMD3(0.52, 0.1, 0.46), skin)
+        m.box(.identity, SIMD3(0, 0.33, 0), SIMD3(0.72, 0.1, 0.64), skin)
+        // 大眼睛（含亮點）、腮紅、小嘴
+        for x: Float in [-0.17, 0.17] {
+            m.box(.identity, SIMD3(x, 0.76, 0.385), SIMD3(0.13, 0.17, 0.02), ink)
+            m.box(.identity, SIMD3(x + 0.03, 0.8, 0.398), SIMD3(0.04, 0.05, 0.01), white)
+            m.box(.identity, SIMD3(x * 1.7, 0.63, 0.385), SIMD3(0.12, 0.06, 0.02), blush)
+        }
+        m.box(.identity, SIMD3(0, 0.6, 0.385), SIMD3(0.1, 0.03, 0.02), ink)
+        // 小手
+        for x: Float in [-0.47, 0.47] { m.box(.identity, SIMD3(x, 0.55, 0.05), SIMD3(0.12, 0.18, 0.14), skin) }
+        // 頭頂綠芽（兩片葉子）
+        m.box(.identity, SIMD3(0, 1.2, 0), SIMD3(0.05, 0.16, 0.05), leaf)
+        m.box(.identity, SIMD3(-0.1, 1.29, 0), SIMD3(0.16, 0.06, 0.1), leaf)
+        m.box(.identity, SIMD3(0.1, 1.33, 0), SIMD3(0.16, 0.06, 0.1), leaf)
+        body.addChildNode(m.node())
+        // 短短的腳（走路會擺）
+        for (x, name) in [(Float(-0.18), "legL"), (Float(0.18), "legR")] {
+            let lm = VoxelMesh()
+            lm.box(.identity, SIMD3(0, -0.13, 0.02), SIMD3(0.2, 0.26, 0.24), shade)
+            let n = lm.node(); n.name = name; n.simdPosition = SIMD3(x, 0.28, 0)
+            body.addChildNode(n)
+        }
+        body.scale = SCNVector3(1.45, 1.45, 1.45)
+        let anchor = SCNNode(); anchor.name = "anchor"; anchor.position = SCNVector3(0, 2.15, 0)
+        root.addChildNode(anchor)
+        let halo = SCNTorus(ringRadius: 0.9, pipeRadius: 0.04)
+        let hm = SCNMaterial(); hm.lightingModel = .constant; hm.diffuse.contents = NSColor.white; hm.emission.contents = NSColor.white
+        halo.firstMaterial = hm
+        let hn = SCNNode(geometry: halo); hn.name = "halo"; hn.position = SCNVector3(0, 0.06, 0); hn.isHidden = true
+        root.addChildNode(hn)
+        let hit = SCNBox(width: 1.4, height: 2.0, length: 1.3, chamferRadius: 0)
+        hit.firstMaterial = SCNMaterial(); hit.firstMaterial!.transparency = 0; hit.firstMaterial!.writesToDepthBuffer = false
+        let hitN = SCNNode(geometry: hit); hitN.name = "hitbox"; hitN.position = SCNVector3(0, 1.0, 0); hitN.isHidden = true
+        root.addChildNode(hitN)
+        OfficeBuilder.pickable(root)
+        return root
+    }
+
+    /// 小狗（本機設定 petName 那位島民）：奶茶色身體、白胸口、深色耳朵、翹尾巴、金色項圈；四條腿各自一個節點（走路會擺）。面向 +z
     static func dog() -> SCNNode {
         let root = SCNNode(); root.name = "dog"
         let body = SCNNode(); body.name = "body"
