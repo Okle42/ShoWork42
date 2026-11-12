@@ -57,6 +57,10 @@ final class OfficeBuilder {
     let basement = OfficeBasement()
     /// 鏡頭在地下室（大地面、城市淡出；B1 出現、圖譜自轉）
     private(set) var underground = false
+    /// 小島村莊（11-12，OfficeVillage.swift）：預設場景；大樓整個藏起來（world），切回大樓時島藏起來
+    let village = VillageBuilder()
+    private(set) var islandMode = false
+    private var modeSet = false, villageFramed = false
 
     struct Module { var parts: ModuleParts; var key: String; var floor: TowerFloor }
     private var modules: [String: Module] = [:]
@@ -122,6 +126,9 @@ final class OfficeBuilder {
         world.addChildNode(driver)
         world.addChildNode(city.root)
         world.addChildNode(basement.root)
+        village.owner = self
+        village.root.isHidden = true
+        scene.rootNode.addChildNode(village.root)
         ambient.light = SCNLight(); ambient.light!.type = .ambient
         scene.rootNode.addChildNode(ambient)
         sun.light = SCNLight(); sun.light!.type = .directional
@@ -289,6 +296,7 @@ final class OfficeBuilder {
         camera.camera!.vignettingIntensity = Self.env("SHOWORK_OFFICE_NOVIGNETTE") != nil ? 0 : 0.35 * l.dark   // 測試：量逐層亮度時關掉四角壓暗
         camera.camera!.vignettingPower = 1.0
         omniBase = 700 * l.lamps * ps
+        village.setLamps(CGFloat(l.lamps * ps))
         weatherFX.setDark(l.dark)
         city.setDark(Double(l.dark))          // 周邊高樓的窗戶燈（11-01）：暗下來才亮
         omniDirty = true
@@ -297,6 +305,24 @@ final class OfficeBuilder {
     /// 0→1 的平滑過渡（a→b，a 可以比 b 大）
     static func smooth(_ a: Double, _ b: Double, _ x: Double) -> Double {
         let t = min(1, max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t)
+    }
+
+    // MARK: 小島／大樓切換（11-12）
+
+    /// 換場景：大樓（world：大樓、城市、B1、大地面）跟小島只顯示一個；燈光、天氣、鏡頭共用。回傳有沒有換
+    @discardableResult
+    func setIslandMode(_ on: Bool) -> Bool {
+        guard on != islandMode || !modeSet else { return false }
+        modeSet = true
+        islandMode = on
+        if on { _ = setUnderground(false); village.buildIfNeeded() }
+        world.isHidden = on
+        village.root.isHidden = !on
+        villageFramed = false
+        omniDirty = true; lodDirty = true; cutSig = ""
+        applyLights()
+        bump(0.3)
+        return true
     }
 
     // MARK: 更新
@@ -313,6 +339,13 @@ final class OfficeBuilder {
     @discardableResult
     func update(tower newPlan: TowerPlan, decor: [String: FloorDecor], wander: WanderPlan, islands: [Island],
                 guardStatus: GuardStatus, scanning: Bool, animate: Bool, now: Date = Date()) -> Reframe {
+        if islandMode {
+            guardLevel = guardStatus.level
+            bump(village.update(islands.flatMap(\.people), animate: animate, now: now))
+            looping = !Look.reduceMotion && (weatherFX.raining || village.looping)
+            if !villageFramed { villageFramed = true; return .layout }
+            return .none
+        }
         let plan = newPlan.floors.isEmpty ? Self.fallback : newPlan
         let old = tower
         let first = modules.isEmpty
@@ -816,6 +849,7 @@ final class OfficeBuilder {
     struct LabelPerson { let id: String; let anchor: SCNNode; let card: BoardCard?; let mood: Mood; let floor: String }
     struct LabelFloor { let id: String; let node: SCNNode; let height: Float; let floorNo: String; let title: String; let kind: TowerFloorKind; let names: [String]; let accent: UInt32? }
     func labelTargets() -> (people: [LabelPerson], floors: [LabelFloor]) {
+        if islandMode { return (village.labelPeople(), []) }
         var ps: [LabelPerson] = []
         for (id, p) in persons {
             guard let a = p.node.childNode(withName: "anchor", recursively: true) else { continue }
@@ -843,12 +877,18 @@ final class OfficeBuilder {
 
     /// 城市的名牌（建築＋出港的船）
     func cityLabelTargets() -> [(id: String, anchor: SCNNode, text: String, alert: Bool)] {
+        if islandMode { return village.signLabels() }
         guard !underground else { return [] }       // 鏡頭在地下室：城市藏起來了，名牌也不畫
         return city.labels + city.shipLabels.map { ($0.id, $0.anchor, $0.text, false) }
     }
 
     /// 城市資料變了：有變才重建；狀態剛變的警示燈、出港的船要播幾秒
     func updateCity(_ s: CityState, animate: Bool) {
+        if islandMode {
+            village.updateCity(s)
+            setGrid(s.grid.stage, animate: animate)      // 停電效果照舊（發光材質、燈一起暗）
+            return
+        }
         bump(city.update(s, animate: animate))
         setGrid(s.grid.stage, animate: animate)
         updateCooler(s.power)
@@ -933,6 +973,7 @@ final class OfficeBuilder {
 
     /// 俯瞰城市（左側索引列「城市」）：從右前方高處看整個街區，大樓在中間
     func frameCity(_ v: SCNView) {
+        if islandMode { frameIsland(v); return }
         let aspect = Double(max(0.4, v.bounds.width / max(1, v.bounds.height)))
         let b = CityBuilder.bounds
         // 直式視窗（寬高比 < 1）：46° 時寬度先頂到、下半部空一大片 ⇒ 改 55° 更俯視，城市縱向變長填滿高度（研究 R2-2-6）
@@ -941,11 +982,18 @@ final class OfficeBuilder {
         place(v, target: t, dist: dist, az: 18, el: el)
     }
 
-    func peopleNodes() -> [(String, SCNNode)] { persons.map { ($0.key, $0.value.node) } + (guardNode.map { [("guard", $0)] } ?? []) }
-    func personNode(_ id: String) -> SCNNode? { id == "guard" ? guardNode : persons[id]?.node }
+    func peopleNodes() -> [(String, SCNNode)] {
+        if islandMode { return village.peopleNodes() }
+        return persons.map { ($0.key, $0.value.node) } + (guardNode.map { [("guard", $0)] } ?? [])
+    }
+    func personNode(_ id: String) -> SCNNode? {
+        if islandMode { return village.personNode(id) }
+        return id == "guard" ? guardNode : persons[id]?.node
+    }
 
     /// 鏡頭對準用的點：roof／lobby／floor:<專案>
     func focusPoint(_ key: String) -> SCNVector3? {
+        if islandMode { return village.focus(key).map { SCNVector3($0.0.x, $0.0.y, $0.0.z) } ?? village.point(key) }
         let id: String
         if key == "roof" || key == "lobby" { id = key }
         else if key.hasPrefix("floor:") { id = TowerFloor.projectId(String(key.dropFirst(6))) }
@@ -968,6 +1016,7 @@ final class OfficeBuilder {
     private var floorGlow: SCNNode?
     @discardableResult
     func highlightFloor(_ id: String?) -> Bool {
+        if islandMode { return false }
         let cur = floorGlow?.parent?.name
         let want = id.map { "floor:\($0)" }
         guard cur != want else { return false }
@@ -978,6 +1027,7 @@ final class OfficeBuilder {
 
     func highlight(_ id: String?) {
         lit = id
+        if islandMode { village.highlight(id); return }
         // 只在真的變了才寫（10-20 量閒置 CPU：每次刷新都把同樣的值寫回去，SceneKit 會當成場景變了、多畫一張）
         func set(_ n: SCNNode?, _ h: Bool) { if let n, n.isHidden != h { n.isHidden = h } }
         for (pid, p) in persons { set(p.node.childNode(withName: "halo", recursively: false), pid != id) }
@@ -1007,7 +1057,7 @@ final class OfficeBuilder {
 
     /// 一個人：角色（坐在椅子上面向桌子，或站在咖啡吧）＋亮著的螢幕＋名牌＋頭上符號＋子 agent＋點擊盒
     /// `intro`＝狀態剛變（等你＝跳三下、做完＝搖一下）；只是搬位置重建時不重播
-    private func makePerson(_ p: Islander, seated: Bool, atDesk: Bool, noCup: Bool = false, intro: Bool = true) -> SCNNode {
+    func makePerson(_ p: Islander, seated: Bool, atDesk: Bool, noCup: Bool = false, intro: Bool = true) -> SCNNode {
         let root = SCNNode(); root.name = "p:\(p.id)"
         let tint = KuboArt.tint(p.mood)
         let act: AIActivity = p.mood == .working ? p.card.activity : .none
@@ -1302,7 +1352,7 @@ final class OfficeBuilder {
     }
 
     private func fidget() {
-        guard moving == nil else { return }
+        guard moving == nil, !islandMode else { return }
         // 鏡頭在地下室：只動 B1 的人（地上的看不到，動了白畫）；在地上反過來
         let pool = persons.values.filter { !$0.place.hasPrefix("trip:") && !$0.place.isEmpty && $0.place.hasPrefix("b1:") == underground }
         for p in pool.shuffled().prefix(Int.random(in: 1...2)) {
@@ -1645,6 +1695,12 @@ final class OfficeBuilder {
     /// 回傳有沒有改到畫面（有的話要補畫一下）
     @discardableResult
     func updateLOD(camera p: SCNVector3, target: SCNVector3) -> Bool {
+        if islandMode {
+            weatherFX.aim()
+            weatherFX.setInside(false)
+            updateFog(dist: Float(hypot(hypot(p.x - target.x, p.y - target.y), p.z - target.z)), near: 30)
+            return false
+        }
         let ug = setUnderground(p.y < 0)
         guard lodDirty || hypot(hypot(p.x - lodAt.x, p.y - lodAt.y), p.z - lodAt.z) > 0.5 else { return ug }
         lodDirty = false; lodAt = p
@@ -1684,7 +1740,7 @@ final class OfficeBuilder {
     /// 鏡頭進出地下室：地下 ⇒ 大地面、城市（含地坪）淡出藏起來、雨停在地上、B1 出現並開始轉；回到地上全部恢復。回傳有沒有變
     @discardableResult
     func setUnderground(_ u: Bool) -> Bool {
-        guard u != underground else { return false }
+        guard u != underground, !(u && islandMode) else { return false }
         underground = u
         basement.setLive(u, spin: !Look.reduceMotion)
         weatherFX.setHidden(u)
@@ -1872,6 +1928,7 @@ final class OfficeBuilder {
 
     /// 從右前方、略高一點看「有人的樓層」（方位 16°、仰角 12°；10-20 UI/UX 優化 §2.2 D）
     func frameCamera(_ v: SCNView) {
+        if islandMode { frameIsland(v); return }
         let aspect = Double(max(0.4, v.bounds.width / max(1, v.bounds.height)))
         let (lo, hi) = frameRange()
         // 寬度是瓶頸（樓層 12 公尺寬、從右前方 16° 看）：框「正面＋後牆前 0.8 公尺」就好，右後角那一點點後牆被切掉沒關係（每層多 8% 高）
@@ -1885,6 +1942,15 @@ final class OfficeBuilder {
     /// 框「這層的人＋左右各一段」：直式視窗（960）約 4–5 公尺寬、橫式（1600）約 8 公尺寬，讓這層高度佔畫面 ≥ 45%
     @discardableResult
     func frameFloor(_ id: String, _ v: SCNView) -> Bool {
+        if islandMode {
+            guard let (t, size) = village.focus(id) else { return false }
+            let aspect = Double(max(0.4, v.bounds.width / max(1, v.bounds.height)))
+            let half = size / 2
+            let (dist, c) = Self.fit(lo: t - SIMD3(half, 1.2, half * 0.6), hi: t + SIMD3(half, 2.4, half * 0.6), aspect: aspect,
+                                     az: Self.islandAz * .pi / 180, el: Self.islandEl * .pi / 180, margin: 0.95)
+            place(v, target: c, dist: dist, az: Self.islandAz, el: Self.islandEl)
+            return true
+        }
         guard let f = tower.floor(id: id), let m = modules[id] else { return false }
         let y = Double(m.parts.node.position.y)
         let aspect = Double(max(0.4, v.bounds.width / max(1, v.bounds.height)))
@@ -1899,6 +1965,16 @@ final class OfficeBuilder {
                                  az: Double(Self.azimuth) * .pi / 180, el: Double(Self.elevation) * .pi / 180, margin: 0.98)
         place(v, target: t, dist: dist, az: Double(Self.azimuth), el: Double(Self.elevation))
         return true
+    }
+
+    /// 小島的預設取景：從南邊偏東、俯角 36° 看整座島（含北邊的家、南邊的小攤）
+    static let islandAz: Double = 12, islandEl: Double = 36
+    func frameIsland(_ v: SCNView) {
+        let aspect = Double(max(0.4, v.bounds.width / max(1, v.bounds.height)))
+        let r = VillageLayout.radius
+        let (dist, t) = Self.fit(lo: SIMD3(-r + 1, 0, -r + 2), hi: SIMD3(r - 1, 3.5, r - 3), aspect: aspect,
+                                 az: Self.islandAz * .pi / 180, el: Self.islandEl * .pi / 180, margin: 1.0)
+        place(v, target: t, dist: dist, az: Self.islandAz, el: Self.islandEl)
     }
 
     /// 測試：SHOWORK_OFFICE_CAM 定鏡頭

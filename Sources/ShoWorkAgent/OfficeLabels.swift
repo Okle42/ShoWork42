@@ -481,6 +481,11 @@ final class OfficeLabels: NSObject, SCNSceneRendererDelegate, @unchecked Sendabl
                   bgAlpha: alert ? 1 : 0.72, dot: nil, anchor: anchor, floor: "city")
     }
 
+    /// 小島的小狗（主人）：金色字玻璃名牌
+    static func dogSpec(anchor: SCNNode) -> LabelSpec {
+        LabelSpec(id: "dog", kind: .guardian, text: "🐾 你", bg: 0, bgAlpha: 0, dot: nil, anchor: anchor, floor: "village", fg: 0xF0D27A, glass: true)
+    }
+
     @MainActor static func guardSpec(_ g: GuardStatus, scanning: Bool, anchor: SCNNode) -> LabelSpec {
         // 10-24 Kang：名牌改英文「🛡️ Security」（盾牌同保全卡標題）；狀態靠字色分（掃描中藍、注意橘、正常綠），只有警示在最後加 🚨
         let t = !scanning && g.level == .alert ? "🛡️ Security 🚨" : "🛡️ Security"
