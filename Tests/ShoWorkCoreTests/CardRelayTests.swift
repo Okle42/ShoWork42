@@ -19,28 +19,28 @@ struct CardRelayTests {
     @Test("啟動時現有的卡不送；新卡轉給隊長；隊長自己的卡不轉")
     func relay() {
         var st = CardRelay.State()
-        #expect(CardRelay.plan(reports: ["a": r("舊", at: t0)], captain: "cap", captainLive: true, state: &st, now: t0, text: txt).isEmpty)
-        let out = CardRelay.plan(reports: ["a": r("新", at: t0), "cap": r("隊長的", at: t0)], captain: "cap", captainLive: true, state: &st, now: t0, text: txt)
+        #expect(CardRelay.plan(reports: ["a": r("舊", at: t0)], captain: "cap", captainLive: true, state: &st, now: t0, policy: .legacy, text: txt).isEmpty)
+        let out = CardRelay.plan(reports: ["a": r("新", at: t0), "cap": r("隊長的", at: t0)], captain: "cap", captainLive: true, state: &st, now: t0, policy: .legacy, text: txt)
         #expect(out == [CardRelay.Outgoing(sessionId: "a", text: "a:新")])
     }
 
     @Test("節流：60 秒內只送一次，到時送最後一張；內容沒變不重送")
     func throttle() {
         var st = CardRelay.State(); st.seeded = true
-        #expect(CardRelay.plan(reports: ["a": r("1", at: t0)], captain: "c", captainLive: true, state: &st, now: t0, text: txt).count == 1)
-        #expect(CardRelay.plan(reports: ["a": r("2", at: t0 + 10)], captain: "c", captainLive: true, state: &st, now: t0 + 10, text: txt).isEmpty)
-        #expect(CardRelay.plan(reports: ["a": r("3", at: t0 + 20)], captain: "c", captainLive: true, state: &st, now: t0 + 30, text: txt).isEmpty)
-        let late = CardRelay.plan(reports: ["a": r("3", at: t0 + 20)], captain: "c", captainLive: true, state: &st, now: t0 + 61, text: txt)
+        #expect(CardRelay.plan(reports: ["a": r("1", at: t0)], captain: "c", captainLive: true, state: &st, now: t0, policy: .legacy, text: txt).count == 1)
+        #expect(CardRelay.plan(reports: ["a": r("2", at: t0 + 10)], captain: "c", captainLive: true, state: &st, now: t0 + 10, policy: .legacy, text: txt).isEmpty)
+        #expect(CardRelay.plan(reports: ["a": r("3", at: t0 + 20)], captain: "c", captainLive: true, state: &st, now: t0 + 30, policy: .legacy, text: txt).isEmpty)
+        let late = CardRelay.plan(reports: ["a": r("3", at: t0 + 20)], captain: "c", captainLive: true, state: &st, now: t0 + 61, policy: .legacy, text: txt)
         #expect(late.map(\.text) == ["a:3"])
-        #expect(CardRelay.plan(reports: ["a": r("3", at: t0 + 20)], captain: "c", captainLive: true, state: &st, now: t0 + 200, text: txt).isEmpty)
+        #expect(CardRelay.plan(reports: ["a": r("3", at: t0 + 20)], captain: "c", captainLive: true, state: &st, now: t0 + 200, policy: .legacy, text: txt).isEmpty)
     }
 
     @Test("隊長不在：不送也不堆積（回來後不補送那段期間的卡）")
     func noCaptain() {
         var st = CardRelay.State(); st.seeded = true
-        #expect(CardRelay.plan(reports: ["a": r("x", at: t0)], captain: nil, captainLive: false, state: &st, now: t0, text: txt).isEmpty)
-        #expect(CardRelay.plan(reports: ["a": r("x", at: t0)], captain: "c", captainLive: true, state: &st, now: t0 + 5, text: txt).isEmpty)
-        #expect(CardRelay.plan(reports: ["b": r("old", at: t0 - 3600)], captain: "c", captainLive: true, state: &st, now: t0, text: txt).isEmpty)
+        #expect(CardRelay.plan(reports: ["a": r("x", at: t0)], captain: nil, captainLive: false, state: &st, now: t0, policy: .legacy, text: txt).isEmpty)
+        #expect(CardRelay.plan(reports: ["a": r("x", at: t0)], captain: "c", captainLive: true, state: &st, now: t0 + 5, policy: .legacy, text: txt).isEmpty)
+        #expect(CardRelay.plan(reports: ["b": r("old", at: t0 - 3600)], captain: "c", captainLive: true, state: &st, now: t0, policy: .legacy, text: txt).isEmpty)
     }
 
     @Test("工作回報全文帶名字、專案、狀態、方法、問題與選項")
@@ -58,8 +58,8 @@ struct CardRelayTests {
     func noDuplicateTaskReport() {
         var st = CardRelay.State(); st.seeded = true
         var done = r("做完", at: t0); done.task = "T1"; done.status = .done
-        #expect(CardRelay.plan(reports: ["a": done], captain: "c", captainLive: true, state: &st, now: t0, text: txt).isEmpty)
+        #expect(CardRelay.plan(reports: ["a": done], captain: "c", captainLive: true, state: &st, now: t0, policy: .legacy, text: txt).isEmpty)
         var w = r("進行中", at: t0); w.task = "T1"
-        #expect(CardRelay.plan(reports: ["b": w], captain: "c", captainLive: true, state: &st, now: t0, text: txt).count == 1)
+        #expect(CardRelay.plan(reports: ["b": w], captain: "c", captainLive: true, state: &st, now: t0, policy: .legacy, text: txt).count == 1)
     }
 }

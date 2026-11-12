@@ -19,6 +19,8 @@ public struct InboxItem: Sendable, Equatable, Identifiable {
     public var generic: Bool           // AI 沒給選項：用通用的「好／先不要」
     public var since: Date?
     public var answered: Date?         // 你從戰情中心回答過、它還沒動：顯示「已送出」
+    public var askId: String? = nil    // 排隊中的 --ask 編號（回答時從佇列拿掉這一題；Asks.swift）
+    public var more = 0                // 同一個 AI 後面還排著幾題
 }
 
 public enum Inbox {
@@ -35,6 +37,14 @@ public enum Inbox {
                                  options: [], generic: false, since: p.at, answered: a)
             }
             guard Mood.of(c) == .waiting else { return nil }
+            // 排隊中的 --ask（Asks.swift）：最早一題先問；回答過就從佇列拿掉，所以這裡永遠是還沒答的（不標「已送出」）
+            if let p = c.asks.first {
+                let ctx = c.detail.flatMap { d in d.isEmpty || d == p.ask ? nil : d }
+                let opts = p.options ?? []
+                return InboxItem(id: c.id, card: c, kind: .reply, question: p.ask, context: ctx,
+                                 options: opts.isEmpty ? genericOptions : opts, generic: opts.isEmpty,
+                                 since: p.at, answered: nil, askId: p.id, more: c.asks.count - 1)
+            }
             let reply = c.reason.hasPrefix("要你決定")
             let ask = c.report?.ask?.trimmingCharacters(in: .whitespacesAndNewlines)
             let q: String

@@ -49,6 +49,32 @@ struct CityTests {
         #expect(CityParse.rememberDisks(["A", "B"], mounted: ["C", "A"]) == ["A", "B", "C"])
     }
 
+    @Test("卷過濾：.dmg 掛起來的唯讀安裝映像、容量 0 的卷不算堆場；真的外接碟照常")
+    func diskImages() {
+        // Natural8.dmg 掛在 /Volumes/Natural8：ISO 9660、唯讀、Disk Image ⇒ 排除（之前永遠 100% 亮紅燈）
+        #expect(!CityParse.includeVolume(path: "/Volumes/Natural8", name: "Natural8", isRoot: false, browsable: true,
+                                         readOnly: true, isDiskImage: true, total: 180_000_000))
+        // 可寫的磁碟映像（拿來當儲存空間的 sparsebundle）還是算
+        #expect(CityParse.includeVolume(path: "/Volumes/Vault", name: "Vault", isRoot: false, browsable: true,
+                                        readOnly: false, isDiskImage: true, total: 10_000_000_000))
+        // 鎖住的 SD 卡：唯讀但不是映像 ⇒ 算
+        #expect(CityParse.includeVolume(path: "/Volumes/DEMO-SD", name: "DEMO-SD", isRoot: false, browsable: true,
+                                        readOnly: true, isDiskImage: false, total: 128_000_000_000))
+        // 容量讀到 0 ⇒ 排除；讀不到（nil）維持原本行為
+        #expect(!CityParse.includeVolume(path: "/Volumes/Empty", name: "Empty", isRoot: false, browsable: true, total: 0))
+        #expect(CityParse.includeVolume(path: "/Volumes/USB", name: "USB", isRoot: false, browsable: true, total: nil))
+        #expect(CityParse.includeVolume(path: "/Volumes/USB", name: "USB", isRoot: false, browsable: true,
+                                        readOnly: false, isDiskImage: false, total: 64_000_000_000))
+        // DiskArbitration 怎麼認映像：macOS 27 實測 model＝Disk Image／protocol＝Virtual Interface／path 走 IOHDIXController；舊版 protocol＝Disk Image
+        #expect(CityParse.isDiskImage(model: "Disk Image", protocol: "Virtual Interface",
+                                      devicePath: "IOService:/IOResources/IOHDIXController/IOHDIXHDDriveOutKernel@5/IODiskImageBlockStorageDeviceOutKernel"))
+        #expect(CityParse.isDiskImage(model: nil, protocol: "Disk Image", devicePath: nil))
+        #expect(CityParse.isDiskImage(model: nil, protocol: nil, devicePath: "IOService:/IOResources/IOHDIXController/x"))
+        #expect(!CityParse.isDiskImage(model: "APPLE SSD AP0256Z", protocol: "Apple Fabric", devicePath: "IOService:/AppleARMPE/arm-io/AppleT8103IO/ans"))
+        #expect(!CityParse.isDiskImage(model: "SanDisk Ultra", protocol: "USB", devicePath: "IOService:/.../IOUSBHostDevice"))
+        #expect(!CityParse.isDiskImage(model: nil, protocol: nil, devicePath: nil))
+    }
+
     @Test("socketfilterfw：開／關／擋全部／讀不懂")
     func firewall() {
         #expect(CityParse.firewall("Firewall is disabled. (State = 0)\n") == false)

@@ -23,7 +23,7 @@ enum OfficeBench {
         let s = BoardReader().read()
         let fm = FileManager.default
         let real = Board.build(sessions: s.sessions, transcripts: s.transcripts, glows: s.glows, teams: s.teams, inbox: s.inbox,
-                               reports: s.reports, reviews: s.reviews, decisions: s.decisions, contexts: s.contexts, nicknames: s.nicknames,
+                               reports: s.reports, reviews: s.reviews, decisions: s.decisions, contexts: s.contexts, nicknames: s.nicknames, asks: s.asks,
                                now: Date(), home: BoardPaths.home, isRepo: { fm.fileExists(atPath: $0 + "/.git") })
         let demo = OfficeDemo.apply(real)
         // 閒晃：休息的人先當成在工作（坐在桌前），之後每 25 秒在「休息（搭電梯上頂樓）」與「工作（溜滑梯回座位）」之間切換

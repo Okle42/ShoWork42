@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import ShoWorkCore
 
-// 科技大樓資料層（10-20 第 2 棒）：固定樓層號、升降樓與 2 小時緩衝、閒置薄層分組、主題快取與重新裝潢節流、閒晃決策可重現
+// 科技大樓資料層（10-20 第 2 棒）：固定樓層號、升降樓與 2 小時緩衝（只有常駐部門；臨時部門關掉即消失）、閒置薄層分組、主題快取與重新裝潢節流、閒晃決策可重現
 
 private func dep(_ n: String, _ active: Bool, resident: Bool = true) -> OfficeDepartment {
     OfficeDepartment(name: n, isResident: resident, isActive: active)
@@ -66,22 +66,29 @@ struct TowerTests {
         #expect(p.projectFloors.map(\.floorNo) == ["02", "03"])
     }
 
-    @Test("臨時部門（不在常駐名冊）AI 關掉後一樣留 2 小時（燈暗著）才消失；不進薄層")
-    func tempLinger() {
+    @Test("臨時部門（不在常駐名冊）AI 關掉後馬上消失、沒有 2 小時緩衝、不進薄層；再開回來號碼不變；常駐部門照舊有緩衝")
+    func tempVanishes() {
         var reg = TowerRegistry()
         let u = { ["a": 3.0, "t": 1] }
-        var (p, _) = TowerPlan.build(departments: [dep("A", false), dep("T", true, resident: false)], cards: [card("s1", "T")],
+        var (p, _) = TowerPlan.build(departments: [dep("A", true), dep("T", true, resident: false)], cards: [card("s1", "T")],
                                      registry: &reg, usage: u, now: t0)
         #expect(p.floor(project: "T")?.active == true && p.floor(project: "T")?.floorNo == "03")
-        // T 的 AI 關掉：OfficeDepartments 不再列出 T，但 2 小時內樓層還在、號碼不變、燈暗著
+        // T 的 AI 關掉：OfficeDepartments 不再列出 T ⇒ 樓層當下就不見，也不在薄層（10-28 使用者拍板，拿掉 2 小時暗燈）
         let tLeave = t0.addingTimeInterval(60)
-        (p, _) = TowerPlan.build(departments: [dep("A", false)], cards: [], registry: &reg, usage: u, now: tLeave)
-        #expect(p.floor(project: "T")?.active == false && p.floor(project: "T")?.floorNo == "03")
-        (p, _) = TowerPlan.build(departments: [dep("A", false)], cards: [], registry: &reg, usage: u, now: tLeave.addingTimeInterval(7100))
-        #expect(p.floor(project: "T") != nil)
-        // 滿 2 小時：消失，也不在薄層
-        (p, _) = TowerPlan.build(departments: [dep("A", false)], cards: [], registry: &reg, usage: u, now: tLeave.addingTimeInterval(7201))
+        (p, _) = TowerPlan.build(departments: [dep("A", true)], cards: [], registry: &reg, usage: u, now: tLeave)
         #expect(p.floor(project: "T") == nil && !p.idlePlates.contains { $0.name == "T" })
+        #expect(p.floors.map(\.id) == ["lobby", "p:a", "roof"])
+        // 就算有人把關掉的臨時部門塞進清單（isActive=false），也不上樓、不進薄層
+        (p, _) = TowerPlan.build(departments: [dep("A", true), dep("T", false, resident: false)], cards: [], registry: &reg, usage: u,
+                                 now: tLeave.addingTimeInterval(10))
+        #expect(p.floor(project: "T") == nil && p.idlePlates.isEmpty)
+        // 常駐部門 A 關掉：照舊留 2 小時（燈暗著）
+        (p, _) = TowerPlan.build(departments: [dep("A", false)], cards: [], registry: &reg, usage: u, now: tLeave.addingTimeInterval(20))
+        #expect(p.floor(project: "A")?.active == false)
+        // T 再開回來：還是原本的 03
+        (p, _) = TowerPlan.build(departments: [dep("A", false), dep("T", true, resident: false)], cards: [card("s2", "T")],
+                                 registry: &reg, usage: u, now: tLeave.addingTimeInterval(30))
+        #expect(p.floor(project: "T")?.active == true && p.floor(project: "T")?.floorNo == "03")
     }
 
     @Test("重開 app：上次存檔時有人、這次沒人 ⇒ 從現在起算 2 小時緩衝")

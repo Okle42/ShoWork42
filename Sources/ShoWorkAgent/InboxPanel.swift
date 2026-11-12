@@ -107,6 +107,9 @@ private struct InboxRow: View {
                 .modifier(RunBar(card: item.card, name: item.card.title.split(separator: "-").first.map(String.init) ?? item.card.title, runs: runs, thickness: 2))
             Text(item.question).font(.callout).textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true).lineLimit(6)
+            if item.more > 0 {
+                Text("答完這題，後面還有 \(item.more) 題").font(.caption).foregroundStyle(.secondary)
+            }
             if let c = item.context, item.kind != .reply || item.generic {
                 Text(c).font(.caption).foregroundStyle(.secondary).lineLimit(3).textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)

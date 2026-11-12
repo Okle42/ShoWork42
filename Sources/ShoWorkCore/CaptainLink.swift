@@ -312,6 +312,64 @@ public enum CaptainLink {
         return (t, sig)
     }
     public static func alarmUnchanged(crew n: Int) -> String { "【巡檢時間】無變化（在線 \(n) 人，跟上次一樣）" }
+
+    // MARK: ③' 安靜巡檢（11-10：隊長被巡檢叫醒一週 228 次，多半「無變化」）
+    //   captain.alarmQuiet（預設 true）：只有要隊長動手的事才推——有人卡住／待審、ctx 到門檻、有派工單卻閒太久、
+    //   收件匣有沒 ack 的動作預告／擋下。要處理的事跟上次推的一樣（或沒有）⇒ 不推。設 false 回到每次都推（含「無變化」）。
+    public static let alarmQuietKey = "captain.alarmQuiet"
+
+    /// 要隊長處理的事（每項一句）＋指紋；空的＝不用推
+    public static func alarmActions(_ r: Roster, openTaskSessions: Set<String>, inbox: [CaptainInboxItem], ctxLimit: Int, now: Date) -> (reasons: [String], sig: String) {
+        let crew = r.entries.filter { !$0.captain }.sorted { $0.name < $1.name }
+        let stuck = crew.filter { $0.column == .stuck }.map(\.name)
+        let review = crew.filter { $0.column == .review }.map(\.name)
+        let full = crew.filter { $0.handover == nil && ($0.ctxTokens ?? 0) >= ctxLimit }
+        let idle = crew.filter { e in openTaskSessions.contains(e.sessionId) && (e.lastActivity.map { now.timeIntervalSince($0) > idleAfter } ?? true) }.map(\.name)
+        // 擋下：還沒放行；預告：1 小時內、沒 ack（開工卡不算，只留收件匣）
+        let open = inbox.filter { i in
+            i.acked == nil && now.timeIntervalSince(i.at) < 86400
+                && ((i.kind == .block && i.released == nil) || (i.kind == .notice && now.timeIntervalSince(i.at) < 3600))
+        }
+        var out: [String] = []
+        if !stuck.isEmpty { out.append("卡住：" + stuck.joined(separator: "、")) }
+        if !review.isEmpty { out.append("待審／等回答：" + review.joined(separator: "、")) }
+        if !full.isEmpty { out.append("ctx 到門檻 \(ctxLimit / 1000)k：" + full.map { "\($0.name) \(($0.ctxTokens ?? 0) / 1000)k" }.joined(separator: "、")) }
+        if !idle.isEmpty { out.append("有派工單卻閒置超過 30 分鐘：" + idle.joined(separator: "、")) }
+        let blocks = open.filter { $0.kind == .block }, notices = open.filter { $0.kind == .notice }
+        if !blocks.isEmpty { out.append("擋下等放行 \(blocks.count) 則：" + blocks.map(\.id).joined(separator: "、")) }
+        if !notices.isEmpty { out.append("動作預告沒 ack \(notices.count) 則") }
+        let sig = [stuck.joined(separator: ","), review.joined(separator: ","), full.map(\.name).joined(separator: ","),
+                   idle.joined(separator: ","), open.map(\.id).sorted().joined(separator: ",")].joined(separator: "|")
+        return (out, out.isEmpty ? "" : sig)
+    }
+
+    /// 安靜巡檢全文：要處理的事放最前面，再接原本的名冊摘要
+    public static func alarmQuietText(reasons: [String], full: String) -> String {
+        "【巡檢時間】要處理：" + reasons.joined(separator: "；") + "\n" + full.replacingOccurrences(of: "【巡檢時間】", with: "")
+    }
+
+    // MARK: ⑥ 隊長換哨提醒（11-10：組員到 board.ctxTokens 會自動收尾，隊長沒有；隊長不自動 /clear，只提醒一次）
+    //   captain.ctxTokens（預設 750k，範圍同 ContextGuard 250k–1000k；設負數＝關）
+    public static let captainCtxKey = "captain.ctxTokens"
+    public static let captainCtxDefault = 750_000
+    public static func captainCtxLimit(_ d: UserDefaults?) -> Int? {
+        let v = d?.object(forKey: captainCtxKey) as? Int ?? captainCtxDefault
+        return v < 0 ? nil : ContextGuard.clamp(v == 0 ? captainCtxDefault : v)
+    }
+
+    /// 這次要不要送【換哨提醒】：隊長 ctx 過門檻、這個 session 還沒送過。回傳要送的文字＋更新後的已送集合
+    public static func shiftReminder(_ r: Roster, limit: Int?, sent: Set<String>, owner: String = LocalConfig.current.ownerName,
+                                     handoff: String = LocalConfig.current.captainHandoffName) -> (text: String?, sent: Set<String>) {
+        guard let limit, let cap = r.entries.first(where: { $0.captain }) else { return (nil, sent) }
+        let t = cap.ctxTokens ?? 0
+        var s = sent
+        if t < limit { s.remove(cap.sessionId); return (nil, s) }      // 降下來就重新計
+        guard !s.contains(cap.sessionId) else { return (nil, s) }
+        s.insert(cap.sessionId)
+        let text = "【換哨提醒】隊長 context 已用 \(t / 1000)k（門檻 \(limit / 1000)k）。請現在：①把目前狀態（進行中的派工單、等誰回覆、要\(owner)決定的事、下一步）更新到 \(handoff) 最上段；"
+            + "②請\(owner)在這個視窗打 /clear，再說「換哨」，新 context 會讀交接接手。看板不會自動 /clear 隊長；這則只送一次。"
+        return (text, s)
+    }
 }
 
 // MARK: ④ 隊長收件匣（board/captain-inbox/<id>.json：開工卡、預告、擋下；新隊長 showork captain 先印未處理的）
@@ -488,10 +546,20 @@ extension CaptainInbox {
     static let deferrals = ["再說", "再決定", "再看", "再談", "再議", "明天", "後天", "下週", "下禮拜", "下次", "改天", "晚點", "晚一點", "回頭", "之後", "以後", "給我看", "還沒", "了沒", "考慮", "想想",
                             "嗎", "？", "?", "等", "之前", "已經", "如果", "要不要", "是否"]
 
-    /// 這則答案有沒有點名放行這條擋規則：按逗號、分號、句號、問號切成小句（標點留在小句尾），
+    /// 問句的字（11-11 BZW2R：使用者在看板問「開pr能幹嘛」被當成同意開 PR）。整則答案只要帶一個就不算同意，不分小句
+    static let questionMarkers = ["？", "?", "嗎", "嘛", "幹麻", "能幹嘛", "要幹嘛", "是什麼", "為什麼", "為何", "怎麼", "怎樣", "如何", "什麼意思", "什麼",
+                                  "可以嗎", "好嗎", "呢", "哪", "多少", "要不要", "是否", "對不對", "有沒有", "會不會", "能不能", "行不行", "可不可以"]
+    /// 這則答案是不是在問問題（問句永遠不算同意）
+    public static func isQuestion(_ answer: String) -> Bool {
+        let a = answer.lowercased()
+        return questionMarkers.contains { a.contains($0) }
+    }
+
+    /// 這則答案有沒有點名放行這條擋規則：整則是問句就不算；再按逗號、分號、句號、問號切成小句（標點留在小句尾），
     /// 有小句帶這個動作、而且帶動作的小句都沒有否定／延後字才算（「先開 PR，不通知」＝PR 算、LINE 不算）
     public static func authorizes(_ answer: String, rule: String) -> Bool {
         guard let ps = preapprovalActions.first(where: { rule.hasPrefix($0.rule) })?.patterns else { return false }
+        if isQuestion(answer) { return false }
         var clauses: [String] = [], cur = ""
         for ch in answer.lowercased() {
             cur.append(ch)

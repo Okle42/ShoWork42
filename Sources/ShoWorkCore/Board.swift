@@ -303,6 +303,8 @@ public struct BoardCard: Codable, Sendable, Equatable, Identifiable {
     public var tokens: TokenUsage? = nil           // 這個 session 累計 token（10-20）
     public var permit: PermitRequest? = nil        // 終端機開著的權限對話框（PermissionRequest hook；10-21）
     public var handover: String? = nil             // 自動交接狀態（「已收尾待 /clear」⋯；Handover.swift）
+    public var asks: [PendingAsk] = []             // 排隊中還沒回答的 --ask，最早的在前（Asks.swift；11-11）
+    public var stillWorking = false                // 有題在等你、但它其實還在工作中（不開審核員）
 }
 
 extension BoardCard {
@@ -337,6 +339,8 @@ extension BoardCard {
         tokens = try c.decodeIfPresent(TokenUsage.self, forKey: .tokens)
         permit = try c.decodeIfPresent(PermitRequest.self, forKey: .permit)
         handover = try c.decodeIfPresent(String.self, forKey: .handover)
+        asks = try c.decodeIfPresent([PendingAsk].self, forKey: .asks) ?? []
+        stillWorking = try c.decodeIfPresent(Bool.self, forKey: .stillWorking) ?? false
     }
 }
 
@@ -431,6 +435,7 @@ public enum Board {
                              glows: [Int32: WorkState], teams: [TeamConfig], inbox: [TeamMessage],
                              reports: [String: SelfReport] = [:], reviews: [String: Review] = [:], decisions: [String: Decision] = [:],
                              contexts: [String: ContextUse] = [:], nicknames: [String: Nickname] = [:],
+                             asks: [String: [PendingAsk]] = [:],
                              now: Date, home: String, isRepo: (String) -> Bool) -> [BoardCard] {
         var out: [BoardCard] = []
         for s in sessions.sorted(by: { ($0.updatedAt ?? 0) > ($1.updatedAt ?? 0) }) where s.entrypoint != "sdk-cli" {
@@ -439,8 +444,9 @@ public enum Board {
             // 10-20 審查：在等子 agent／workflow 回來時主 session 本來就不寫東西，不算卡住（實測主控 session 開完 workflow 被誤判卡住）
             if base.0 == .stuck && t.isDelegating { base = (.active, "交辦中，等子 agent 回來") }
             let report = CardRules.fresh(reports[s.sessionId], t.lastPromptAt)
+            let pending = AskQueue.live(asks[s.sessionId] ?? [], now: now)
             let (col, why) = CardRules.column(base: base, glow: glows[s.pid], report: report, decision: decisions[s.sessionId],
-                                              lastPrompt: t.lastPromptAt, lastActivity: t.lastActivity)
+                                              lastPrompt: t.lastPromptAt, lastActivity: t.lastActivity, pending: pending.first)
             let review = reviews[s.sessionId].flatMap { r in (t.lastPromptAt.map { r.turn >= $0 } ?? true) ? r : nil }
             let (project, visiting) = whereabouts(t.recentWorkCwds, fallback: t.lastCwd ?? s.cwd, home: home, isRepo: isRepo)
             let team = teams.first { $0.leadSessionId == s.sessionId }
@@ -454,6 +460,8 @@ public enum Board {
                                  cwd: t.lastWorkCwd ?? t.lastCwd ?? s.cwd, kind: s.kind, report: report, review: review,
                                  ctx: contexts[s.sessionId], name: s.name))
             if col == .active { out[out.count - 1].visiting = visiting }
+            out[out.count - 1].asks = pending
+            out[out.count - 1].stillWorking = !pending.isEmpty && (base.0 == .active || base.0 == .stuck)
             out[out.count - 1].unused = t.lastActivity == nil && t.lastPrompt == nil   // 只有正在做事才有影分身，閒著不留幽靈
             // 10-20：動作／卡住原因／子 agent／token。同步子 agent 只在主 session 還沒停時算（停了還掛著＝被中斷的殘留）
             let waiting = col == .review && glows[s.pid] == .input
