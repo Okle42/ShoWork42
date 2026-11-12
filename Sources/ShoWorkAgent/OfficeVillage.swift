@@ -285,7 +285,9 @@ final class VillageBuilder {
                 p.node.simdPosition = SIMD3(Float(p.goal.x), 0, Float(p.goal.z)); p.node.eulerAngles.y = CGFloat(p.face)
                 p.seated = true
                 self.persons[id] = p
-                self.onPlay?(0.2)
+                // 坐下的人是第一位（還沒人拿水煙壺）⇒ 馬上交給他、吸一口（不用等下一次閒晃）
+                let t = self.bongHolder == nil && self.canAnimate() ? self.passBong(puff: true) : 0
+                self.onPlay?(max(0.2, t))
             }
         }
     }
@@ -488,8 +490,11 @@ final class VillageBuilder {
         let k = CGFloat(Self.personScale)
         let b = VillageArt.bong()
         b.name = "bong"
-        b.scale = SCNVector3(k, k, k)
-        b.position = SCNVector3(0.5 * k, CGFloat(TowerSpec.seatTop) * k + 0.05, 0.45 * k)
+        // 11-12 實機：原本放在 x 0.65，坐著的 Kubo 身體半寬約 0.69 ⇒ 整支藏在身體裡看不到（他說「沒有在傳」）。
+        // 改放在右手外側（手在 x≈0.83）、坐墩高度、放大：不管從哪個方向看都在身體外面
+        let kb = k * 1.6
+        b.scale = SCNVector3(kb, kb, kb)
+        b.position = SCNVector3(0.98, CGFloat(TowerSpec.seatTop) * k - 0.05, 0.15)
         p.node.addChildNode(b)
         guard puff, !Look.reduceMotion else { return 0.2 }
         // 吸一口：頭往後仰一下，頭頂冒三團煙往上飄、變淡、消失
