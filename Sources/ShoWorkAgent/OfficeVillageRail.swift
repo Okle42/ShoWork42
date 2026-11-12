@@ -10,6 +10,7 @@ struct VillageRail: View {
     var alerts: [VillageSign] = []
     let onPlace: (String) -> Void
     let onPerson: (String) -> Void
+    @ObservedObject private var school = SchoolStore.shared
 
     static let red = Color(red: 0.94, green: 0.27, blue: 0.27), orange = Color(red: 0.98, green: 0.45, blue: 0.09)
     static let green = Color(red: 0.13, green: 0.77, blue: 0.37), purple = Color(red: 0.65, green: 0.55, blue: 0.98)
@@ -24,8 +25,9 @@ struct VillageRail: View {
                     ForEach(Array(plan.stalls.enumerated()), id: \.offset) { i, s in
                         place("place:stall:\(i)", "storefront", s, sub: "小攤")
                     }
+                    place("place:school", "graduationcap", "學校", sub: school.state.summary)
                     place("place:campfire", "flame", "營火", sub: plazaCount)
-                    place("place:facility", "wind", "風車・水塔・海・熱氣球・倉庫", sub: alerts.isEmpty ? "一切正常" : alerts.map(\.text).joined(separator: "、"),
+                    place("place:facility", "wind", "風車・水塔・海・熱氣球・小棚子", sub: alerts.isEmpty ? "一切正常" : alerts.map(\.text).joined(separator: "、"),
                           alert: !alerts.isEmpty)
                     header("島民 \(plan.residents.filter(\.online).count)")
                     ForEach(people, id: \.id) { r in person(r) }

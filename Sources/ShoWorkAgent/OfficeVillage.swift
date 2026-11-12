@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SceneKit
 import simd
 import ShoWorkCore
@@ -49,6 +50,39 @@ enum VillageStore {
     }
 }
 
+/// 學校資料（研究資料夾；只讀）：每 60 秒在背景數一次 .md，變了才發布（11-12 第三輪）
+@MainActor
+final class SchoolStore: ObservableObject {
+    static let shared = SchoolStore()
+    @Published private(set) var state = SchoolState()
+    private var timer: Timer?
+    private var busy = false
+
+    func start() {
+        guard timer == nil else { return }
+        refresh()
+        let t = Timer(timeInterval: 60, repeats: true) { _ in MainActor.assumeIsolated { SchoolStore.shared.refresh() } }
+        t.tolerance = 15
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
+    }
+
+    func refresh() {
+        guard !busy else { return }
+        busy = true
+        let cfg = VillageStore.config?.school
+        DispatchQueue.global(qos: .utility).async {
+            let s = SchoolScan.scan(cfg)
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    self.busy = false
+                    if s != self.state { self.state = s }
+                }
+            }
+        }
+    }
+}
+
 /// 場景設定：小島（預設）／大樓
 enum OfficeScene3D: String, CaseIterable {
     case island, tower
@@ -78,6 +112,9 @@ final class VillageBuilder {
     private var stallNode: SCNNode?
     private var stallSig = ""
     private var wellNode: SCNNode?
+    private var schoolNode: SCNNode?
+    private var schoolSub: AnyCancellable?
+    private var schoolTotal: Int?
     private var seaNode: SCNNode?
     private var seaTide = 0.6
     private var wellSig = ""
@@ -122,8 +159,20 @@ final class VillageBuilder {
         add(sea, pick: true)
         add(VillageArt.terrain())
         add(VillageArt.company(), pick: true)
-        for (k, n) in [("windmill", VillageArt.windmill()), ("balloon", VillageArt.balloon()), ("warehouse", VillageArt.warehouse())] {
+        for (k, n) in [("windmill", VillageArt.windmill()), ("balloon", VillageArt.balloon()), ("warehouse", VillageArt.diskShed())] {
             facilityNodes[k] = n; add(n, pick: true)
+        }
+        // 學校（11-12 第三輪：原本倉庫那間）：研究資料夾一變就更新；有新筆記冒一顆星星
+        let school = VillageArt.school()
+        add(school, pick: true)
+        schoolNode = school
+        SchoolStore.shared.start()
+        schoolSub = SchoolStore.shared.$state.dropFirst().removeDuplicates().receive(on: DispatchQueue.main).sink { [weak self] st in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                if let old = self.schoolTotal, st.total > old { self.onPlay?(self.flashSchool()) }
+                self.schoolTotal = st.total
+            }
         }
         // 夜晚：廣場、店屋、公司小屋三盞暖燈（強度跟著天色／停電，setLamps）
         for p in [SCNVector3(0, 4.5, 3), SCNVector3(-5, 4.2, -5), SCNVector3(12, 4.2, 1), SCNVector3(0, 4.5, -5.5)] {
@@ -517,6 +566,18 @@ final class VillageBuilder {
         return 3.4
     }
 
+    /// 有新筆記：學校屋頂冒一顆星星（跳上去、轉一圈、淡掉）；回傳要播幾秒
+    func flashSchool() -> TimeInterval {
+        guard !Look.reduceMotion else { return 0 }
+        let star = VillageArt.star()
+        star.position = SCNVector3(VillageLayout.school.cx, 4.2, VillageLayout.school.cz + 1.0)
+        star.enumerateHierarchy { c, _ in c.categoryBitMask |= 1 | OfficeBuilder.outdoorMask }
+        root.addChildNode(star)
+        star.runAction(.sequence([.group([.moveBy(x: 0, y: 1.6, z: 0, duration: 0.8), .rotateBy(x: 0, y: .pi * 2, z: 0, duration: 1.6)]),
+                                  .wait(duration: 0.6), .fadeOut(duration: 0.6), .removeFromParentNode()]))
+        return 3.1
+    }
+
     // MARK: 車（11-12 第二輪：車型、顏色、停哪寫在本機設定；車主點了才看到）
 
     private var carNodes: [SCNNode] = []
@@ -642,7 +703,8 @@ final class VillageBuilder {
         if id == "city:power" { return v(VillageLayout.well, 5.4) }
         if id == "city:fuel" { return SCNVector3(0, 0, VillageLayout.radius + 4.5) }
         if id.hasPrefix("city:cloud:") { return SCNVector3(VillageLayout.balloonTether.x + 1.5, 9.5, VillageLayout.balloonTether.z + 2.5) }
-        if id.hasPrefix("city:disk:") { return v(VPoint(VillageLayout.warehouse.cx, VillageLayout.warehouse.cz), 4.2) }
+        if id.hasPrefix("city:disk:") { return v(VPoint(VillageLayout.diskShed.cx, VillageLayout.diskShed.cz), 2.6) }
+        if id == "city:school" { return v(VPoint(VillageLayout.school.cx, VillageLayout.school.cz), 5.2) }
         return nil
     }
 
@@ -655,6 +717,7 @@ final class VillageBuilder {
         case "shop": return r(VillageLayout.shop)
         case "company": return r(VillageLayout.company)
         case "plaza": return (SIMD3(VillageLayout.plaza.x, 1, VillageLayout.plaza.z), 11)
+        case "school": return r(VillageLayout.school, 2.4)
         case "campfire": return (SIMD3(VillageLayout.campfire.x, 1, VillageLayout.campfire.z), 10)
         case "facility": return (SIMD3(0, 2, 2), 34)
         default:
@@ -1172,19 +1235,53 @@ enum VillageArt {
         return m.node(name: "city:cloud:iCloud")
     }
 
-    /// 倉庫小屋（內建碟）：木板牆、紅棕屋頂、穀倉門、門口幾個木箱
-    static func warehouse() -> SCNNode {
-        let b = VillageLayout.warehouse
+    /// 內建碟的小棚子（11-12 第三輪：倉庫讓給學校；東南邊不起眼的小木棚）
+    static func diskShed() -> SCNNode {
+        let b = VillageLayout.diskShed
+        let m = VoxelMesh(ao: 0), k = Kit(m: m), xf = Xf(x: F(b.cx), y: 0, z: F(b.cz))
+        let w = F(b.w), d = F(b.d)
+        k.b(xf, 0, 0, 0, w, 1.4, d, VoxMat.tex("darkplank"))
+        k.b(xf, 0, 1.4, 0, w + 0.3, 0.12, d + 0.3, TM.f(0x6E4A2E))
+        k.b(xf, 0, 0, d / 2 + 0.02, 0.8, 1.1, 0.05, TM.f(0x8A4B32))
+        k.b(xf, w / 2 + 0.4, 0, 0.2, 0.5, 0.5, 0.5, VoxMat.tex("plank"))
+        return m.node(name: "city:disk:內建碟")
+    }
+
+    /// 學校（研究資料夾）：奶白牆、紅屋頂、鐘樓掛金鐘、旁邊旗桿、門口招牌「學校」
+    static func school() -> SCNNode {
+        let b = VillageLayout.school
         let m = VoxelMesh(ao: 0), k = Kit(m: m), xf = Xf(x: F(b.cx), y: 0, z: F(b.cz))
         let w = F(b.w), d = F(b.d), zf = d / 2
-        k.b(xf, 0, 0, 0, w, 2.3, d, VoxMat.tex("darkplank"))
-        roof(k, xf, y0: 2.3, w: w, d: d, steps: 4, rise: 0.32, inset: 0.4, TM.f(0x8A4B32))
-        k.b(xf, 0, 0, zf + 0.02, 1.5, 1.8, 0.06, TM.f(0xB8463A))
-        k.b(xf, 0, 0.1, zf + 0.06, 1.5, 0.1, 0.04, TM.f(0xF4EEE2)); k.b(xf, 0, 1.6, zf + 0.06, 1.5, 0.1, 0.04, TM.f(0xF4EEE2))
-        for (x, y, z) in [(1.4, 0, zf + 0.7), (1.0, 0, zf + 1.2), (1.2, 0.6, zf + 0.9)] as [(Float, Float, Float)] {
-            k.b(xf, x, y, z, 0.6, 0.6, 0.6, VoxMat.tex("plank"))
-        }
-        return m.node(name: "city:disk:內建碟")
+        let wall = VoxMat.dayNight(0xF6EBD3, 0x8E8678), trim = TM.f(0xB8463A)
+        k.b(xf, 0, 0, 0, w + 0.3, 0.2, d + 0.3, TM.f(stone))
+        k.b(xf, 0, 0.2, 0, w, 2.2, d, wall)
+        k.b(xf, 0, 2.4, 0, w + 0.1, 0.12, d + 0.1, trim)
+        roof(k, xf, y0: 2.52, w: w, d: d, steps: 4, rise: 0.3, inset: 0.4, TM.f(0xB8463A))
+        // 鐘樓＋金鐘
+        k.b(xf, 0, 3.6, 0, 0.9, 0.9, 0.9, wall)
+        for x: Float in [-0.35, 0.35] { k.b(xf, x, 4.5, 0, 0.12, 0.6, 0.12, TM.f(woodDark)) }
+        k.b(xf, 0, 4.45, 0, 0.36, 0.36, 0.36, TM.glow(0xF2C230, 0.3, 1.0))
+        roof(k, xf, y0: 5.1, w: 0.9, d: 0.9, steps: 3, rise: 0.2, inset: 0.25, TM.f(0x8A3528), ridgeAlongX: false)
+        // 門（紅門）、窗
+        k.b(xf, 0, 0.2, zf + 0.02, 0.9, 1.6, 0.06, trim)
+        for x: Float in [-1.25, 1.25] { k.b(xf, x, 0.9, zf + 0.02, 0.7, 0.7, 0.06, window); k.b(xf, x, 0.85, zf + 0.06, 0.8, 0.08, 0.08, TM.f(woodDark)) }
+        // 旗桿
+        k.b(xf, -w / 2 - 0.6, 0, zf - 0.3, 0.08, 3.6, 0.08, TM.f(0x8A8F94))
+        k.b(xf, -w / 2 - 0.25, 3.0, zf - 0.3, 0.6, 0.4, 0.04, TM.f(0x3D8BD9))
+        let n = m.node(name: "city:school")
+        n.addChildNode(sign(board("學校", w: 1.3, h: 0.42, bg: 0x2F5E3A, fg: 0xFFF6DD, rim: 0xD4AF4F), w: 1.3, h: 0.42,
+                            at: SCNVector3(b.cx, 2.0, b.cz + Double(zf) + 0.06), back: 0x23452B))
+        return n
+    }
+
+    /// 新筆記的小星星
+    static func star() -> SCNNode {
+        let m = VoxelMesh()
+        let g = VoxMat.flat(0xFFE07A, emit: (0.9, 1.6))
+        m.box(.identity, SIMD3(0, 0, 0), SIMD3(0.5, 0.18, 0.12), g)
+        m.box(.identity, SIMD3(0, 0, 0), SIMD3(0.18, 0.5, 0.12), g)
+        m.box(.identity, SIMD3(0, 0, 0), SIMD3(0.3, 0.3, 0.12), g)
+        return m.node(name: "star")
     }
 
     /// 頭上的「！」（紅底方塊＋白色驚嘆號，兩面都看得到）

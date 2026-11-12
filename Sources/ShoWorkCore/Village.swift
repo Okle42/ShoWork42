@@ -28,6 +28,8 @@ public struct VillageConfig: Codable, Sendable, Equatable {
     public var petLabel: String? = nil
     /// 主人（看板使用者）那個角色的名牌；沒寫＝「你」
     public var ownerLabel: String? = nil
+    /// 學校（研究資料夾）
+    public var school: VillageSchoolConfig? = nil
     public init(shopName: String? = nil, zones: [String: String]? = nil, shopKeywords: [String]? = nil, cars: [VillageCarConfig]? = nil,
                 petName: String? = nil, petLabel: String? = nil, ownerLabel: String? = nil) {
         self.shopName = shopName; self.zones = zones; self.shopKeywords = shopKeywords; self.cars = cars
@@ -294,7 +296,7 @@ public enum VillageSigns {
         }
         if let c = s.clouds.first(where: { $0.isICloud && $0.alert }) { out.append(.init(id: c.id, text: "熱氣球漏氣：" + CityText.cloud(c))) }
         if let d = s.disks.first(where: { $0.isInternal && $0.alert }) {
-            out.append(.init(id: d.id, text: "倉庫快滿了：內建碟已用 \(Int(((d.used ?? 0) * 100).rounded()))%"))
+            out.append(.init(id: d.id, text: "小棚子快滿了：內建碟已用 \(Int(((d.used ?? 0) * 100).rounded()))%"))
         }
         return out
     }
@@ -349,7 +351,10 @@ public enum VillageLayout {
     public static let fountain = VRect(0, 3, 2.2, 2.2)
     public static let well = VPoint(6.2, 6.4)        // 水塔（11-12 第二輪：水井改高架水塔）
     public static let windmill = VPoint(18.5, 9.5)
-    public static let warehouse = VRect(-18.2, 11.6, 3.6, 3.0)
+    public static let warehouse = VRect(-18.2, 11.6, 3.6, 3.0)      // 11-12 第三輪：這塊改成學校
+    public static var school: VRect { warehouse }
+    /// 內建碟的小棚子（不起眼，東南邊）
+    public static let diskShed = VRect(15.8, 14.0, 2.0, 1.6)
     public static let balloonTether = VPoint(-9, -19.5)
     /// 個人小攤（攤子本體；攤主站在攤子後面、面向 +z）
     public static let stalls: [VRect] = [VRect(-8.5, 11, 2.4, 1.4), VRect(-2.8, 13.5, 2.4, 1.4), VRect(2.8, 13.5, 2.4, 1.4),
@@ -408,7 +413,7 @@ public enum VillageLayout {
 
     /// 地上擋路的東西（找路、點地面時避開）。stallCount＝現在有畫幾個小攤
     public static func obstacles(stallCount: Int = stalls.count) -> [VRect] {
-        var o = [townhall, shop, company, fountain, warehouse, VRect(campfire.x, campfire.z, 1.4, 1.4),
+        var o = [townhall, shop, company, fountain, warehouse, diskShed, VRect(campfire.x, campfire.z, 1.4, 1.4),
                  VRect(well.x, well.z, 2.2, 2.2), VRect(windmill.x, windmill.z, 2.4, 2.4), VRect(balloonTether.x, balloonTether.z, 0.8, 0.8)]
         o += carSpots.values.flatMap { $0 }.map { VRect($0.x, $0.z, carSize.w, carSize.d) }
         o += stalls.prefix(stallCount)
@@ -509,5 +514,91 @@ public enum VillagePath {
 
     public static func length(_ pts: [VPoint]) -> Double {
         zip(pts, pts.dropFirst()).reduce(0) { $0 + $1.0.dist($1.1) }
+    }
+}
+
+// MARK: - 學校（11-12 第三輪：研究資料夾＝學校，一個子資料夾一間教室）
+
+public struct VillageSchoolConfig: Codable, Sendable, Equatable {
+    public var root: String?        // 研究資料夾（每個子資料夾＝一科）；沒寫＝SchoolScan.defaultRoot
+    public var fallback: String?    // 研究資料夾還不存在時，當成唯一一科的資料夾；沒寫＝SchoolScan.defaultFallback
+    public var fallbackName: String?
+    public init(root: String? = nil, fallback: String? = nil, fallbackName: String? = nil) {
+        self.root = root; self.fallback = fallback; self.fallbackName = fallbackName
+    }
+}
+
+public struct SchoolSubject: Sendable, Equatable {
+    public var name: String
+    public var notes: Int
+    public var latest: Date?
+    public init(name: String, notes: Int, latest: Date?) { self.name = name; self.notes = notes; self.latest = latest }
+}
+
+public struct SchoolState: Sendable, Equatable {
+    public var subjects: [SchoolSubject] = []
+    public var source = ""              // 讀的是哪個資料夾
+    public var usingFallback = false    // 研究資料夾還沒建，先讀備用那一科
+    public init() {}
+    public var total: Int { subjects.reduce(0) { $0 + $1.notes } }
+    public var latest: Date? { subjects.compactMap(\.latest).max() }
+    /// 左側清單那一行：「N 科・M 篇」
+    public var summary: String { subjects.isEmpty ? "還沒有科目" : "\(subjects.count) 科・\(total) 篇" }
+}
+
+/// 只讀：數資料夾裡的 .md，不建資料夾、不搬檔案
+public enum SchoolScan {
+    public static let defaultRoot = "~/Documents/Obsidian/大腦/研究"
+    public static let defaultFallback = "~/Documents/Obsidian/大腦/AI知識庫"
+
+    static func expand(_ p: String, home: String) -> String {
+        p == "~" ? home : p.hasPrefix("~/") ? home + String(p.dropFirst(1)) : p
+    }
+
+    /// 一個資料夾（含子資料夾）裡有幾篇 .md、最新改的是什麼時候；隱藏檔／隱藏資料夾（.obsidian 之類）不算
+    public static func count(_ dir: URL, fm: FileManager = .default) -> (Int, Date?) {
+        guard let e = fm.enumerator(at: dir, includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
+                                    options: [.skipsHiddenFiles, .skipsPackageDescendants]) else { return (0, nil) }
+        var n = 0, latest: Date?
+        for case let u as URL in e where u.pathExtension.lowercased() == "md" {
+            let v = try? u.resourceValues(forKeys: [.contentModificationDateKey, .isRegularFileKey])
+            guard v?.isRegularFile ?? true else { continue }
+            n += 1
+            if let d = v?.contentModificationDate, latest.map({ d > $0 }) ?? true { latest = d }
+        }
+        return (n, latest)
+    }
+
+    static func isDir(_ p: String, fm: FileManager) -> Bool {
+        var d: ObjCBool = false
+        return fm.fileExists(atPath: p, isDirectory: &d) && d.boolValue
+    }
+
+    /// 研究資料夾在：每個子資料夾一科（依名字排序），直接放在根目錄的 .md 算「未分類」；
+    /// 不在：備用資料夾當成唯一一科；兩個都不在＝沒有科目
+    public static func scan(_ cfg: VillageSchoolConfig?, home: String = NSHomeDirectory(), fm: FileManager = .default) -> SchoolState {
+        var s = SchoolState()
+        let root = expand(cfg?.root ?? defaultRoot, home: home)
+        if isDir(root, fm: fm) {
+            s.source = root
+            let kids = ((try? fm.contentsOfDirectory(atPath: root)) ?? []).filter { !$0.hasPrefix(".") }.sorted()
+            for k in kids where isDir(root + "/" + k, fm: fm) {
+                let (n, d) = count(URL(fileURLWithPath: root + "/" + k, isDirectory: true), fm: fm)
+                s.subjects.append(SchoolSubject(name: k, notes: n, latest: d))
+            }
+            let loose = kids.filter { $0.lowercased().hasSuffix(".md") && !isDir(root + "/" + $0, fm: fm) }
+            if !loose.isEmpty {
+                let dates = loose.compactMap { (try? fm.attributesOfItem(atPath: root + "/" + $0))?[.modificationDate] as? Date }
+                s.subjects.append(SchoolSubject(name: "未分類", notes: loose.count, latest: dates.max()))
+            }
+            return s
+        }
+        let fb = expand(cfg?.fallback ?? defaultFallback, home: home)
+        if isDir(fb, fm: fm) {
+            s.source = fb; s.usingFallback = true
+            let (n, d) = count(URL(fileURLWithPath: fb, isDirectory: true), fm: fm)
+            s.subjects = [SchoolSubject(name: cfg?.fallbackName ?? "AI", notes: n, latest: d)]
+        }
+        return s
     }
 }

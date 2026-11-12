@@ -1940,6 +1940,9 @@ final class OfficeSCNView: SCNView {
                 DispatchQueue.main.asyncAfter(deadline: .now() + (Double(env["SHOWORK_OFFICE_HOVER_DELAY"] ?? "") ?? 1.5)) { [self] in
                     var pt: NSPoint?
                     if onLabel, let r = labels.rect(id) { pt = NSPoint(x: r.midX, y: r.midY) }      // 名牌框跟 label(at:) 同一個座標系（這個 view 的）
+                    if pt == nil, builder.islandMode, let c = builder.village.point(id) {      // 小島：設施的點（11-12）
+                        let q = projectPoint(c); pt = NSPoint(x: q.x, y: q.y)
+                    }
                     if pt == nil, let c = builder.city.hitCenter(id) {
                         let q = projectPoint(c); pt = NSPoint(x: q.x, y: q.y)
                     }

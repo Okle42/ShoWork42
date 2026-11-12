@@ -1096,12 +1096,13 @@ struct CityDetail: View {
     /// 小島模式（11-12）：同一組資料，名字換成島上的東西
     @MainActor static var island = false
     @MainActor static func title(_ id: String, _ city: CityState) -> String {
+        if id == "city:school" { return "🏫 學校・研究筆記" }
         if island {
             if id == "city:power" { return "🗼 水塔・AI 額度（5 小時）" }
             if id == "city:fuel" { return "🌊 海・AI 額度（7 天，潮位）" }
             if id == "city:cooler" { return "🌬 風車・這台 Mac 的溫度" }
             if let c = city.clouds.first(where: { $0.id == id }) { return "🎈 熱氣球・" + c.name }
-            if let d = city.disks.first(where: { $0.id == id }), d.isInternal { return "🛖 倉庫小屋・\(CityText.diskName(d))" }
+            if let d = city.disks.first(where: { $0.id == id }), d.isInternal { return "🛖 小棚子・\(CityText.diskName(d))" }
         }
         if let d = city.disks.first(where: { $0.id == id }) { return "📦 貨櫃堆場・\(CityText.diskName(d))" }
         if let c = city.clouds.first(where: { $0.id == id }) { return (CityBuilder.airshipStyle == 4 ? "🛸 飛碟・" : "🎈 飛艇・") + c.name }
@@ -1208,6 +1209,8 @@ struct CityDetail: View {
                 }
             }
             if let t = f.checkedAt { note("每 5 分鐘檢查；上次 \(Self.ago(t))") }
+        } else if id == "city:school" {
+            SchoolDetail(compact: compact)
         } else if id == "city:power" || id == "city:fuel" {
             let g = city.grid, now = Date()
             Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 3) {
@@ -1256,5 +1259,33 @@ struct UsageBar: View {
             }
         }
         .frame(height: 6)
+    }
+}
+
+
+/// 學校細節（研究資料夾的科目與篇數；11-12 第三輪）
+struct SchoolDetail: View {
+    var compact = false
+    @ObservedObject private var store = SchoolStore.shared
+    var body: some View {
+        let s = store.state
+        VStack(alignment: .leading, spacing: 4) {
+            if s.subjects.isEmpty {
+                Text("還沒有科目（研究資料夾還沒建，或裡面沒有子資料夾）").foregroundStyle(.secondary)
+            } else {
+                Text(s.summary + (s.usingFallback ? "（研究資料夾還沒分類，先讀 AI 知識庫）" : "")).font(.caption.weight(.semibold))
+                Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 2) {
+                    ForEach(Array(s.subjects.prefix(compact ? 10 : 40).enumerated()), id: \.offset) { _, x in
+                        GridRow {
+                            Text(x.name).lineLimit(1)
+                            Text("\(x.notes) 篇").monospacedDigit()
+                            Text(x.latest.map { CityDetail.ago($0) } ?? "—").foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                if s.subjects.count > (compact ? 10 : 40) { Text("⋯還有 \(s.subjects.count - (compact ? 10 : 40)) 科").font(.caption).foregroundStyle(.secondary) }
+            }
+            if !compact { Text("資料夾：" + s.source).font(.caption2).foregroundStyle(.tertiary).lineLimit(2) }
+        }
     }
 }

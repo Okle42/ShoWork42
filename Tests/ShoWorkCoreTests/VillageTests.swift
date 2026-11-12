@@ -157,7 +157,7 @@ struct VillageTests {
         for i in VillageLayout.homes.indices { pts.append(VillageLayout.homeDoor(i)) }
         for p in pts { #expect(VillageLayout.walkable(p, obstacles: obs, pad: 0.1), "\(p) 擋住了") }
         // 障礙物彼此不重疊（房子不疊在一起）
-        let solid = [VillageLayout.shop, VillageLayout.company, VillageLayout.warehouse, VRect(VillageLayout.campfire.x, VillageLayout.campfire.z, 1.4, 1.4)]
+        let solid = [VillageLayout.shop, VillageLayout.company, VillageLayout.warehouse, VillageLayout.diskShed, VRect(VillageLayout.campfire.x, VillageLayout.campfire.z, 1.4, 1.4)]
             + VillageLayout.carSpots.values.flatMap { $0 }.map { VRect($0.x, $0.z, VillageLayout.carSize.w, VillageLayout.carSize.d) }
             + VillageLayout.stalls + VillageLayout.homes.map { VRect($0.x, $0.z, VillageLayout.homeSize, VillageLayout.homeSize) }
         for (i, a) in solid.enumerated() { for b in solid[(i + 1)...] {
@@ -218,5 +218,41 @@ struct VillageTests {
         #expect(c.petTitle("Puppy") == "小白（Puppy）")
         #expect(VillageConfig(petName: "x").petTitle("x") == "x")
         #expect(c.ownerTitle == "老大" && VillageConfig().ownerTitle == "你")
+    }
+
+    @Test("學校：子資料夾＝科目、數 .md（含子資料夾、不算隱藏）、根目錄的算未分類；不存在用備用；都不在＝沒科目；中文名")
+    func school() throws {
+        let fm = FileManager.default
+        let home = fm.temporaryDirectory.appendingPathComponent("school-\(UUID().uuidString)").path
+        defer { try? fm.removeItem(atPath: home) }
+        func write(_ p: String) throws {
+            let u = URL(fileURLWithPath: home + "/" + p)
+            try fm.createDirectory(at: u.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data("x".utf8).write(to: u)
+        }
+        let cfg = VillageSchoolConfig(root: "~/研究", fallback: "~/AI知識庫")
+        // 兩個都不在
+        try fm.createDirectory(atPath: home, withIntermediateDirectories: true)
+        #expect(SchoolScan.scan(cfg, home: home).subjects.isEmpty)
+        #expect(SchoolScan.scan(cfg, home: home).summary == "還沒有科目")
+        // 只有備用：當成一科「AI」
+        try write("AI知識庫/a.md"); try write("AI知識庫/子/b.md"); try write("AI知識庫/c.txt"); try write("AI知識庫/.obsidian/d.md")
+        var s = SchoolScan.scan(cfg, home: home)
+        #expect(s.usingFallback && s.subjects == [SchoolSubject(name: "AI", notes: 2, latest: s.subjects.first?.latest)])
+        // 研究資料夾建了但是空的：0 科（不再用備用）
+        try fm.createDirectory(atPath: home + "/研究", withIntermediateDirectories: true)
+        s = SchoolScan.scan(cfg, home: home)
+        #expect(!s.usingFallback && s.subjects.isEmpty)
+        // 中文科目、空科目、根目錄散落的筆記
+        try write("研究/機場接送/a.md"); try write("研究/機場接送/深/b.md"); try write("研究/音樂/c.md")
+        try fm.createDirectory(atPath: home + "/研究/空的", withIntermediateDirectories: true)
+        try write("研究/散的.md")
+        s = SchoolScan.scan(cfg, home: home)
+        #expect(s.subjects.map(\.name) == ["機場接送", "空的", "音樂", "未分類"])
+        #expect(s.subjects.map(\.notes) == [2, 0, 1, 1])
+        #expect(s.total == 4 && s.summary == "4 科・4 篇")
+        #expect(s.subjects[1].latest == nil && s.subjects[0].latest != nil)
+        // 沒設定＝預設路徑（~/Documents/Obsidian/大腦/研究）
+        #expect(SchoolScan.scan(nil, home: home).subjects.isEmpty)
     }
 }
