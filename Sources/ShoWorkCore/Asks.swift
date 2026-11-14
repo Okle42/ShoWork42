@@ -6,7 +6,8 @@ import Foundation
 //   ② 同一個 session 後來再發一張卡，前一題（例如 某組員的一題）就被蓋掉；
 //   ③ AI 發完 --ask 又動一下工具，光暈變回工作中，問題從「等你回答」消失（Puppy 01:05:34→01:05:39）。
 // 改成 --ask 另外排進 board/asks/<sid>.json：不管 status、後來的卡片、工作中事件，都留著，
-// 只有「你在戰情中心回答」「AI 自己撤回（showork asks withdraw）」「放超過 ttl」才拿掉。最早的先問。
+// 只有「你在戰情中心回答」「你在那個終端機打字回答」「AI 自己撤回（showork asks withdraw）」「放超過 ttl」才拿掉。最早的先問。
+// 11-14 使用者：在終端機那邊回答了，戰情中心的題目還掛著 ⇒ 使用者本人在那個 session 打字（UserPromptSubmit）就清掉它的待答題。
 
 public struct PendingAsk: Codable, Sendable, Equatable, Identifiable {
     public var id: String              // Q＋4 碼，撤回用
@@ -112,5 +113,31 @@ public enum AskQueue {
         let ys = id == "all" ? [] : xs.filter { $0.id.caseInsensitiveCompare(id) != .orderedSame }
         save(sid, ys)
         return xs.count - ys.count
+    }
+
+    /// 使用者本人在終端機打的字才算回答：其他 session／看板轉送／系統訊息（<…> 標籤，含戰情中心回答）不算；
+    /// 「放行」是在回權限擋單，不是回答問題
+    public static func isTerminalAnswer(_ prompt: String?) -> Bool {
+        guard CaptainLink.needsStart(prompt: prompt) else { return false }
+        return !(prompt ?? "").trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("放行")
+    }
+
+    /// 使用者在這個 session 的終端機打字回答 ⇒ 這個 session 的待答題全部拿掉、卡片上的 --ask 清掉；
+    /// 隊長卡片／佇列掛著同一題的也清掉（不轉【使用者已答】：答案在組員那邊，隊長巡檢看得到，不為這個叫醒隊長）。回傳拿掉的題
+    @discardableResult
+    public static func answeredInTerminal(sid: String, prompt: String?, captain: String? = nil,
+                                          cardsDir: URL = Paths.supportDir.appendingPathComponent("board/cards", isDirectory: true)) -> [PendingAsk] {
+        guard isTerminalAnswer(prompt) else { return [] }
+        let xs = load(sid)
+        guard !xs.isEmpty else { return [] }
+        save(sid, [])
+        for q in xs {
+            Answered.clearCaptainCard(sid: sid, question: q.ask, dir: cardsDir)
+            if let cap = captain, cap != sid {
+                Answered.clearCaptainCard(sid: cap, question: q.ask, dir: cardsDir)
+                resolve(sid: cap, question: q.ask)
+            }
+        }
+        return xs
     }
 }

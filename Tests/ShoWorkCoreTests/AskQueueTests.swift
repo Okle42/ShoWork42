@@ -123,4 +123,39 @@ struct AskQueueTests {
         let c = try BoardJSON.decoder.decode(BoardCard.self, from: Data(old.utf8))
         #expect(c.asks.isEmpty && !c.stillWorking)
     }
+
+    @Test("11-14：在終端機打字回答 ⇒ 那個 session 的待答題清掉；戰情中心轉來的回答、其他 session 訊息、放行不算")
+    func terminalAnswer() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("asks-term-\(UUID().uuidString)")
+        let cards = dir.appendingPathComponent("cards")
+        try FileManager.default.createDirectory(at: cards, withIntermediateDirectories: true)
+        setenv("SHOWORK_ASKS_DIR", dir.appendingPathComponent("asks").path, 1)
+        defer { unsetenv("SHOWORK_ASKS_DIR"); try? FileManager.default.removeItem(at: dir) }
+
+        let r = SelfReport(status: .review, summary: "等你", ask: "要不要寄？", options: ["寄", "不要"], at: now)
+        AskQueue.record(sid: "S", report: r, now: now)
+        AskQueue.record(sid: "S", report: SelfReport(status: .blocked, summary: "再等", ask: "第二題？", at: now + 5), now: now + 5)
+        AskQueue.record(sid: "CAP", report: r, now: now)                 // 隊長也掛著同一題
+        try BoardJSON.encoder.encode(r).write(to: cards.appendingPathComponent("S.json"))
+        try BoardJSON.encoder.encode(r).write(to: cards.appendingPathComponent("CAP.json"))
+
+        // 不算回答：戰情中心轉來的（另外走 resolve，只拿掉答的那一題）、其他 session、系統通知、放行、空白
+        for p in ["<cross-session-message from=\"uds:\" from-name=\"AI工作戰情中心（使用者）\">【使用者從戰情中心回答你的問題】寄</cross-session-message>",
+                  "<cross-session-message from=\"uds:\" from-name=\"Bob\">你好</cross-session-message>",
+                  "<task-notification>done</task-notification>", "放行", "放行 BX12", "  ", nil] as [String?] {
+            #expect(AskQueue.answeredInTerminal(sid: "S", prompt: p, captain: "CAP", cardsDir: cards).isEmpty, "\(p ?? "nil")")
+        }
+        #expect(AskQueue.load("S").count == 2)
+
+        // 本人在終端機打字：兩題都清、卡片 --ask 清、隊長同一題也清
+        let gone = AskQueue.answeredInTerminal(sid: "S", prompt: "寄吧", captain: "CAP", cardsDir: cards)
+        #expect(gone.map(\.ask) == ["要不要寄？", "第二題？"])
+        #expect(AskQueue.load("S").isEmpty && AskQueue.load("CAP").isEmpty)
+        for f in ["S.json", "CAP.json"] {
+            let left = try BoardJSON.decoder.decode(SelfReport.self, from: Data(contentsOf: cards.appendingPathComponent(f)))
+            #expect(left.ask == nil, "\(f)")
+        }
+        // 沒有待答題時打字什麼都不動
+        #expect(AskQueue.answeredInTerminal(sid: "S", prompt: "再一個", captain: "CAP", cardsDir: cards).isEmpty)
+    }
 }

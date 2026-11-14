@@ -126,6 +126,8 @@ if args.first == "title" {
         return "使用者這則指令已點名放行單號 \(item.id)（\(item.text)）。現在可以再跑一次剛才被擋下的同一個指令（30 分鐘內有效、只能用一次）。"
     }()
     let handoverNote = event == "UserPromptSubmit" ? sid.flatMap { Handover.noteNewPrompt(sid: $0, prompt: prompt) } : nil
+    // 11-14 使用者：在終端機回答了，戰情中心「等你回答」的題還掛著 ⇒ 本人在這個 session 打字就清掉（Asks.swift）
+    if event == "UserPromptSubmit", let sid { AskQueue.answeredInTerminal(sid: sid, prompt: prompt, captain: CaptainStore.captain()?.sessionId) }
     let startNag: String? = {
         guard event == "UserPromptSubmit", let sid, CaptainLink.needsStart(prompt: prompt) else { return nil }
         let p = (prompt ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
