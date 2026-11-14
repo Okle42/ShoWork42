@@ -234,7 +234,10 @@ enum BoardActions {
         }
         // 10-31：戰情中心的回答本身就是使用者的決定 ⇒ 答「放行」直接放行這個 AI 等著的單；答案點名的對外動作記成事先放行（CaptainInbox.usePreapproval）
         if line.hasPrefix("放行") {
-            _ = CaptainInbox.release(id: nil, target: c.sessionId, by: "戰情中心", byName: "使用者（戰情中心回答）", source: "戰情中心回答", now: Date())
+            // 11-14：放行落空（沒有一天內的單）以前是靜默略過，AI 以為放行了、重跑又被擋 ⇒ 跟終端機打字一樣明講
+            if CaptainInbox.release(id: nil, target: c.sessionId, by: "戰情中心", byName: "使用者（戰情中心回答）", source: "戰情中心回答", now: Date()) == nil {
+                line += "（戰情中心：\(CaptainLink.releaseMissText(id: nil))）"
+            }
         } else {
             CaptainInbox.recordAnswer(sid: c.sessionId, answer: said, question: question, now: Date())   // 不含「回答的是」註記（題目的問號不能害答案被當問句）
         }
