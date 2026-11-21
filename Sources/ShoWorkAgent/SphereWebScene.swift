@@ -16,7 +16,7 @@ import ShoWorkCore
 //     mini {on}、openBoard（v3 #7：桌面常駐小球）
 // 球體的狀態與播報由網頁自己判（狀態一變就說一句）。
 // 語音（v2，11-21）：macOS 內建台灣中文語音（AVSpeechSynthesizer），網頁上的喇叭按鈕開關，預設關。
-// ⚠ 不准用 Keng 本人的聲音（11-21 Keng 下令；記憶 feedback_不准用Keng的聲音）。按住講話只做本機即時辨識成文字，不存音檔。
+// ⚠ 不准用使用者本人的聲音（11-21 使用者下令）。按住講話只做本機即時辨識成文字，不存音檔。
 
 @MainActor
 final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandler, AVSpeechSynthesizerDelegate {
@@ -79,7 +79,7 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
             jump(c)
         case "speak": speak(str("text") ?? "")
         case "stopSpeaking": synth.stopSpeaking(at: .immediate); edge.stop()
-        case "setVoice":       // 11-21 Keng：換聲音（選單選了就存起來、馬上試聽一句）
+        case "setVoice":       // 11-21 使用者：換聲音（選單選了就存起來、馬上試聽一句）
             guard let id = str("id"), SphereVoices.all().contains(where: { $0.id == id }) else { return }
             SphereVoices.selected = id
             pushPrefs()
@@ -367,8 +367,8 @@ struct SphereWebScene: NSViewRepresentable {
     static func dismantleNSView(_ v: NSView, coordinator: Coordinator) { coordinator.host?.tearDown(); coordinator.host = nil }
 }
 
-// MARK: - 聲音選單（11-21 Keng：不喜歡預設那個聲音 ⇒ 讓他自己挑、可試聽）
-// ⚠ 只列現成的合成聲音；不准用 Keng 本人的聲音（記憶 feedback_不准用Keng的聲音）
+// MARK: - 聲音選單（11-21 使用者：不喜歡預設那個聲音 ⇒ 讓他自己挑、可試聽）
+// ⚠ 只列現成的合成聲音；不准用使用者本人的聲音
 
 enum SphereVoices {
     struct Voice { let id: String; let name: String; let group: String }

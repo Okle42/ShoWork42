@@ -30,7 +30,7 @@
 `brief` 沒有自動接手、`card --kind wrapup` 只存卡片（沒有自動 /clear）。`showork.exe` 也算 showork 自己的指令（不預告）。
 規則清單照 Mac：Windows 的暫存區（`%TEMP%`、`C:\Users\…\AppData\Local\Temp`）**不算**暫存區，rm 到那裡會被擋；要放寬改 `preview.tsv`。
 
-**還沒做**：permit（收件匣按允許）、事先放行的「回答」UI（Windows 看板還不寫 `preapprovals.json`，只會讀與用掉）、預告合併送隊長（`notice` 只進收件匣）、roster／task／b1、自動交接。
+**還沒做**：事先放行的「回答」UI（Windows 看板還不寫 `preapprovals.json`，只會讀與用掉）、預告合併送隊長（`notice` 只進收件匣）、roster／task／b1、自動交接。
 
 ## 做法（對照 macOS 版）
 

@@ -227,7 +227,7 @@ const STATES = {
 let state = "idle", tgt = { ...STATES.idle }, cur = { ...STATES.idle };
 let speakAmp = 0;               // 說話時的「音量」，驅動球體脹縮
 const PINK = new THREE.Color("#ff5c93"), CYAN = new THREE.Color("#6fd6ff"), ORANGE = new THREE.Color("#ffb020"), RED = new THREE.Color("#ff4d4d");
-// 11-21 Keng：顏色不要瞬間跳 ⇒ 每個會換色的東西都走 Fade：從「現在的顏色」用 1.2 秒緩入緩出漸到新顏色（中途又換也是從當下接著漸）
+// 11-21 使用者：顏色不要瞬間跳 ⇒ 每個會換色的東西都走 Fade：從「現在的顏色」用 1.2 秒緩入緩出漸到新顏色（中途又換也是從當下接著漸）
 const nowS = () => performance.now() / 1000;
 class Fade {
   constructor(c, dur = 1.2) { this.c = c.clone(); this.from = c.clone(); this.to = c.clone(); this.t0 = -1e9; this.dur = dur; }
@@ -408,7 +408,7 @@ let lastDraw = 0, wordPulse = 0, bounceAt = -1e9;
 const bitMats = new Set(bits.map(b => b.material));
 function frame(now) {
   requestAnimationFrame(frame);
-  // 11-21 Keng 錄影：機器熱時降到 8 張／秒，看起來一頓一頓 ⇒ 不再砍張數，改砍解析度（像素少 4 倍，GPU 省更多）
+  // 11-21 使用者錄影：機器熱時降到 8 張／秒，看起來一頓一頓 ⇒ 不再砍張數，改砍解析度（像素少 4 倍，GPU 省更多）
   // 平常跟螢幕同步（60 張）；機器熱、桌面小球：30 張＋1 倍解析度
   const lean = data.paused || MINI;
   const want = lean ? 1 : Math.min(devicePixelRatio, 2);

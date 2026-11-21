@@ -13,7 +13,7 @@ namespace ShoWork;
 ///     交給 BoardForm（ActionReceived；要卡片資料）：focus、answer、permit、captain、ask、sessionInfo、timeline、openBoard
 /// 語音：Windows 內建 SAPI 的中文合成語音（COM SAPI.SpVoice，不另裝套件）；沒有中文語音就不出聲，照樣回 karaVoice("end")，網頁不會卡住。
 /// 按住講話：Windows 版還沒做（回 karaHeard("", true)＋說明）。
-/// ⚠ 不准用 Keng 本人的聲音（記憶 feedback_不准用Keng的聲音）：只列系統已安裝的合成語音，不錄音、不存音檔。
+/// ⚠ 不准用使用者本人的聲音：只列系統已安裝的合成語音，不錄音、不存音檔。
 /// 測試模式（--board-window／--board-demo）：不出聲、不碰麥克風（照 Mac 假裝聽到一句）；回答、放行、交給隊長由 BoardForm 擋。
 sealed class SphereHost : IDisposable
 {
