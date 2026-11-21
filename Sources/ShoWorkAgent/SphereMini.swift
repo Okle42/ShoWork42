@@ -11,7 +11,7 @@ import ShoWorkCore
 @MainActor
 final class SphereMini: NSObject, NSWindowDelegate {
     static let shared = SphereMini()
-    private static let defaults = UserDefaults(suiteName: "ai.okle42.showork")
+    nonisolated(unsafe) private static let defaults = UserDefaults(suiteName: "ai.okle42.showork")
     private var panel: NSPanel?
     private var host: SphereWebHost?
     static let size = NSSize(width: 200, height: 210)

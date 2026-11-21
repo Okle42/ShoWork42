@@ -30,9 +30,7 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
     private var model: BoardModel { BoardModel.shared }
     private let synth = AVSpeechSynthesizer()
     private var listener: SphereListener?
-    private static let voice: AVSpeechSynthesisVoice? =
-        AVSpeechSynthesisVoice.speechVoices().filter { $0.language == "zh-TW" }.max { $0.quality.rawValue < $1.quality.rawValue }
-        ?? AVSpeechSynthesisVoice(language: "zh-TW")
+    private let edge = SphereEdgeVoice()
 
     init?(dir: URL? = WorkWindow.webDir, mini: Bool = false) {
         guard let dir, FileManager.default.fileExists(atPath: dir.appendingPathComponent("sphere.html").path) else { return nil }
@@ -63,7 +61,7 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
         subs.removeAll()
         ticker?.invalidate(); ticker = nil
         listener?.stop(); listener = nil
-        synth.stopSpeaking(at: .immediate)
+        synth.stopSpeaking(at: .immediate); edge.stop()
         web.configuration.userContentController.removeScriptMessageHandler(forName: "sphere")
     }
 
@@ -80,7 +78,12 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
             guard let c = card(str("sessionId")) else { return say("找不到這個 session 了。") }
             jump(c)
         case "speak": speak(str("text") ?? "")
-        case "stopSpeaking": synth.stopSpeaking(at: .immediate)
+        case "stopSpeaking": synth.stopSpeaking(at: .immediate); edge.stop()
+        case "setVoice":       // 11-21 Keng：換聲音（選單選了就存起來、馬上試聽一句）
+            guard let id = str("id"), SphereVoices.all().contains(where: { $0.id == id }) else { return }
+            SphereVoices.selected = id
+            pushPrefs()
+            speak(str("sample") ?? "你好，我是球體助理，之後就用這個聲音播報。")
         case "answer":
             guard let c = card(str("sessionId")) else { return say("這個 session 已經不在了。") }
             let text = (str("text") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -177,9 +180,19 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
             DispatchQueue.main.asyncAfter(deadline: .now() + min(8, 0.18 * Double(t.count))) { [weak self] in self?.voice("end") }
             return
         }
-        synth.stopSpeaking(at: .immediate)
+        synth.stopSpeaking(at: .immediate); edge.stop()
+        let id = SphereVoices.selected
+        if id.hasPrefix("edge:") {
+            // 微軟神經語音：edge-tts 合成 mp3（要網路；文字會送到微軟），播放時用音量驅動球跳動
+            edge.speak(String(t.prefix(300)), voice: String(id.dropFirst(5))) { [weak self] ev in
+                DispatchQueue.main.async { MainActor.assumeIsolated { self?.voice(ev) } }
+            } failed: { [weak self] in
+                DispatchQueue.main.async { MainActor.assumeIsolated { self?.voice("end"); self?.say("微軟語音連不上，先改用系統語音。") } }
+            }
+            return
+        }
         let u = AVSpeechUtterance(string: String(t.prefix(300)))
-        u.voice = Self.voice
+        u.voice = AVSpeechSynthesisVoice(identifier: String(id.dropFirst(6))) ?? AVSpeechSynthesisVoice(language: "zh-TW")
         u.rate = AVSpeechUtteranceDefaultSpeechRate * 1.05
         synth.speak(u)
     }
@@ -228,7 +241,10 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
         }
     }
 
-    private func pushPrefs() { js("window.karaPrefs", ["mini": SphereMini.shared.enabled]) }
+    private func pushPrefs() {
+        js("window.karaPrefs", ["mini": SphereMini.shared.enabled, "voice": SphereVoices.selected,
+                                "voices": SphereVoices.all().map { ["id": $0.id, "name": $0.name, "group": $0.group] }])
+    }
 
     private func push() {
         guard loaded else { return }
@@ -323,4 +339,108 @@ struct SphereWebScene: NSViewRepresentable {
     func updateNSView(_ v: NSView, context: Context) {}
 
     static func dismantleNSView(_ v: NSView, coordinator: Coordinator) { coordinator.host?.tearDown(); coordinator.host = nil }
+}
+
+// MARK: - 聲音選單（11-21 Keng：不喜歡預設那個聲音 ⇒ 讓他自己挑、可試聽）
+// ⚠ 只列現成的合成聲音；不准用 Keng 本人的聲音（記憶 feedback_不准用Keng的聲音）
+
+enum SphereVoices {
+    struct Voice { let id: String; let name: String; let group: String }
+    nonisolated(unsafe) private static let defaults = UserDefaults(suiteName: "ai.okle42.showork")
+    /// 微軟神經語音（edge-tts；要網路，播報文字會送到微軟）
+    static let edgeVoices: [(String, String)] = [
+        ("zh-TW-HsiaoChenNeural", "曉臻（台灣女聲）"), ("zh-TW-HsiaoYuNeural", "曉雨（台灣女聲）"),   // 雲哲 YunJhe 免費接口一直失敗（11-21 再試仍失敗），不列
+        ("zh-CN-XiaoxiaoNeural", "曉曉（溫暖女聲）"), ("zh-CN-XiaoyiNeural", "曉伊（活潑女聲）"),
+        ("zh-CN-YunxiNeural", "雲希（陽光男聲）"), ("zh-CN-YunyangNeural", "雲揚（新聞男聲）"), ("zh-CN-YunjianNeural", "雲健（熱血男聲）"),
+    ]
+    static func all() -> [Voice] {
+        let apple = AVSpeechSynthesisVoice.speechVoices().filter { $0.language == "zh-TW" }
+        var seen = Set<String>(), out: [Voice] = []
+        // 同名留品質最好的那個
+        for v in apple.sorted(by: { $0.quality.rawValue > $1.quality.rawValue }) where !seen.contains(v.name) {
+            seen.insert(v.name)
+            let name = v.identifier.contains("Shufen") ? "淑芬（系統高品質女聲）" : v.name == "Meijia" ? "美佳（系統女聲）" : v.name
+            out.append(Voice(id: "apple:" + v.identifier, name: name, group: "Mac 內建（離線）"))
+        }
+        if SphereEdgeVoice.binary != nil {
+            out += edgeVoices.map { Voice(id: "edge:" + $0.0, name: $0.1, group: "微軟神經語音（要網路，文字會送到微軟）") }
+        }
+        return out
+    }
+    static var selected: String {
+        get {
+            if let s = defaults?.string(forKey: "sphere.voiceId"), all().contains(where: { $0.id == s }) { return s }
+            return all().first?.id ?? "apple:"
+        }
+        set { defaults?.set(newValue, forKey: "sphere.voiceId") }
+    }
+}
+
+/// edge-tts 合成＋播放；放的時候每 60ms 看音量，聲音冒上來就回報一次 "word"（讓球跟著跳）
+final class SphereEdgeVoice: NSObject, AVAudioPlayerDelegate, @unchecked Sendable {
+    static var binary: String? {
+        let cands = [ProcessInfo.processInfo.environment["SHOWORK_EDGE_TTS"], NSHomeDirectory() + "/github-repos/lipsync-lab/.venv/bin/edge-tts",
+                     "/opt/homebrew/bin/edge-tts"].compactMap { $0 }
+        return cands.first { FileManager.default.isExecutableFile(atPath: $0) }
+    }
+    private static let cache = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("ShoWork42/sphere-tts", isDirectory: true)
+    private var player: AVAudioPlayer?
+    private var meter: Timer?
+    private var onEvent: ((String) -> Void)?
+    private var gen = 0
+    private var loud = false
+
+    func speak(_ text: String, voice: String, onEvent: @escaping @Sendable (String) -> Void, failed: @escaping @Sendable () -> Void) {
+        gen += 1; let g = gen
+        guard let bin = Self.binary else { return failed() }
+        try? FileManager.default.createDirectory(at: Self.cache, withIntermediateDirectories: true)
+        let key = String(UInt64(bitPattern: Int64("\(voice)|\(text)".hashValue)), radix: 36)
+        // hashValue 每次啟動會變：快取只在這次執行有效（夠用：同一句常重播的是試聽）
+        let out = Self.cache.appendingPathComponent("\(voice)-\(key).mp3")
+        DispatchQueue.global().async {
+            if !FileManager.default.fileExists(atPath: out.path) {
+                let p = Process()
+                p.executableURL = URL(fileURLWithPath: bin)
+                p.arguments = ["-v", voice, "--text=\(text)", "--write-media=\(out.path)"]
+                p.standardOutput = FileHandle.nullDevice; p.standardError = FileHandle.nullDevice
+                do { try p.run() } catch { return failed() }
+                let deadline = Date().addingTimeInterval(20)
+                while p.isRunning && Date() < deadline { Thread.sleep(forTimeInterval: 0.05) }
+                if p.isRunning { p.terminate(); return failed() }
+                guard p.terminationStatus == 0 else { try? FileManager.default.removeItem(at: out); return failed() }
+            }
+            DispatchQueue.main.async { self.play(out, gen: g, onEvent: onEvent, failed: failed) }
+        }
+    }
+
+    private func play(_ url: URL, gen g: Int, onEvent: @escaping (String) -> Void, failed: () -> Void) {
+        guard g == gen else { return }        // 中途又換了一句／停了
+        guard let p = try? AVAudioPlayer(contentsOf: url) else { return failed() }
+        p.delegate = self; p.isMeteringEnabled = true
+        player = p; self.onEvent = onEvent
+        p.play(); onEvent("start")
+        meter = Timer.scheduledTimer(withTimeInterval: 0.06, repeats: true) { [weak self] _ in
+            guard let self, let p = self.player else { return }
+            p.updateMeters()
+            let db = p.averagePower(forChannel: 0)
+            if db > -24 && !self.loud { self.loud = true; self.onEvent?("word") }
+            else if db < -32 { self.loud = false }
+        }
+    }
+
+    func stop() {
+        gen += 1
+        if player != nil { finish() }
+    }
+
+    private func finish() {
+        meter?.invalidate(); meter = nil
+        player?.stop(); player = nil
+        let e = onEvent; onEvent = nil
+        e?("end")
+    }
+
+    func audioPlayerDidFinishPlaying(_ p: AVAudioPlayer, successfully: Bool) {
+        DispatchQueue.main.async { if p === self.player { self.finish() } }
+    }
 }

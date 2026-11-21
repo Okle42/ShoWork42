@@ -77,6 +77,8 @@
   #voice { position: fixed; top: 16px; right: 16px; width: 32px; height: 32px; display: grid; place-items: center;
     background: var(--panel); border: 1px solid var(--line); border-radius: 50%; color: var(--ink-dim); cursor: pointer; padding: 0; }
   #voice.on { color: var(--pink); border-color: var(--pink-dim); }
+  #voiceSel { appearance: none; -webkit-appearance: none; max-width: 150px; padding-right: 10px; }
+  #voiceSel option, #voiceSel optgroup { background: #13111a; color: var(--ink); }
   #tools #voice { width: 30px; height: 24px; padding: 0; border-radius: 14px; }
   canvas#gl { cursor: pointer; }
   /* v3 #1：需要你的選項面板 */
@@ -166,6 +168,7 @@
   <button class="pill sm" id="bBrief" title="唸一次早報（今天的狀況與額度）">早報</button>
   <button class="pill sm" id="bWrap" title="唸收工總結（今天做完什麼、還剩什麼）">收工</button>
   <button class="pill sm" id="bMini" title="桌面常駐小球：開／關">小球</button>
+  <select class="pill sm" id="voiceSel" title="播報的聲音（選了會試聽一句）" aria-label="播報的聲音" hidden></select>
   <button class="pill sm" id="voice" aria-label="語音開關"></button>
 </div>
 <div id="state">待命</div>
@@ -380,8 +383,13 @@ let lastDraw = 0, wordPulse = 0;
 const bitMats = new Set(bits.map(b => b.material));
 function frame(now) {
   requestAnimationFrame(frame);
-  // 最多 30 張／秒（省電）；桌面小球 20 張；機器熱（cool42／停電）時 8 張（再低漸變會一格一格跳）
-  if (now - lastDraw < (data.paused ? 125 : MINI ? 50 : 31)) return;
+  // 11-21 Keng 錄影：機器熱時降到 8 張／秒，看起來一頓一頓 ⇒ 不再砍張數，改砍解析度（像素少 4 倍，GPU 省更多）
+  // 平常跟螢幕同步（60 張）；機器熱、桌面小球：30 張＋1 倍解析度
+  const lean = data.paused || MINI;
+  const want = lean ? 1 : Math.min(devicePixelRatio, 2);
+  if (renderer.getPixelRatio() !== want) { renderer.setPixelRatio(want); resize(); }
+  const gap = lean ? 33.3 : 0;
+  if (now - lastDraw < gap - 4) return;          // 留 4ms 誤差，避免 60Hz 螢幕上偶爾跳過一格變成頓
   lastDraw = now;
   const dt = Math.min(clock.getDelta(), 0.08), t = clock.elapsedTime;
   for (const k in cur) cur[k] += (tgt[k] - cur[k]) * Math.min(1, dt * 3);
@@ -568,7 +576,12 @@ window.karaUpdate = (d) => {
   syncSats(data.team || []); syncOuter(data.runs, data.heat);
   diff(data.team || []); quota(); renderAsk(); autoState(); brief();
 };
-window.karaPrefs = (p) => { $("bMini").classList.toggle("on", !!p.mini); $("bMini").title = p.mini ? "桌面小球：開（點一下關掉）" : "桌面小球：關（點一下打開）"; };
+window.karaPrefs = (p) => {
+  if (p.voices) {
+    const sel = $("voiceSel"), groups = [...new Set(p.voices.map(v => v.group))];
+    sel.innerHTML = groups.map(g => `<optgroup label="${esc(g)}">${p.voices.filter(v => v.group === g).map(v => `<option value="${esc(v.id)}">${esc(v.name)}</option>`).join("")}</optgroup>`).join("");
+    sel.value = p.voice; sel.hidden = false;
+  } $("bMini").classList.toggle("on", !!p.mini); $("bMini").title = p.mini ? "桌面小球：開（點一下關掉）" : "桌面小球：關（點一下打開）"; };
 
 /* ---------- v3 #4 額度預警：跨過門檻（5 小時 70／90／100，7 天 80／95）就說一次 ---------- */
 let quotaLv = null;
@@ -618,6 +631,10 @@ function brief() {
 $("bBrief").onclick = () => announce(briefText());
 $("bWrap").onclick = () => announce(wrapText());
 $("bMini").onclick = () => post({ action: "mini" });
+$("voiceSel").onchange = e => {
+  if (!voiceOn) { voiceOn = true; try { localStorage.setItem("sphere.voice", "1"); } catch {} renderVoice(); }   // 選聲音＝想聽：順手打開語音
+  post({ action: "setVoice", id: e.target.value });
+};
 
 /* ---------- v3 #1 需要你：球下方的選項面板（回答／放行），一次一件，‹ › 換下一件 ---------- */
 let askSid = null;
