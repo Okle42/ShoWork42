@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<!-- 戰情中心第四個分頁「球體」（11-21 Kang：參考 IG 的 K.A.R.A 2.0 球體助理）。原型在 IGSkills42/research/kara。
+     原生端每次資料變動呼叫 window.karaUpdate({five_hour, seven_day, ctx, sessions, team:[{name,status,progress,doing}]})。 -->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>球體助理</title>
+<style>
+  :root {
+    --bg: #05050a;
+    --grid: rgba(255,255,255,.07);
+    --pink: #ff5c93;
+    --pink-dim: rgba(255,92,147,.35);
+    --ink: #f3eef2;
+    --ink-dim: rgba(243,238,242,.55);
+    --panel: rgba(18,16,24,.78);
+    --line: rgba(255,255,255,.14);
+    --cyan: #6fd6ff;
+    --warn: #ffb020;
+    --bad: #ff4d4d;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); overflow: hidden;
+    font-family: "SF Pro Display", -apple-system, "PingFang TC", sans-serif; }
+  body::before { content: ""; position: fixed; inset: 0; pointer-events: none;
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 48px 48px; background-position: center;
+    mask-image: radial-gradient(ellipse at center, #000 30%, transparent 85%); }
+  canvas#gl { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+
+  /* 上方字幕列 */
+  #caption { position: fixed; top: 16px; left: 50%; transform: translateX(-50%);
+    width: min(560px, calc(100% - 32px)); background: var(--panel); border: 1px solid var(--line);
+    border-radius: 6px; padding: 10px 14px 12px; backdrop-filter: blur(8px); }
+  #caption .who { font-size: 10px; letter-spacing: .18em; color: var(--ink-dim); display: flex; gap: 8px; align-items: center; }
+  #caption .who i { width: 6px; height: 6px; border-radius: 50%; background: var(--pink); display: inline-block; }
+  #caption .text { margin-top: 6px; font-size: 15px; letter-spacing: .04em; min-height: 1.4em; }
+  #caption .bar { margin-top: 8px; height: 2px; background: var(--line); border-radius: 1px; overflow: hidden; }
+  #caption .bar b { display: block; height: 100%; width: 0; background: var(--pink); transition: width .25s; }
+
+  /* 資訊小卡 */
+  .card { position: fixed; background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+    padding: 10px 12px; min-width: 200px; backdrop-filter: blur(8px);
+    opacity: 0; transform: translateY(6px) scale(.98); transition: opacity .35s, transform .35s; pointer-events: none; }
+  .card.on { opacity: 1; transform: none; }
+  .card .k { font-size: 10px; letter-spacing: .18em; color: var(--ink-dim); }
+  .card .head { display: flex; justify-content: space-between; align-items: baseline; margin: 4px 0 8px; }
+  .card .head span { font-size: 14px; letter-spacing: .06em; }
+  .card .head b { font-size: 24px; font-weight: 500; font-variant-numeric: tabular-nums; }
+  .row { display: grid; grid-template-columns: 44px 1fr auto; gap: 8px; font-size: 12px; padding: 5px 0;
+    border-top: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+  .row .t { color: var(--ink-dim); font-size: 10px; letter-spacing: .12em; padding-top: 1px; }
+  .meter { grid-column: 1 / -1; height: 2px; background: var(--line); margin-top: 3px; }
+  .meter b { display: block; height: 100%; background: var(--pink); }
+  #cardUsage { left: 24px; top: 34%; }
+  #cardTeam { right: 24px; top: 42%; }
+
+  #state { position: fixed; bottom: 64px; left: 0; right: 0; text-align: center; font-size: 12px;
+    letter-spacing: .32em; color: var(--ink-dim); }
+  #controls { position: fixed; bottom: 16px; left: 0; right: 0; display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; padding: 0 16px; }
+  #controls button { background: transparent; color: var(--ink-dim); border: 1px solid var(--line); border-radius: 14px;
+    padding: 5px 12px; font: inherit; font-size: 12px; cursor: pointer; }
+  #controls button:hover, #controls button.on { color: var(--ink); border-color: var(--pink-dim); }
+  body.embedded #controls { display: none; }
+  @media (max-width: 640px) {
+    #cardUsage { left: 16px; top: auto; bottom: 120px; min-width: 0; width: calc(50% - 24px); }
+    #cardTeam { right: 16px; top: auto; bottom: 120px; min-width: 0; width: calc(50% - 24px); }
+  }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+
+<div id="caption">
+  <div class="who"><i></i><span id="who">球體 · 待命</span></div>
+  <div class="text" id="capText"></div>
+  <div class="bar"><b id="capBar"></b></div>
+</div>
+
+<div class="card" id="cardUsage">
+  <div class="k">額度 · 用量</div>
+  <div class="head"><span>這 7 天</span><b id="u7">--%</b></div>
+  <div class="row"><span class="t">CTX</span><span>記憶量（最近的 session）</span><span id="uc">--%</span><div class="meter"><b id="mc"></b></div></div>
+  <div class="row"><span class="t">5H</span><span>5 小時額度</span><span id="u5">--%</span><div class="meter"><b id="m5"></b></div></div>
+  <div class="row"><span class="t">7D</span><span>7 天額度</span><span id="u7b">--%</span><div class="meter"><b id="m7"></b></div></div>
+</div>
+
+<div class="card" id="cardTeam">
+  <div class="k">戰情 · SESSION</div>
+  <div class="head"><span>在線</span><b id="ns">--</b></div>
+  <div id="teamRows"></div>
+</div>
+
+<div id="state">待命</div>
+<div id="controls">
+  <button data-s="idle">待命</button>
+  <button data-s="listening">聆聽</button>
+  <button data-s="thinking">思考</button>
+  <button data-s="searching">搜尋</button>
+  <button data-s="speaking">說話</button>
+  <button id="demo">▶ 示範一輪</button>
+</div>
+
+<script type="importmap">
+{ "imports": { "three": "./vendor/three-r170/three.module.min.js" } }
+</script>
+<script type="module">
+import * as THREE from "three";
+
+/* ---------- 狀態定義：每個狀態的轉速、亮度、標籤 ---------- */
+const STATES = {
+  idle:      { label: "待命",  spin: 0.15, glow: 0.45, pulse: 0.0, scatter: 0 },
+  listening: { label: "聆聽中", spin: 0.25, glow: 0.75, pulse: 0.35, scatter: 0 },
+  thinking:  { label: "思考中", spin: 0.9,  glow: 0.65, pulse: 0.15, scatter: 0 },
+  searching: { label: "搜尋中", spin: 1.4,  glow: 0.85, pulse: 0.1, scatter: 1 },
+  speaking:  { label: "說話中", spin: 0.35, glow: 1.0,  pulse: 0.0, scatter: 0 },
+  alert:     { label: "需要你", spin: 0.6,  glow: 1.0,  pulse: 0.6, scatter: 0 },
+};
+let state = "idle", tgt = { ...STATES.idle }, cur = { ...STATES.idle };
+let speakAmp = 0;               // 說話時的「音量」，驅動球體脹縮
+const PINK = new THREE.Color("#ff5c93"), CYAN = new THREE.Color("#6fd6ff"), ORANGE = new THREE.Color("#ffb020"), RED = new THREE.Color("#ff4d4d");
+let accent = PINK.clone(), accentTgt = PINK.clone();
+
+/* ---------- three.js 場景 ---------- */
+const canvas = document.getElementById("gl");
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100);
+camera.position.set(0, 0, 9);
+const root = new THREE.Group(); scene.add(root);
+
+const mats = [];
+function lineMat(op) { const m = new THREE.LineBasicMaterial({ color: PINK, transparent: true, opacity: op, blending: THREE.AdditiveBlending, depthWrite: false }); m.userData.base = op; mats.push(m); return m; }
+function meshMat(op) { const m = new THREE.MeshBasicMaterial({ color: PINK, transparent: true, opacity: op, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }); m.userData.base = op; mats.push(m); return m; }
+
+// 1. 內核：會被「聲音」擾動的線框球
+// 線框只建一次，之後每格直接移動它的頂點（不重建幾何，省 CPU）
+const coreGeo = new THREE.WireframeGeometry(new THREE.IcosahedronGeometry(1.15, 4));
+const corePos0 = coreGeo.attributes.position.array.slice();
+const core = new THREE.LineSegments(coreGeo, lineMat(0.10));
+root.add(core);
+
+// 2. 三角面殼：每個面縮小成一片小三角形（影片裡的三角鏤空）
+const shell = new THREE.Group(); root.add(shell);
+{
+  const ico = new THREE.IcosahedronGeometry(1.55, 1).toNonIndexed();
+  const p = ico.attributes.position;
+  const tri = [], v = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()], c = new THREE.Vector3();
+  for (let i = 0; i < p.count; i += 3) {
+    for (let k = 0; k < 3; k++) v[k].fromBufferAttribute(p, i + k);
+    c.copy(v[0]).add(v[1]).add(v[2]).divideScalar(3);
+    for (let k = 0; k < 3; k++) { const q = v[k].clone().lerp(c, 0.42); tri.push(q.x, q.y, q.z); }
+  }
+  const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute(tri, 3));
+  shell.add(new THREE.Mesh(g, meshMat(0.08)));
+  shell.add(new THREE.LineSegments(new THREE.EdgesGeometry(g), lineMat(0.45)));
+}
+
+// 3. 六角網格外殼（淡）
+{
+  const g = new THREE.IcosahedronGeometry(1.85, 1);
+  const hex = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.DodecahedronGeometry(1.85, 1)), lineMat(0.12));
+  root.add(hex); hex.userData.spin = -0.4; root.userData.hex = hex;
+}
+
+// 4. 環形 HUD：分段的圓弧，各自傾斜、各自轉
+const rings = [];
+function arcRing(r, w, segs, tilt, speed, op) {
+  const grp = new THREE.Group();
+  let a = 0;
+  for (let i = 0; i < segs; i++) {
+    const len = (Math.PI * 2 / segs) * (0.35 + Math.random() * 0.55);
+    const geo = new THREE.RingGeometry(r, r + w, 48, 1, a, len);
+    grp.add(new THREE.Mesh(geo, meshMat(op * (0.5 + Math.random() * 0.5))));
+    a += Math.PI * 2 / segs;
+  }
+  // 細線外框
+  const circ = new THREE.EllipseCurve(0, 0, r + w + 0.04, r + w + 0.04).getPoints(160);
+  grp.add(new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(circ), lineMat(op * 0.6)));
+  grp.rotation.set(tilt[0], tilt[1], tilt[2]);
+  grp.userData.speed = speed;
+  root.add(grp); rings.push(grp);
+  return grp;
+}
+arcRing(2.15, 0.07, 9, [1.25, 0.15, 0], 0.30, 0.55);
+arcRing(2.45, 0.04, 14, [1.05, -0.35, 0.2], -0.22, 0.45);
+arcRing(2.85, 0.12, 6, [1.35, 0.45, -0.1], 0.14, 0.40);
+arcRing(1.95, 0.02, 24, [0, 0, 0], -0.5, 0.35);
+
+// 5. 搜尋時往外飛的資料碎片
+const bits = [];
+{
+  const g = new THREE.CircleGeometry(0.06, 6);
+  for (let i = 0; i < 40; i++) {
+    const m = new THREE.Mesh(g, meshMat(0.0));
+    m.userData = { dir: new THREE.Vector3().randomDirection(), t: Math.random(), speed: 0.15 + Math.random() * 0.25 };
+    root.add(m); bits.push(m);
+  }
+}
+
+function resize() {
+  const w = innerWidth, h = innerHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  camera.position.z = w < h ? 13 : 9;     // 直式畫面拉遠一點，環才不會出框
+  camera.updateProjectionMatrix();
+}
+addEventListener("resize", resize); resize();
+
+/* ---------- 動畫 ---------- */
+const clock = new THREE.Clock();
+const tmp = new THREE.Vector3();
+function frame() {
+  const dt = Math.min(clock.getDelta(), 0.05), t = clock.elapsedTime;
+  for (const k in cur) cur[k] += (tgt[k] - cur[k]) * Math.min(1, dt * 3);
+  accent.lerp(accentTgt, Math.min(1, dt * 3));
+
+  // 說話：用幾個正弦湊出像講話的起伏；字幕在打字時才有聲
+  const talking = state === "speaking" && typing;
+  const amp = talking ? (0.5 + 0.5 * Math.sin(t * 17)) * (0.6 + 0.4 * Math.sin(t * 5.3)) : 0;
+  speakAmp += (amp - speakAmp) * Math.min(1, dt * 12);
+  const breathe = 1 + cur.pulse * 0.06 * Math.sin(t * 3) + speakAmp * 0.08;
+
+  // 內核頂點擾動
+  const pos = coreGeo.attributes.position.array;
+  const n = 0.06 + speakAmp * 0.22 + cur.spin * 0.03;
+  for (let i = 0; i < pos.length; i += 3) {
+    const x = corePos0[i], y = corePos0[i + 1], z = corePos0[i + 2];
+    const d = 1 + n * Math.sin(x * 3 + t * 2.1) * Math.sin(y * 3.4 + t * 1.7) * Math.sin(z * 2.7 + t * 1.3);
+    pos[i] = x * d; pos[i + 1] = y * d; pos[i + 2] = z * d;
+  }
+  coreGeo.attributes.position.needsUpdate = true;
+
+  core.rotation.y += dt * cur.spin * 0.6; core.rotation.x += dt * cur.spin * 0.2;
+  shell.rotation.y -= dt * cur.spin * 0.35; shell.rotation.z += dt * cur.spin * 0.1;
+  shell.scale.setScalar(breathe);
+  root.userData.hex.rotation.y += dt * root.userData.hex.userData.spin * cur.spin;
+  for (const r of rings) r.rotateZ(dt * r.userData.speed * (0.4 + cur.spin));
+
+  // 搜尋碎片
+  for (const b of bits) {
+    const u = b.userData; u.t = (u.t + dt * u.speed * (0.5 + cur.spin)) % 1;
+    b.position.copy(u.dir).multiplyScalar(1.6 + u.t * 3.2);
+    b.material.opacity = cur.scatter * Math.sin(u.t * Math.PI) * 0.9;
+    b.lookAt(camera.position);
+  }
+
+  // 整體亮度與顏色
+  for (const m of mats) {
+    if (bits.some(b => b.material === m)) { m.color.copy(accent); continue; }
+    m.color.copy(accent); m.opacity = m.userData.base * (0.45 + cur.glow * 0.55 + speakAmp * 0.35);
+  }
+  root.rotation.y = Math.sin(t * 0.2) * 0.15;
+  root.rotation.x = Math.sin(t * 0.17) * 0.08;
+
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+/* ---------- 狀態、字幕、小卡 ---------- */
+const $ = id => document.getElementById(id);
+function setState(s) {
+  if (!STATES[s]) return;
+  state = s; tgt = { ...STATES[s] };
+  accentTgt = s === "alert" ? ORANGE.clone() : s === "searching" ? PINK.clone().lerp(CYAN, 0.45) : PINK.clone();
+  $("state").textContent = STATES[s].label.split("").join(" ");
+  $("who").textContent = "球體 · " + STATES[s].label;
+  document.querySelectorAll("#controls button[data-s]").forEach(b => b.classList.toggle("on", b.dataset.s === s));
+}
+let typing = false, typeTimer = null;
+function say(text, ms = 70) {
+  return new Promise(res => {
+    clearInterval(typeTimer); typing = true;
+    const el = $("capText"), bar = $("capBar"); let i = 0;
+    el.textContent = "";
+    typeTimer = setInterval(() => {
+      i++; el.textContent = text.slice(0, i); bar.style.width = (i / text.length * 100) + "%";
+      if (i >= text.length) { clearInterval(typeTimer); typing = false; setTimeout(res, 600); }
+    }, ms);
+  });
+}
+const wait = ms => new Promise(r => setTimeout(r, ms));
+function show(id, on) { $(id).classList.toggle("on", on); }
+
+/* ---------- 資料：嵌在 ShoWork42 時由 App 推進來；單獨開時讀 /usage ---------- */
+let data = { five_hour: null, seven_day: null, ctx: null, sessions: null, team: [] };
+function pct(v) { return v == null ? "--%" : Math.round(v) + "%"; }
+function meter(id, v) { const b = $(id); b.style.width = (v ?? 0) + "%"; b.style.background = v >= 90 ? "var(--bad)" : v >= 70 ? "var(--warn)" : "var(--pink)"; }
+function render() {
+  $("u7").textContent = pct(data.seven_day); $("u7b").textContent = pct(data.seven_day);
+  $("u5").textContent = pct(data.five_hour); $("uc").textContent = pct(data.ctx);
+  meter("m7", data.seven_day); meter("m5", data.five_hour); meter("mc", data.ctx);
+  $("ns").textContent = data.sessions ?? "--";
+  $("teamRows").innerHTML = (data.team || []).slice(0, 6).map(c =>
+    `<div class="row"><span class="t">${esc(c.status || "")}</span><span>${esc(c.name || "")}${c.doing ? " · " + esc(c.doing) : ""}</span><span>${c.progress != null ? c.progress + "%" : ""}</span></div>`).join("");
+}
+function esc(s) { return String(s).replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch])); }
+window.karaUpdate = (d) => { embedded = true; document.body.classList.add("embedded"); Object.assign(data, d); render(); autoState(); };
+window.karaSetState = setState;
+window.karaSay = (text) => { setState("speaking"); return say(text).then(() => setState("idle")); };
+let embedded = false;
+async function poll() {
+  if (embedded) return;
+  try { const r = await fetch("/usage", { cache: "no-store" }); if (r.ok) { Object.assign(data, await r.json()); render(); } } catch {}
+}
+poll(); setInterval(poll, 30000);
+
+// 嵌在戰情中心時：有人等你回答就亮橘、有人在跑就轉、都閒就待命
+function autoState() {
+  if (demoRunning) return;
+  const team = data.team || [];
+  if (team.some(c => c.status === "需要你")) setState("alert");
+  else if (team.some(c => c.status === "進行中")) setState("thinking");
+  else setState("idle");
+  show("cardUsage", true); show("cardTeam", team.length > 0);
+  // 字幕列：一句話講現況（不打字、不算說話）
+  const n = st => team.filter(c => c.status === st).length;
+  const parts = [];
+  if (n("需要你")) parts.push(`${n("需要你")} 個在等你回答`);
+  if (n("進行中")) parts.push(`${n("進行中")} 個進行中`);
+  if (n("待審")) parts.push(`${n("待審")} 個待審`);
+  if (n("卡住")) parts.push(`${n("卡住")} 個卡住`);
+  const line = team.length ? parts.join("，") || "大家都閒著" : "目前沒有 session";
+  if (!typing && $("capText").textContent !== line) { $("capText").textContent = line; $("capBar").style.width = "100%"; }
+}
+
+/* ---------- 示範一輪（照影片的流程，數字用真的） ---------- */
+let demoRunning = false;
+async function demo() {
+  if (demoRunning) return; demoRunning = true;
+  show("cardUsage", false); show("cardTeam", false);
+  setState("speaking"); await say("你好，我是球體助理。");
+  setState("listening"); await say("我在聽。", 90); await wait(1200);
+  setState("thinking"); await say("讓我想一下⋯", 90); await wait(1400);
+  setState("searching"); await say("正在查資料、整理給你。"); await wait(1800);
+  setState("speaking"); show("cardUsage", true);
+  await say(`記憶量 ${pct(data.ctx)}，這 5 小時用了 ${pct(data.five_hour)}，這週 ${pct(data.seven_day)}。`);
+  show("cardTeam", true);
+  await say(`現在有 ${data.sessions ?? "幾"} 個 session 在跑。`);
+  await wait(800);
+  setState("idle"); await say("有事再叫我。"); demoRunning = false;
+}
+document.querySelectorAll("#controls button[data-s]").forEach(b => b.onclick = () => setState(b.dataset.s));
+$("demo").onclick = demo;
+addEventListener("keydown", e => { if (e.code === "Space") { e.preventDefault(); demo(); } });
+
+setState("idle"); render(); show("cardUsage", true);
+if (new URLSearchParams(location.search).has("demo")) setTimeout(demo, 600);
+</script>
+</body>
+</html>

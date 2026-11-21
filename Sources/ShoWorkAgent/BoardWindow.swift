@@ -181,6 +181,9 @@ struct BoardView: View {
                                reviewing: model.reviewing, onSendBack: { sendBackCard = $0 }, onPark: { parkCard = $0 },
                                onDispatch: { dispatchCard = $0 }, onToast: show, forcedScene: scene)
                     .id(scene)
+            } else if ((BoardWindow.testMode ? ProcessInfo.processInfo.environment["SHOWORK_TEST_VIEW"] : nil) ?? view) == "sphere" {
+                // 11-21 使用者：第四個分頁「球體助理」（參考 IG 的 K.A.R.A 2.0），見 SphereWebScene.swift
+                SphereWebScene()
             } else {
                 OfficeWebScene(onSendBack: { sendBackCard = $0 }, onPark: { parkCard = $0 },
                                onDispatch: { dispatchCard = $0 }, onToast: show)
@@ -221,6 +224,7 @@ struct BoardView: View {
             Image(systemName: "cube").tag("office").help("3D 辦公室")
             Image(systemName: "building.2").tag("tower").help("3D 辦公大樓")
             Image(systemName: "tree").tag("island").help("小島村莊")
+            Image(systemName: "circle.hexagongrid").tag("sphere").help("球體助理")
         }
         .pickerStyle(.segmented).labelsHidden().fixedSize()
         Button { newTask = true } label: { Label(short ? "新任務" : "新任務⋯", systemImage: "plus") }
