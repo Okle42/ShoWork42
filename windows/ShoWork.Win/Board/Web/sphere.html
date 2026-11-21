@@ -65,6 +65,15 @@
     padding: 5px 12px; font: inherit; font-size: 12px; cursor: pointer; }
   #controls button:hover, #controls button.on { color: var(--ink); border-color: var(--pink-dim); }
   body.embedded #controls { display: none; }
+  #cardTeam { pointer-events: auto; }
+  #cardTeam:not(.on) { pointer-events: none; }
+  .row.link { cursor: pointer; border-radius: 3px; }
+  .row.link:hover { background: rgba(255,255,255,.05); }
+  .row.need .t { color: var(--warn); }
+  #voice { position: fixed; top: 16px; right: 16px; width: 32px; height: 32px; display: grid; place-items: center;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 50%; color: var(--ink-dim); cursor: pointer; padding: 0; }
+  #voice.on { color: var(--pink); border-color: var(--pink-dim); }
+  canvas#gl { cursor: pointer; }
   @media (max-width: 640px) {
     #cardUsage { left: 16px; top: auto; bottom: 120px; min-width: 0; width: calc(50% - 24px); }
     #cardTeam { right: 16px; top: auto; bottom: 120px; min-width: 0; width: calc(50% - 24px); }
@@ -94,6 +103,7 @@
   <div id="teamRows"></div>
 </div>
 
+<button id="voice" aria-label="語音開關"></button>
 <div id="state">待命</div>
 <div id="controls">
   <button data-s="idle">待命</button>
@@ -214,14 +224,21 @@ addEventListener("resize", resize); resize();
 /* ---------- 動畫 ---------- */
 const clock = new THREE.Clock();
 const tmp = new THREE.Vector3();
-function frame() {
-  const dt = Math.min(clock.getDelta(), 0.05), t = clock.elapsedTime;
+let lastDraw = 0, wordPulse = 0;
+const bitMats = new Set(bits.map(b => b.material));
+function frame(now) {
+  requestAnimationFrame(frame);
+  if (now - lastDraw < 31) return;          // 最多 30 張／秒（省電；肉眼看不出差）
+  lastDraw = now;
+  const dt = Math.min(clock.getDelta(), 0.08), t = clock.elapsedTime;
   for (const k in cur) cur[k] += (tgt[k] - cur[k]) * Math.min(1, dt * 3);
   accent.lerp(accentTgt, Math.min(1, dt * 3));
 
   // 說話：用幾個正弦湊出像講話的起伏；字幕在打字時才有聲
-  const talking = state === "speaking" && typing;
-  const amp = talking ? (0.5 + 0.5 * Math.sin(t * 17)) * (0.6 + 0.4 * Math.sin(t * 5.3)) : 0;
+  // 有語音時跟著唸到的詞跳；沒語音就用正弦假裝
+  wordPulse *= Math.exp(-dt * 6);
+  const talking = state === "speaking" && (typing || voicing);
+  const amp = !talking ? 0 : voicing ? 0.35 + 0.65 * wordPulse : (0.5 + 0.5 * Math.sin(t * 17)) * (0.6 + 0.4 * Math.sin(t * 5.3));
   speakAmp += (amp - speakAmp) * Math.min(1, dt * 12);
   const breathe = 1 + cur.pulse * 0.06 * Math.sin(t * 3) + speakAmp * 0.08;
 
@@ -251,19 +268,20 @@ function frame() {
 
   // 整體亮度與顏色
   for (const m of mats) {
-    if (bits.some(b => b.material === m)) { m.color.copy(accent); continue; }
+    if (bitMats.has(m)) { m.color.copy(accent); continue; }
     m.color.copy(accent); m.opacity = m.userData.base * (0.45 + cur.glow * 0.55 + speakAmp * 0.35);
   }
   root.rotation.y = Math.sin(t * 0.2) * 0.15;
   root.rotation.x = Math.sin(t * 0.17) * 0.08;
 
   renderer.render(scene, camera);
-  requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
 
 /* ---------- 狀態、字幕、小卡 ---------- */
 const $ = id => document.getElementById(id);
+const host = () => window.webkit?.messageHandlers?.sphere;      // 嵌在戰情中心才有（每次現查：測試可以事後掛假的）
+const post = o => { try { host()?.postMessage(o); } catch {} };
 function setState(s) {
   if (!STATES[s]) return;
   state = s; tgt = { ...STATES[s] };
@@ -287,6 +305,50 @@ function say(text, ms = 70) {
 const wait = ms => new Promise(r => setTimeout(r, ms));
 function show(id, on) { $(id).classList.toggle("on", on); }
 
+/* ---------- 語音：原生端唸（AVSpeechSynthesizer），每唸到一個詞回 karaVoice("word") 讓球跳一下 ---------- */
+let voiceOn = false;
+try { voiceOn = localStorage.getItem("sphere.voice") === "1"; } catch {}
+let voicing = false, voiceDone = null;
+window.karaVoice = (ev) => {
+  if (ev === "word") wordPulse = 1;
+  else if (ev === "start") voicing = true;
+  else if (ev === "end") { voicing = false; const f = voiceDone; voiceDone = null; f?.(); }
+};
+function renderVoice() {
+  $("voice").classList.toggle("on", voiceOn);
+  $("voice").title = voiceOn ? "語音：開（點一下關掉）" : "語音：關（點一下打開）";
+  $("voice").innerHTML = voiceOn ? SPK_ON : SPK_OFF;
+}
+const SPK = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9v6h4l5 4V5L8 9z"/>';
+const SPK_ON = SPK + '<path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/></svg>';
+const SPK_OFF = SPK + '<path d="M17 9l5 6M22 9l-5 6"/></svg>';
+$("voice").onclick = () => {
+  voiceOn = !voiceOn; try { localStorage.setItem("sphere.voice", voiceOn ? "1" : "0"); } catch {}
+  renderVoice();
+  if (!voiceOn) post({ action: "stopSpeaking" });
+  else announce("語音打開了。");
+};
+// 一句話：打字＋（有開語音就）唸；唸完或打完才往下
+async function speak(text) {
+  const typed = say(text, voiceOn && host() ? 110 : 70);
+  if (voiceOn && host()) {
+    const spoken = new Promise(r => { voiceDone = r; setTimeout(r, 4000 + text.length * 350); });   // 保險：原生端沒回 end 也會往下
+    post({ action: "speak", text });
+    await Promise.all([typed, spoken]);
+  } else await typed;
+}
+
+/* ---------- 播報佇列：狀態一變就說，一次說一句 ---------- */
+const queue = []; let talkingNow = false;
+function announce(text) { if (queue.length < 6) queue.push(text); pump(); }
+async function pump() {
+  if (talkingNow || demoRunning) return;
+  talkingNow = true;
+  while (queue.length) { setState("speaking"); await speak(queue.shift()); }
+  talkingNow = false;
+  autoState();
+}
+
 /* ---------- 資料：嵌在 ShoWork42 時由 App 推進來；單獨開時讀 /usage ---------- */
 let data = { five_hour: null, seven_day: null, ctx: null, sessions: null, team: [] };
 function pct(v) { return v == null ? "--%" : Math.round(v) + "%"; }
@@ -296,13 +358,44 @@ function render() {
   $("u5").textContent = pct(data.five_hour); $("uc").textContent = pct(data.ctx);
   meter("m7", data.seven_day); meter("m5", data.five_hour); meter("mc", data.ctx);
   $("ns").textContent = data.sessions ?? "--";
-  $("teamRows").innerHTML = (data.team || []).slice(0, 6).map(c =>
-    `<div class="row"><span class="t">${esc(c.status || "")}</span><span>${esc(c.name || "")}${c.doing ? " · " + esc(c.doing) : ""}</span><span>${c.progress != null ? c.progress + "%" : ""}</span></div>`).join("");
+  $("teamRows").innerHTML = (data.team || []).slice(0, 6).map((c, i) =>
+    `<div class="row${c.sessionId ? " link" : ""}${c.status === "需要你" ? " need" : ""}" data-i="${i}" title="${c.sessionId ? "點一下跳到這個 session" : ""}"><span class="t">${esc(c.status || "")}</span><span>${esc(c.name || "")}${c.doing ? " · " + esc(c.doing) : ""}</span><span>${c.progress != null ? c.progress + "%" : ""}</span></div>`).join("");
 }
+$("teamRows").onclick = e => {
+  const row = e.target.closest(".row"); if (!row) return;
+  const c = (data.team || [])[+row.dataset.i];
+  if (c?.sessionId) post({ action: "focus", sessionId: c.sessionId });
+};
 function esc(s) { return String(s).replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch])); }
-window.karaUpdate = (d) => { embedded = true; document.body.classList.add("embedded"); Object.assign(data, d); render(); autoState(); };
+
+// 狀態變化 → 一句播報（第一次收到資料只記下來，不播）
+let prev = null;
+function diff(team) {
+  const now = new Map(team.filter(c => c.sessionId).map(c => [c.sessionId, c]));
+  if (prev) {
+    for (const [id, c] of now) {
+      const p = prev.get(id);
+      if (!p) continue;                      // 新出現的 session（含剛載入）只記下來，不播
+      const was = p.status, is = c.status;
+      if (is === was && (is !== "需要你" || p?.ask === c.ask)) continue;
+      const who = c.name || "有個 session";
+      if (is === "需要你") announce(c.ask ? `${who} 在等你回答：${clip(c.ask, 40)}` : `${who} 在等你回答。`);
+      else if (is === "待審" && was) announce(c.summary ? `${who} 做完了，等你看：${clip(c.summary, 40)}` : `${who} 做完了，等你看。`);
+      else if (is === "完成" && was && was !== "完成") announce(`${who} 完成了。`);
+      else if (is === "卡住" && was !== "卡住") announce(`${who} 卡住了${c.summary ? "：" + clip(c.summary, 30) : "。"}`);
+    }
+  }
+  prev = now;
+}
+function clip(s, n) { s = String(s).replace(/\s+/g, " ").trim(); return s.length > n ? s.slice(0, n) + "⋯" : s; }
+
+window.karaUpdate = (d) => {
+  embedded = true; document.body.classList.add("embedded");
+  Object.assign(data, d); render(); diff(data.team || []); autoState();
+};
 window.karaSetState = setState;
-window.karaSay = (text) => { setState("speaking"); return say(text).then(() => setState("idle")); };
+window.karaSay = (text) => announce(text);
+window.karaToast = (text) => announce(text);
 let embedded = false;
 async function poll() {
   if (embedded) return;
@@ -310,47 +403,55 @@ async function poll() {
 }
 poll(); setInterval(poll, 30000);
 
-// 嵌在戰情中心時：有人等你回答就亮橘、有人在跑就轉、都閒就待命
-function autoState() {
-  if (demoRunning) return;
+// 現況一句話
+function statusLine() {
   const team = data.team || [];
-  if (team.some(c => c.status === "需要你")) setState("alert");
-  else if (team.some(c => c.status === "進行中")) setState("thinking");
-  else setState("idle");
-  show("cardUsage", true); show("cardTeam", team.length > 0);
-  // 字幕列：一句話講現況（不打字、不算說話）
   const n = st => team.filter(c => c.status === st).length;
   const parts = [];
   if (n("需要你")) parts.push(`${n("需要你")} 個在等你回答`);
   if (n("進行中")) parts.push(`${n("進行中")} 個進行中`);
   if (n("待審")) parts.push(`${n("待審")} 個待審`);
   if (n("卡住")) parts.push(`${n("卡住")} 個卡住`);
-  const line = team.length ? parts.join("，") || "大家都閒著" : "目前沒有 session";
+  return team.length ? parts.join("，") || "大家都閒著" : "目前沒有 session";
+}
+// 嵌在戰情中心時：有人等你回答就亮橘、有人在跑就轉、都閒就待命
+function autoState() {
+  const team = data.team || [];
+  show("cardUsage", true); show("cardTeam", team.length > 0);
+  if (demoRunning || talkingNow) return;
+  if (team.some(c => c.status === "需要你")) setState("alert");
+  else if (team.some(c => c.status === "進行中")) setState("thinking");
+  else setState("idle");
+  const line = statusLine();
   if (!typing && $("capText").textContent !== line) { $("capText").textContent = line; $("capBar").style.width = "100%"; }
 }
+// 點球：唸一次現況＋額度
+canvas.onclick = () => announce(`${statusLine()}。這 5 小時用了 ${pct(data.five_hour)}，這週 ${pct(data.seven_day)}。`);
 
 /* ---------- 示範一輪（照影片的流程，數字用真的） ---------- */
 let demoRunning = false;
 async function demo() {
-  if (demoRunning) return; demoRunning = true;
+  if (demoRunning || talkingNow) return; demoRunning = true;
   show("cardUsage", false); show("cardTeam", false);
-  setState("speaking"); await say("你好，我是球體助理。");
+  setState("speaking"); await speak("你好，我是球體助理。");
   setState("listening"); await say("我在聽。", 90); await wait(1200);
   setState("thinking"); await say("讓我想一下⋯", 90); await wait(1400);
   setState("searching"); await say("正在查資料、整理給你。"); await wait(1800);
   setState("speaking"); show("cardUsage", true);
-  await say(`記憶量 ${pct(data.ctx)}，這 5 小時用了 ${pct(data.five_hour)}，這週 ${pct(data.seven_day)}。`);
+  await speak(`記憶量 ${pct(data.ctx)}，這 5 小時用了 ${pct(data.five_hour)}，這週 ${pct(data.seven_day)}。`);
   show("cardTeam", true);
-  await say(`現在有 ${data.sessions ?? "幾"} 個 session 在跑。`);
+  await speak(`現在有 ${data.sessions ?? "幾"} 個 session 在線。`);
   await wait(800);
-  setState("idle"); await say("有事再叫我。"); demoRunning = false;
+  setState("idle"); await speak("有事再叫我。"); demoRunning = false;
+  embedded ? autoState() : null;
 }
 document.querySelectorAll("#controls button[data-s]").forEach(b => b.onclick = () => setState(b.dataset.s));
 $("demo").onclick = demo;
 addEventListener("keydown", e => { if (e.code === "Space") { e.preventDefault(); demo(); } });
 
-setState("idle"); render(); show("cardUsage", true);
+setState("idle"); render(); renderVoice(); show("cardUsage", true);
 if (new URLSearchParams(location.search).has("demo")) setTimeout(demo, 600);
+post({ action: "ready" });
 </script>
 </body>
 </html>
