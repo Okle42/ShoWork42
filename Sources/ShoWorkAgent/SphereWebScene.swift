@@ -37,7 +37,7 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
         self.mini = mini
         let cfg = WKWebViewConfiguration()
         cfg.setURLSchemeHandler(OfficeWebSchemeHandler(root: dir), forURLScheme: OfficeWebSchemeHandler.scheme)
-        web = WKWebView(frame: .zero, configuration: cfg)
+        web = SphereWebView(frame: .zero, configuration: cfg)
         super.init()
         cfg.userContentController.add(SphereWeakHandler(self), name: "sphere")
         audio.onEvent = { [weak self] ev in self?.voice(ev) }
@@ -343,6 +343,16 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
     }
 
     static func needsYou(_ c: BoardCard) -> Bool { !c.asks.isEmpty || c.permit != nil }
+}
+
+/// 11-22 使用者：按住空白鍵講話時聽到一堆嗶聲＝自動重複的空白鍵沒人收，macOS 每下嗶一聲（約 30 聲／秒，麥克風也錄進去）。
+/// 網頁已經吞掉重複鍵；這裡原生再擋一層：按住期間的空白鍵重複事件直接丟掉，不進網頁、不走到 noResponder。
+/// 第一下和放開照常交給網頁（開始聽／送出）。實測：按住 3 秒、90 次重複 → 0 聲。
+final class SphereWebView: WKWebView {
+    override func keyDown(with e: NSEvent) {
+        if e.keyCode == 49 && e.isARepeat { return }
+        super.keyDown(with: e)
+    }
 }
 
 /// WKUserContentController 會強引用 handler：中間隔一層 weak，宿主才放得掉

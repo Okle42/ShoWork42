@@ -1308,11 +1308,19 @@ window.karaTimeline = (d) => {
 function fmt(m) { m = Math.round(m); return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}`; }
 $("tlCard").addEventListener("click", e => { if (e.target.closest("[data-x]")) show("tlCard", false); });
 addEventListener("keydown", e => { if (e.key === "Escape") { closeSat(); show("tlCard", false); } });
+// 11-22 使用者：按住空白鍵講話會聽到「一堆空白鍵的聲音」＝按住期間每個自動重複的空白鍵沒人收，macOS 每下嗶一聲（約 30 聲／秒，還會被麥克風錄進去）
+// ⇒ 重複鍵也一律吞掉，只有第一下開始聽；原生端 SphereWebView 也擋一層（不靠網頁）
+const typingField = t => t.closest?.("input,textarea,select,[contenteditable]");
 addEventListener("keydown", e => {
-  if (e.code !== "Space" || e.repeat || !embedded || e.target.closest?.("input,textarea")) return;
-  e.preventDefault(); e.stopImmediatePropagation(); startListen();
+  if (e.code !== "Space" || !embedded || typingField(e.target)) return;
+  e.preventDefault(); e.stopImmediatePropagation();
+  if (!e.repeat && !listening) startListen();
 }, true);
-addEventListener("keyup", e => { if (e.code === "Space" && embedded && listening) { e.preventDefault(); stopListen(); } }, true);
+addEventListener("keyup", e => {
+  if (e.code !== "Space" || !embedded || typingField(e.target)) return;
+  e.preventDefault(); e.stopImmediatePropagation();
+  if (listening) stopListen();
+}, true);
 
 /* ---------- 示範一輪（照影片的流程，數字用真的） ---------- */
 let demoRunning = false;
