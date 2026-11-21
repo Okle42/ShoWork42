@@ -19,7 +19,7 @@ import ShoWorkCore
 // ⚠ 不准用使用者本人的聲音（11-21 使用者下令）。按住講話只做本機即時辨識成文字，不存音檔。
 
 @MainActor
-final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandler, AVSpeechSynthesizerDelegate {
+final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
     let web: WKWebView
     let mini: Bool
     private var loaded = false
@@ -28,7 +28,7 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
     private var subs: [AnyCancellable] = []
     private var ticker: Timer?
     private var model: BoardModel { BoardModel.shared }
-    private let synth = AVSpeechSynthesizer()
+    private let audio = SphereAudio()      // v5：自己播＋FFT，聲波和逐詞字幕都靠它
     private var listener: SphereListener?
     private let edge = SphereEdgeVoice()
 
@@ -40,7 +40,9 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
         web = WKWebView(frame: .zero, configuration: cfg)
         super.init()
         cfg.userContentController.add(SphereWeakHandler(self), name: "sphere")
-        synth.delegate = self
+        audio.onEvent = { [weak self] ev in self?.voice(ev) }
+        audio.onWord = { [weak self] loc, len in self?.web.evaluateJavaScript("window.karaVoice && window.karaVoice('word', \(loc), \(len))") }
+        audio.onLevels = { [weak self] bands, rms, pos, dur in self?.levels(bands, rms, pos: pos, dur: dur, mic: false) }
         web.setValue(false, forKey: "drawsBackground")
         // 測試視窗在螢幕外＝被當成看不見、rAF 停掉、WebGL 不畫（同 OfficeWebHost）：測試時關掉遮擋偵測
         let occ = NSSelectorFromString("_setWindowOcclusionDetectionEnabled:")
@@ -61,7 +63,7 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
         subs.removeAll()
         ticker?.invalidate(); ticker = nil
         listener?.stop(); listener = nil
-        synth.stopSpeaking(at: .immediate); edge.stop()
+        audio.stop(); edge.stop()
         web.configuration.userContentController.removeScriptMessageHandler(forName: "sphere")
     }
 
@@ -78,7 +80,7 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
             guard let c = card(str("sessionId")) else { return say("找不到這個 session 了。") }
             jump(c)
         case "speak": speak(str("text") ?? "")
-        case "stopSpeaking": synth.stopSpeaking(at: .immediate); edge.stop()
+        case "stopSpeaking": audio.stop(); edge.stop()
         case "setVoice":       // 11-21 使用者：換聲音（選單選了就存起來、馬上試聽一句）
             guard let id = str("id"), SphereVoices.all().contains(where: { $0.id == id }) else { return }
             SphereVoices.selected = id
@@ -177,7 +179,7 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
             }
             return
         }
-        synth.stopSpeaking(at: .immediate)
+        audio.stop(); edge.stop()
         let l = SphereListener { [weak self] text, final, err in
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
@@ -186,6 +188,9 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
                     self.js("window.karaHeard", text, final)
                 }
             }
+        }
+        l.onLevel = { [weak self] bands, rms in
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.levels(bands, rms, pos: 0, dur: nil, mic: true) } }
         }
         listener = l
         l.start()
@@ -202,12 +207,17 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
             DispatchQueue.main.asyncAfter(deadline: .now() + min(8, 0.18 * Double(t.count))) { [weak self] in self?.voice("end") }
             return
         }
-        synth.stopSpeaking(at: .immediate); edge.stop()
+        audio.stop(); edge.stop()
         let id = SphereVoices.selected
         if id.hasPrefix("edge:") {
             // 微軟神經語音：edge-tts 合成 mp3（要網路；文字會送到微軟），播放時用音量驅動球跳動
-            edge.speak(String(t.prefix(300)), voice: String(id.dropFirst(5))) { [weak self] ev in
-                DispatchQueue.main.async { MainActor.assumeIsolated { self?.voice(ev) } }
+            edge.speak(String(t.prefix(300)), voice: String(id.dropFirst(5))) { [weak self] url in
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated {
+                        guard let self else { return }
+                        if !self.audio.play(file: url) { self.voice("end"); self.say("微軟語音的音檔打不開，先改用系統語音。") }
+                    }
+                }
             } failed: { [weak self] in
                 DispatchQueue.main.async { MainActor.assumeIsolated { self?.voice("end"); self?.say("微軟語音連不上，先改用系統語音。") } }
             }
@@ -216,22 +226,16 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
         let u = AVSpeechUtterance(string: String(t.prefix(300)))
         u.voice = AVSpeechSynthesisVoice(identifier: String(id.dropFirst(6))) ?? AVSpeechSynthesisVoice(language: "zh-TW")
         u.rate = AVSpeechUtteranceDefaultSpeechRate * 1.05
-        synth.speak(u)
+        audio.speak(u)
     }
 
     private func voice(_ ev: String) { web.evaluateJavaScript("window.karaVoice && window.karaVoice('\(ev)')") }
 
-    nonisolated func speechSynthesizer(_ s: AVSpeechSynthesizer, didStart u: AVSpeechUtterance) {
-        DispatchQueue.main.async { MainActor.assumeIsolated { self.voice("start") } }
-    }
-    nonisolated func speechSynthesizer(_ s: AVSpeechSynthesizer, willSpeakRangeOfSpeechString r: NSRange, utterance u: AVSpeechUtterance) {
-        DispatchQueue.main.async { MainActor.assumeIsolated { self.voice("word") } }
-    }
-    nonisolated func speechSynthesizer(_ s: AVSpeechSynthesizer, didFinish u: AVSpeechUtterance) {
-        DispatchQueue.main.async { MainActor.assumeIsolated { self.voice("end") } }
-    }
-    nonisolated func speechSynthesizer(_ s: AVSpeechSynthesizer, didCancel u: AVSpeechUtterance) {
-        DispatchQueue.main.async { MainActor.assumeIsolated { self.voice("end") } }
+    /// v5 聲波：頻譜 32 段＋音量（＋播放進度）推給網頁；mic＝按住講話時的麥克風
+    private func levels(_ bands: [Float], _ rms: Float, pos: Double, dur: Double?, mic: Bool) {
+        let b = bands.map { String(format: "%.2f", $0) }.joined(separator: ",")
+        let d = dur.map { String(format: "%.2f", $0) } ?? "null"
+        web.evaluateJavaScript("window.karaLevels && window.karaLevels({b:[\(b)],r:\(String(format: "%.3f", rms)),p:\(String(format: "%.2f", pos)),d:\(d),mic:\(mic)})")
     }
 
     func webView(_ w: WKWebView, didFinish n: WKNavigation!) {
@@ -308,6 +312,8 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
             if let p = c.report?.progress { t["progress"] = p }
             if let d = c.report?.doing { t["doing"] = d }
             if let s = c.report?.summary { t["summary"] = s }
+            if let x = c.ctx { t["ctx"] = x.percent.rounded() }          // v5：戰情卡每列的記憶量
+            if let t0 = c.lastActivity { t["ago"] = max(0, Int(now.timeIntervalSince(t0) / 60)) }
             if let a = c.asks.first {
                 t["ask"] = a.ask
                 if let opts = a.options, !opts.isEmpty { t["options"] = opts }
@@ -402,22 +408,19 @@ enum SphereVoices {
     }
 }
 
-/// edge-tts 合成＋播放；放的時候每 60ms 看音量，聲音冒上來就回報一次 "word"（讓球跟著跳）
-final class SphereEdgeVoice: NSObject, AVAudioPlayerDelegate, @unchecked Sendable {
+/// edge-tts 合成 mp3（v5：播放交給 SphereAudio，才能做 FFT 畫聲波）
+final class SphereEdgeVoice: @unchecked Sendable {
     static var binary: String? {
         let cands = [ProcessInfo.processInfo.environment["SHOWORK_EDGE_TTS"], NSHomeDirectory() + "/github-repos/lipsync-lab/.venv/bin/edge-tts",
                      "/opt/homebrew/bin/edge-tts"].compactMap { $0 }
         return cands.first { FileManager.default.isExecutableFile(atPath: $0) }
     }
     private static let cache = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("ShoWork42/sphere-tts", isDirectory: true)
-    private var player: AVAudioPlayer?
-    private var meter: Timer?
-    private var onEvent: ((String) -> Void)?
+    private let lock = NSLock()
     private var gen = 0
-    private var loud = false
 
-    func speak(_ text: String, voice: String, onEvent: @escaping @Sendable (String) -> Void, failed: @escaping @Sendable () -> Void) {
-        gen += 1; let g = gen
+    func speak(_ text: String, voice: String, ready: @escaping @Sendable (URL) -> Void, failed: @escaping @Sendable () -> Void) {
+        lock.lock(); gen += 1; let g = gen; lock.unlock()
         guard let bin = Self.binary else { return failed() }
         try? FileManager.default.createDirectory(at: Self.cache, withIntermediateDirectories: true)
         let key = String(UInt64(bitPattern: Int64("\(voice)|\(text)".hashValue)), radix: 36)
@@ -435,38 +438,10 @@ final class SphereEdgeVoice: NSObject, AVAudioPlayerDelegate, @unchecked Sendabl
                 if p.isRunning { p.terminate(); return failed() }
                 guard p.terminationStatus == 0 else { try? FileManager.default.removeItem(at: out); return failed() }
             }
-            DispatchQueue.main.async { self.play(out, gen: g, onEvent: onEvent, failed: failed) }
+            self.lock.lock(); let live = g == self.gen; self.lock.unlock()
+            if live { ready(out) }        // 中途又換了一句／停了就不播
         }
     }
 
-    private func play(_ url: URL, gen g: Int, onEvent: @escaping (String) -> Void, failed: () -> Void) {
-        guard g == gen else { return }        // 中途又換了一句／停了
-        guard let p = try? AVAudioPlayer(contentsOf: url) else { return failed() }
-        p.delegate = self; p.isMeteringEnabled = true
-        player = p; self.onEvent = onEvent
-        p.play(); onEvent("start")
-        meter = Timer.scheduledTimer(withTimeInterval: 0.06, repeats: true) { [weak self] _ in
-            guard let self, let p = self.player else { return }
-            p.updateMeters()
-            let db = p.averagePower(forChannel: 0)
-            if db > -24 && !self.loud { self.loud = true; self.onEvent?("word") }
-            else if db < -32 { self.loud = false }
-        }
-    }
-
-    func stop() {
-        gen += 1
-        if player != nil { finish() }
-    }
-
-    private func finish() {
-        meter?.invalidate(); meter = nil
-        player?.stop(); player = nil
-        let e = onEvent; onEvent = nil
-        e?("end")
-    }
-
-    func audioPlayerDidFinishPlaying(_ p: AVAudioPlayer, successfully: Bool) {
-        DispatchQueue.main.async { if p === self.player { self.finish() } }
-    }
+    func stop() { lock.lock(); gen += 1; lock.unlock() }
 }

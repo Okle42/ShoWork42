@@ -105,6 +105,11 @@ final class SphereListener: @unchecked Sendable {
     private var done = false
     private let lock = NSLock()
 
+    /// v5：麥克風的頻譜＋音量（聽的時候球也有聲波），約 30 次／秒
+    var onLevel: (@Sendable ([Float], Float) -> Void)?
+    private let spectrum = SphereSpectrum()
+    private var lastLevel = Date.distantPast
+
     init(_ report: @escaping Report) { self.report = report }
 
     func start() {
@@ -131,7 +136,13 @@ final class SphereListener: @unchecked Sendable {
         let fmt = input.outputFormat(forBus: 0)
         guard fmt.sampleRate > 0 else { return report("", true, "找不到麥克風。") }
         nonisolated(unsafe) let r = req
-        input.installTap(onBus: 0, bufferSize: 1024, format: fmt) { buf, _ in r.append(buf) }
+        input.installTap(onBus: 0, bufferSize: 1024, format: fmt) { [weak self] buf, _ in
+            r.append(buf)
+            guard let self, let cb = self.onLevel, let ch = buf.floatChannelData?[0], Date().timeIntervalSince(self.lastLevel) > 0.03 else { return }
+            self.lastLevel = Date()
+            let l = self.spectrum.analyze(ch, count: Int(buf.frameLength), sampleRate: fmt.sampleRate)
+            cb(l.bands, l.rms)
+        }
         engine.prepare()
         do { try engine.start() } catch { return report("", true, "麥克風開不起來：\(error.localizedDescription)") }
         task = rec.recognitionTask(with: req) { [weak self] res, err in

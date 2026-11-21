@@ -5,7 +5,13 @@
      原生端每次資料變動呼叫 window.karaUpdate({five_hour, seven_day, five_reset, seven_reset, ctx, sessions, doneToday,
        team:[{name,status,sessionId,progress,doing,summary,ask,options,permit}], runs:[{label,name,fraction,eta}], heat:{temp,level}, paused})。
      v3（11-21）：#1 需要你時球下方浮出選項按鈕（回答／放行）#2 按住球講話交給隊長 #3 session 衛星 #4 額度預警
-                  #5 早報／收工總結 #6 外環＝背景工作進度＋cool42 溫度 #7 ?mini=1＝桌面常駐小球（SphereMini.swift） -->
+                  #5 早報／收工總結 #6 外環＝背景工作進度＋cool42 溫度 #7 ?mini=1＝桌面常駐小球（SphereMini.swift）
+     v5（11-22 使用者：照 KARA 影片把 1–6 做到更好＋講話要有聲波；背景改十字點）：
+       ① 狀態：中英雙標籤＋解碼動畫、思考掃描彗星、警示衝擊波 ② 事件卡從球拉線彈出（講到誰就彈誰）
+       ③ 額度儀表：數字滾動、分段刻度、重置倒數、照目前速度預估幾點用完 ④ 戰情卡：狀態色點、進度細條、記憶量、狀態一變就閃
+       ⑤ 字幕跟「唸到哪」逐詞同步（Mac 系統語音用 marker、微軟語音照播放進度）＋字幕下的聲波 ⑥ 警示橫幅（需要你／卡住／額度／過熱）
+       聲波：原生端 window.karaLevels({b:[32 段頻譜], r:音量, p:已播秒, d:總秒, mic})，球外圈 120 根放射條跟著真的聲音跳；
+       沒收到（Windows SAPI、測試）就用假的波形頂著。 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>球體助理</title>
@@ -24,14 +30,15 @@
     --bad: #ff4d4d;
   }
   * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); overflow: hidden;
+  html, body { margin: 0; height: 100%; color: var(--ink); overflow: hidden;
+    background: radial-gradient(ellipse 75% 38% at 50% 104%, rgba(70,60,190,.20), transparent 70%), var(--bg);
     font-family: "SF Pro Display", -apple-system, "PingFang TC", sans-serif; }
   body::before { content: ""; position: fixed; inset: 0; pointer-events: none;
-    background-image:
-      linear-gradient(var(--grid) 1px, transparent 1px),
-      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
-    background-size: 48px 48px; background-position: center;
-    mask-image: radial-gradient(ellipse at center, #000 30%, transparent 85%); }
+    /* v5：KARA 那種「網格十字點」：只有交叉點一個小 +，不畫整條線 */
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='56'%3E%3Cpath d='M28 24.5v7M24.5 28h7' stroke='%23fff' stroke-opacity='.28' stroke-width='1'/%3E%3C/svg%3E");
+    background-size: 56px 56px; background-position: center;
+    -webkit-mask-image: radial-gradient(ellipse at center, #000 40%, transparent 92%);
+    mask-image: radial-gradient(ellipse at center, #000 40%, transparent 92%); }
   canvas#gl { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
 
   /* 上方字幕列 */
@@ -82,7 +89,7 @@
   #tools #voice { width: 30px; height: 24px; padding: 0; border-radius: 14px; }
   canvas#gl { cursor: pointer; }
   /* v3 #1：需要你的選項面板 */
-  #askCard { position: fixed; left: 50%; bottom: 92px; transform: translateX(-50%) translateY(8px);
+  #askCard { position: fixed; left: 50%; bottom: 112px; transform: translateX(-50%) translateY(8px);
     width: min(580px, calc(100% - 32px)); background: var(--panel); border: 1px solid rgba(255,176,32,.45);
     border-radius: 6px; padding: 10px 14px 12px; backdrop-filter: blur(8px);
     opacity: 0; pointer-events: none; transition: opacity .3s, transform .3s; }
@@ -147,6 +154,93 @@
   .tl .axis span::before { content: ""; position: absolute; left: 50%; top: -3px; height: 3px; border-left: 1px solid var(--line); }
   .legend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 11px; color: var(--ink-dim); margin-top: 10px; }
   .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+  /* ===== v5 ===== */
+  /* ① 狀態標籤：中文＋英文（解碼動畫） */
+  #state { bottom: 70px; }
+  #state .zh { display: block; font-size: 12px; letter-spacing: .32em; }
+  #state .en { display: inline-flex; align-items: center; gap: 10px; margin-top: 5px; font: 500 10px ui-monospace, Menlo, monospace;
+    letter-spacing: .38em; color: var(--pink); transition: color 1.2s; }
+  #state .en::before, #state .en::after { content: ""; width: 22px; height: 1px; background: currentColor; opacity: .5; }
+  body.alert #state .en { color: var(--warn); }
+  body.bad #state .en { color: var(--bad); }
+  /* ⑤ 字幕：逐詞同步（唸過的亮、正在唸的粉、還沒唸的暗）＋游標＋聲波 */
+  #capText .said { color: var(--ink); }
+  #capText .now { color: var(--pink); text-shadow: 0 0 10px rgba(255,92,147,.55); }
+  #capText .todo { color: rgba(243,238,242,.28); }
+  #capText .cur { display: inline-block; width: .55em; color: var(--pink); animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  #wave { display: block; width: 100%; height: 26px; margin-top: 6px; }
+  #caption .who .q { margin-left: auto; color: var(--ink-dim); letter-spacing: .08em; }
+  /* ② 事件卡（從球拉線出來） */
+  svg#links { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+  svg#links path { fill: none; stroke: var(--pink); stroke-width: 1; opacity: .55; }
+  svg#links path.pop { stroke-width: 1.2; opacity: .9; transition: stroke-dashoffset .45s ease-out; }
+  svg#links circle { fill: var(--pink); }
+  svg#links .warn { stroke: var(--warn); fill: var(--warn); }
+  svg#links .bad { stroke: var(--bad); fill: var(--bad); }
+  .pop { position: fixed; top: 96px; width: 290px; z-index: 4; pointer-events: auto; cursor: pointer;
+    background: rgba(16,13,22,.9); border-color: rgba(255,92,147,.45);
+    clip-path: inset(0 0 100% 0); opacity: 1; transform: none; transition: clip-path .4s cubic-bezier(.2,.8,.2,1) .25s; }
+  .pop.on { clip-path: inset(0 0 0 0); }
+  .pop:not(.on) { pointer-events: none; visibility: hidden; transition: clip-path .3s, visibility 0s .3s; }
+  .pop.r { right: 24px; } .pop.l { left: 24px; }
+  .pop.warn { border-color: rgba(255,176,32,.6); } .pop.bad { border-color: rgba(255,77,77,.6); }
+  .pop::after { content: ""; position: absolute; left: 0; right: 0; height: 1px; top: 0; background: rgba(255,255,255,.5);
+    box-shadow: 0 0 12px rgba(255,92,147,.9); opacity: 0; }
+  .pop.on::after { animation: scan .7s ease-out .25s; }
+  @keyframes scan { 0% { top: 0; opacity: 1; } 100% { top: 100%; opacity: 0; } }
+  .pop .head b { font-size: 22px; }
+  .pop .ln { font-size: 12px; line-height: 1.5; padding: 4px 0; border-top: 1px solid var(--line); }
+  .pop .ln .t { color: var(--ink-dim); font-size: 10px; letter-spacing: .12em; margin-right: 6px; }
+  /* ③ 額度儀表 */
+  #cardUsage { width: 286px; }
+  .donut { width: 40px; height: 40px; transform: rotate(-90deg); }
+  .donut circle { fill: none; stroke-width: 3.2; }
+  .donut .tr { stroke: var(--line); }
+  .donut .fg { stroke: var(--pink); stroke-linecap: round; transition: stroke-dasharray .9s ease, stroke 1.2s; }
+  #cardUsage .head { align-items: center; }
+  #cardUsage .head .big { display: flex; align-items: center; gap: 10px; }
+  .meter.seg { height: 5px; background: repeating-linear-gradient(90deg, rgba(255,255,255,.09) 0 5px, transparent 5px 7px); }
+  .meter.seg b { -webkit-mask-image: repeating-linear-gradient(90deg, #000 0 5px, transparent 5px 7px); mask-image: repeating-linear-gradient(90deg, #000 0 5px, transparent 5px 7px); }
+  .row .rs { display: block; font-size: 10px; color: var(--ink-dim); letter-spacing: .04em; margin-top: 1px; }
+  .fc { margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--line); font-size: 11px; line-height: 1.45; color: var(--ink-dim); }
+  .fc.warn { color: var(--warn); } .fc.bad { color: var(--bad); } .fc.ok { color: #7dffb0; }
+  .card.flash { animation: cflash 1.6s ease-out; }
+  @keyframes cflash { 0%, 40% { border-color: var(--warn); box-shadow: 0 0 24px rgba(255,176,32,.35); } 100% { border-color: var(--line); box-shadow: none; } }
+  /* ④ 戰情卡 */
+  #cardTeam { width: 310px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: -2px 0 8px; }
+  .chips span { font-size: 10px; letter-spacing: .06em; color: var(--ink-dim); display: inline-flex; align-items: center; gap: 4px; }
+  .chips i, .trow .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--c); display: inline-block; }
+  .row.trow { grid-template-columns: 12px 1fr auto; align-items: center; }
+  .trow .dot { box-shadow: 0 0 6px var(--c); }
+  .trow .dot.pulse { animation: dpulse 1.2s ease-in-out infinite; }
+  @keyframes dpulse { 50% { transform: scale(1.7); opacity: .55; } }
+  .trow .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .trow .nm small { color: var(--ink-dim); font-size: 11px; }
+  .trow .sub { grid-column: 2 / -1; font-size: 10px; color: var(--ink-dim); letter-spacing: .04em; margin-top: -2px; }
+  .trow .sub .hi { color: var(--warn); }
+  .trow .meter { grid-column: 2 / -1; margin-top: 0; }
+  .trow.flash { animation: rflash 1.6s ease-out; }
+  @keyframes rflash { 0%, 35% { background: rgba(255,92,147,.16); } 100% { background: transparent; } }
+  .more { font-size: 10px; color: var(--ink-dim); text-align: right; padding-top: 6px; letter-spacing: .08em; }
+  /* ⑥ 警示橫幅：橫過球的整條（像影片的 HEAVY RAIN · 16:00） */
+  #banner { position: fixed; left: 50%; width: min(620px, calc(100% - 24px)); top: 50%; transform: translate(-50%, -50%); z-index: 6; pointer-events: none; cursor: pointer;
+    background: linear-gradient(90deg, transparent, rgba(110,18,38,.82) 12%, rgba(110,18,38,.82) 88%, transparent);
+    border-top: 1px solid rgba(255,92,147,.55); border-bottom: 1px solid rgba(255,92,147,.55);
+    padding: 7px 0 8px; clip-path: inset(0 50% 0 50%); visibility: hidden; transition: clip-path .45s cubic-bezier(.2,.8,.2,1), visibility 0s .45s; }
+  #banner.on { clip-path: inset(0 0 0 0); visibility: visible; transition: clip-path .45s cubic-bezier(.2,.8,.2,1); pointer-events: auto; animation: flick .5s steps(2) .45s 2; }
+  #banner.warn { background: linear-gradient(90deg, transparent, rgba(120,62,6,.85) 12%, rgba(120,62,6,.85) 88%, transparent); border-color: rgba(255,176,32,.6); }
+  @keyframes flick { 50% { opacity: .55; } }
+  #banner .in { width: calc(100% - 64px); margin: 0 auto; }
+  #banner .meta { display: flex; justify-content: space-between; font: 9px ui-monospace, Menlo, monospace; letter-spacing: .22em; color: rgba(255,255,255,.6); }
+  #banner .main { display: flex; align-items: center; gap: 10px; margin: 4px 0 3px; font-size: 22px; letter-spacing: .1em; font-weight: 500; }
+  #banner .main svg { flex: none; }
+  #banner .main .bt { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #banner .main .cur { animation: blink 1s steps(1) infinite; }
+  #banner .sub { font-size: 12px; color: rgba(255,255,255,.75); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  body.mini svg#links, body.mini .pop, body.mini #banner, body.mini #wave { display: none !important; }
+  @media (prefers-reduced-motion: reduce) { #banner.on, .pop.on::after, .trow .dot.pulse, .card.flash, .trow.flash { animation: none; } }
   @media (max-width: 640px) {
     #cardUsage { left: 16px; top: auto; bottom: 120px; min-width: 0; width: calc(50% - 24px); }
     #cardTeam { right: 16px; top: auto; bottom: 120px; min-width: 0; width: calc(50% - 24px); }
@@ -157,24 +251,28 @@
 </head>
 <body>
 <canvas id="gl"></canvas>
+<svg id="links" aria-hidden="true"><g id="lkStatic"></g><g id="lkPop"></g></svg>
 
 <div id="caption">
-  <div class="who"><i></i><span id="who">球體 · 待命</span></div>
+  <div class="who"><i></i><span id="who">球體 · 待命</span><span class="q" id="capQ"></span></div>
   <div class="text" id="capText"></div>
+  <canvas id="wave" aria-hidden="true"></canvas>
   <div class="bar"><b id="capBar"></b></div>
 </div>
 
 <div class="card" id="cardUsage">
   <div class="k">額度 · 用量</div>
-  <div class="head"><span>這 7 天</span><b id="u7">--%</b></div>
-  <div class="row"><span class="t">CTX</span><span>記憶量（最近的 session）</span><span id="uc">--%</span><div class="meter"><b id="mc"></b></div></div>
-  <div class="row"><span class="t">5H</span><span>5 小時額度</span><span id="u5">--%</span><div class="meter"><b id="m5"></b></div></div>
-  <div class="row"><span class="t">7D</span><span>7 天額度</span><span id="u7b">--%</span><div class="meter"><b id="m7"></b></div></div>
+  <div class="head"><span>這 7 天</span><span class="big"><svg class="donut" viewBox="0 0 36 36"><circle class="tr" cx="18" cy="18" r="15.9"/><circle class="fg" id="d7" cx="18" cy="18" r="15.9" stroke-dasharray="0 100"/></svg><b id="u7">--%</b></span></div>
+  <div class="row"><span class="t">5H</span><span>5 小時額度<span class="rs" id="r5"></span></span><span id="u5">--%</span><div class="meter seg"><b id="m5"></b></div></div>
+  <div class="row"><span class="t">7D</span><span>7 天額度<span class="rs" id="r7"></span></span><span id="u7b">--%</span><div class="meter seg"><b id="m7"></b></div></div>
+  <div class="row"><span class="t">CTX</span><span>記憶量<span class="rs" id="rc"></span></span><span id="uc">--%</span><div class="meter seg"><b id="mc"></b></div></div>
+  <div class="fc" id="fc" hidden></div>
 </div>
 
 <div class="card" id="cardTeam">
   <div class="k">戰情 · SESSION</div>
   <div class="head"><span>在線</span><b id="ns">--</b></div>
+  <div class="chips" id="chips"></div>
   <div id="teamRows"></div>
 </div>
 
@@ -187,6 +285,8 @@
 <div class="card" id="satCard" role="dialog" aria-label="session 詳情"></div>
 <div class="card" id="tlCard" role="dialog" aria-label="今日時間軸"></div>
 <div id="tip"></div>
+<div class="card pop" id="pop" role="status"></div>
+<div id="banner" role="alert"><div class="in"></div></div>
 
 <div id="tools">
   <button class="pill sm" id="bBrief" title="唸一次早報（今天的狀況與額度）">早報</button>
@@ -196,7 +296,7 @@
   <select class="pill sm" id="voiceSel" title="播報的聲音（選了會試聽一句）" aria-label="播報的聲音" hidden></select>
   <button class="pill sm" id="voice" aria-label="語音開關"></button>
 </div>
-<div id="state">待命</div>
+<div id="state"><span class="zh" id="stZh">待命</span><span class="en" id="stEn">STANDBY</span></div>
 <div id="hint">點球聽現況 · 按住球（或空白鍵）問問題或交給隊長 · 點衛星看詳情</div>
 <div id="controls">
   <button data-s="idle">待命</button>
@@ -217,12 +317,12 @@ if (MINI) document.body.classList.add("mini");
 
 /* ---------- 狀態定義：每個狀態的轉速、亮度、標籤 ---------- */
 const STATES = {
-  idle:      { label: "待命",  spin: 0.15, glow: 0.45, pulse: 0.0, scatter: 0 },
-  listening: { label: "聆聽中", spin: 0.25, glow: 0.75, pulse: 0.35, scatter: 0 },
-  thinking:  { label: "思考中", spin: 0.9,  glow: 0.65, pulse: 0.15, scatter: 0 },
-  searching: { label: "搜尋中", spin: 1.4,  glow: 0.85, pulse: 0.1, scatter: 1 },
-  speaking:  { label: "說話中", spin: 0.35, glow: 1.0,  pulse: 0.0, scatter: 0 },
-  alert:     { label: "需要你", spin: 0.6,  glow: 1.0,  pulse: 0.6, scatter: 0 },
+  idle:      { label: "待命",  en: "STANDBY",   spin: 0.15, glow: 0.45, pulse: 0.0, scatter: 0 },
+  listening: { label: "聆聽中", en: "LISTENING", spin: 0.25, glow: 0.75, pulse: 0.35, scatter: 0 },
+  thinking:  { label: "思考中", en: "THINKING",  spin: 0.9,  glow: 0.65, pulse: 0.15, scatter: 0 },
+  searching: { label: "搜尋中", en: "SEARCHING", spin: 1.4,  glow: 0.85, pulse: 0.1, scatter: 1 },
+  speaking:  { label: "說話中", en: "SPEAKING",  spin: 0.35, glow: 1.0,  pulse: 0.0, scatter: 0 },
+  alert:     { label: "需要你", en: "WARNING",   spin: 0.6,  glow: 1.0,  pulse: 0.6, scatter: 0 },
 };
 let state = "idle", tgt = { ...STATES.idle }, cur = { ...STATES.idle };
 let speakAmp = 0;               // 說話時的「音量」，驅動球體脹縮
@@ -392,6 +492,25 @@ function syncOuter(runs, heat) {
   }
 }
 
+// 8. v5 聲波：球外圈 120 根放射條（面向鏡頭），左右對稱，跟著真的頻譜跳
+const NB = 32, WAVE_N = 120, WAVE_R0 = 1.66;
+const lv = { bands: new Float32Array(NB), sm: new Float32Array(NB), rms: 0, at: -1e9, mic: false };
+const waveMat = new THREE.MeshBasicMaterial({ color: PINK, transparent: true, opacity: 0.12, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+const wave = new THREE.InstancedMesh(new THREE.PlaneGeometry(0.028, 1), waveMat, WAVE_N);
+wave.frustumCulled = false; outer.add(wave);
+const waveDummy = new THREE.Object3D();
+function bandOf(i) { const k = i < WAVE_N / 2 ? i : WAVE_N - 1 - i; return Math.min(NB - 1, Math.floor(k / (WAVE_N / 2) * NB)); }
+// 9. v5 ① 思考／搜尋：沿內環跑的掃描彗星；警示：往外擴散的衝擊波
+const comet = new THREE.Mesh(new THREE.RingGeometry(2.0, 2.045, 64, 1, 0, 0.9),
+  new THREE.MeshBasicMaterial({ color: PINK, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+outer.add(comet);
+const shocks = [0, 1, 2].map(() => {
+  const m = new THREE.Mesh(new THREE.RingGeometry(1, 1.018, 128),
+    new THREE.MeshBasicMaterial({ color: ORANGE, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+  m.userData.t = -1; outer.add(m); return m;
+});
+let shockNext = 0;
+
 function resize() {
   const w = innerWidth, h = innerHeight;
   renderer.setSize(w, h, false);
@@ -424,7 +543,11 @@ function frame(now) {
   // 有語音時跟著唸到的詞跳；沒語音就用正弦假裝
   wordPulse *= Math.exp(-dt * 6);
   const talking = state === "speaking" && (typing || voicing);
-  const amp = !talking ? 0 : voicing ? 0.35 + 0.65 * wordPulse : (0.5 + 0.5 * Math.sin(t * 17)) * (0.6 + 0.4 * Math.sin(t * 5.3));
+  const live = performance.now() - lv.at < 250;               // v5：原生端有送真的聲音
+  const hearing = listening && live && lv.mic;
+  const amp = hearing ? Math.min(1, lv.rms * 2.2)
+    : !talking ? 0 : live && !lv.mic ? Math.min(1, lv.rms * 1.5)
+    : voicing ? 0.35 + 0.65 * wordPulse : (0.5 + 0.5 * Math.sin(t * 17)) * (0.6 + 0.4 * Math.sin(t * 5.3));
   speakAmp += (amp - speakAmp) * Math.min(1, dt * 12);
   const breathe = 1 + cur.pulse * 0.06 * Math.sin(t * 3) + speakAmp * 0.08;
 
@@ -458,6 +581,8 @@ function frame(now) {
     m.color.copy(accent); m.opacity = m.userData.base * (0.45 + cur.glow * 0.55 + speakAmp * 0.35);
   }
   animSats(dt, t);
+  animWave(dt, t, talking, hearing, live);
+  animFx(dt, t);
   // v4 D：彈一下（新的「需要你」）：衰減的正弦
   const bt = (performance.now() - bounceAt) / 1000;
   root.scale.setScalar(bt < 1.6 ? 1 + 0.16 * Math.exp(-bt * 3) * Math.abs(Math.sin(bt * 9)) : 1);
@@ -470,6 +595,71 @@ function frame(now) {
   renderer.render(scene, camera);
 }
 requestAnimationFrame(frame);
+
+/* v5 聲波：目標值＝真的頻譜（有送）或假的（沒送但在講）；上升快、下降慢，看起來像音響的表 */
+function animWave(dt, t, talking, hearing, live) {
+  const active = talking || hearing;
+  for (let i = 0; i < NB; i++) {
+    let g = 0;
+    if (active && live) g = lv.bands[i];
+    else if (active) g = speakAmp * (0.3 + 0.7 * Math.abs(Math.sin(t * 7.1 + i * 0.9) * Math.sin(t * 3.3 + i * 0.37))) * (1 - i / NB * 0.55);
+    lv.sm[i] += (g - lv.sm[i]) * Math.min(1, dt * (g > lv.sm[i] ? 26 : 7));
+  }
+  for (let i = 0; i < WAVE_N; i++) {
+    const a = i / WAVE_N * Math.PI * 2 + Math.PI / 2, len = 0.035 + lv.sm[bandOf(i)] * 0.8;
+    const r = WAVE_R0 + len / 2;
+    waveDummy.position.set(Math.cos(a) * r, Math.sin(a) * r, 0);
+    waveDummy.rotation.set(0, 0, a - Math.PI / 2);
+    waveDummy.scale.set(1, len, 1);
+    waveDummy.updateMatrix(); wave.setMatrixAt(i, waveDummy.matrix);
+  }
+  wave.instanceMatrix.needsUpdate = true;
+  waveMat.color.copy(hearing ? CYAN : accent);
+  waveMat.opacity += ((active ? 0.85 : 0.13) - waveMat.opacity) * Math.min(1, dt * 4);
+  drawCapWave(active ? (live ? lv.rms : speakAmp * 0.6) : 0, hearing);
+}
+function animFx(dt, t) {
+  const scan = state === "thinking" || state === "searching";
+  comet.rotation.z -= dt * (state === "searching" ? 5.5 : 3.2);
+  comet.material.opacity += ((scan ? 0.75 : 0) - comet.material.opacity) * Math.min(1, dt * 3);
+  comet.material.color.copy(accent);
+  const alarm = state === "alert" || bannerOn;
+  if (alarm && t > shockNext) {
+    const m = shocks.find(x => x.userData.t < 0); if (m) m.userData.t = 0;
+    shockNext = t + 1.5;
+  }
+  const col = bannerLevel === "bad" ? RED : ORANGE;
+  for (const m of shocks) {
+    if (m.userData.t < 0) continue;
+    m.userData.t += dt / 1.6;
+    const k = m.userData.t;
+    if (k >= 1) { m.userData.t = -1; m.material.opacity = 0; continue; }
+    m.scale.setScalar(1.7 + k * 2.4); m.material.opacity = 0.7 * (1 - k) * (1 - k); m.material.color.copy(col);
+  }
+}
+/* 字幕下的聲波：往左捲的音量歷史，上下對稱 */
+const capWave = document.getElementById("wave"), cw = capWave.getContext("2d");
+const waveHist = new Float32Array(96); let waveIdle = 0;
+function drawCapWave(v, mic) {
+  waveHist.copyWithin(0, 1); waveHist[waveHist.length - 1] = v;
+  if (v <= 0.001) { if (++waveIdle > waveHist.length + 2) return; } else waveIdle = 0;
+  const W = capWave.clientWidth, H = capWave.clientHeight, dpr = Math.min(devicePixelRatio, 2);
+  if (!W) return;
+  if (capWave.width !== Math.round(W * dpr)) { capWave.width = Math.round(W * dpr); capWave.height = Math.round(H * dpr); }
+  cw.setTransform(dpr, 0, 0, dpr, 0, 0); cw.clearRect(0, 0, W, H);
+  const n = waveHist.length, step = W / n, bw = Math.max(1, step * 0.55);
+  const c = mic ? "111,214,255" : document.body.classList.contains("alert") ? "255,176,32" : "255,92,147";
+  for (let i = 0; i < n; i++) {
+    const h = Math.max(1, Math.min(1, waveHist[i] * 1.6) * (H - 2));
+    cw.fillStyle = `rgba(${c},${0.18 + 0.82 * (i / n)})`;
+    cw.fillRect(i * step, (H - h) / 2, bw, h);
+  }
+}
+window.karaLevels = (o) => {
+  for (let i = 0; i < NB; i++) lv.bands[i] = o.b?.[i] || 0;
+  lv.rms = o.r || 0; lv.mic = !!o.mic; lv.at = performance.now();
+  if (!o.mic && o.d) capSync(Math.round(capFull.length * Math.min(1, (o.p || 0) / o.d * 1.04)));
+};
 
 /* ---------- 狀態、字幕、小卡 ---------- */
 const $ = id => document.getElementById(id);
@@ -484,24 +674,50 @@ function setState(s) {
   // 說話時沿用原本的顏色（有人在等你就維持橘），不要每播一句就粉紅↔橘來回閃
   const waiting = s === "speaking" && typeof pending === "function" && embedded && pending().length > 0;
   accentFade.set(s === "alert" || waiting ? ORANGE : s === "searching" ? PINK.clone().lerp(CYAN, 0.45) : PINK);
-  $("state").textContent = STATES[s].label.split("").join(" ");
+  const en = bannerOn ? "WARNING" : STATES[s].en;
+  if ($("stZh").dataset.v !== STATES[s].label) { $("stZh").dataset.v = STATES[s].label; $("stZh").textContent = STATES[s].label.split("").join(" "); }
+  if ($("stEn").dataset.v !== en) { $("stEn").dataset.v = en; decode($("stEn"), en.split("").join(" ")); }
   $("who").textContent = "球體 · " + STATES[s].label;
   document.body.classList.toggle("alert", s === "alert" || waiting);
   document.querySelectorAll("#controls button[data-s]").forEach(b => b.classList.toggle("on", b.dataset.s === s));
+}
+// v5 ①：英文狀態字用「解碼」動畫換字（亂碼 → 正確字）
+function decode(el, target, ms = 420) {
+  const G = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789#%&*/<>", t0 = performance.now();
+  clearInterval(el._t);
+  el._t = setInterval(() => {
+    const k = (performance.now() - t0) / ms, n = Math.floor(k * target.length);
+    el.textContent = target.split("").map((ch, i) => i < n || ch === " " ? ch : G[Math.random() * G.length | 0]).join("");
+    if (k >= 1) { clearInterval(el._t); el.textContent = target; }
+  }, 33);
 }
 let typing = false, typeTimer = null;
 function say(text, ms = 70) {
   if (MINI) $("caption").classList.remove("quiet");
   return new Promise(res => {
-    clearInterval(typeTimer); typing = true;
+    clearInterval(typeTimer); typing = true; capFull = text; capShown = 0; capWord = null; capSynced = false;
     const el = $("capText"), bar = $("capBar"); let i = 0;
     el.textContent = "";
     typeTimer = setInterval(() => {
-      i++; el.textContent = text.slice(0, i); bar.style.width = (i / text.length * 100) + "%";
+      if (capSynced) return;                           // v5：原生端在報「唸到哪」，改由它推進
+      i++; capPaint(i); bar.style.width = (i / text.length * 100) + "%";
       if (i >= text.length) { clearInterval(typeTimer); typing = false; setTimeout(res, 600); }
     }, ms);
+    capDone = () => { clearInterval(typeTimer); typing = false; capPaint(text.length); bar.style.width = "100%"; setTimeout(res, 500); };
   });
 }
+/* v5 ⑤ 字幕逐詞同步：唸過的亮、正在唸的粉、還沒唸的暗；尾巴一個閃爍游標 */
+let capFull = "", capShown = 0, capWord = null, capSynced = false, capDone = null;
+function capPaint(n, word) {
+  capShown = Math.max(capShown, Math.min(n, capFull.length));
+  const el = $("capText"), w = word || capWord;
+  if (!capSynced) { el.innerHTML = esc(capFull.slice(0, capShown)) + (capShown < capFull.length ? '<span class="cur">_</span>' : ""); return; }
+  const a = w ? Math.min(w[0], capShown) : capShown, b = w ? Math.min(w[0] + w[1], capFull.length) : capShown;
+  el.innerHTML = `<span class="said">${esc(capFull.slice(0, a))}</span><span class="now">${esc(capFull.slice(a, Math.max(a, b)))}</span>` +
+    (capShown < capFull.length ? '<span class="cur">_</span>' : "") + `<span class="todo">${esc(capFull.slice(Math.max(b, capShown)))}</span>`;
+  $("capBar").style.width = (capShown / Math.max(1, capFull.length) * 100) + "%";
+}
+function capSync(n, word) { if (!capFull) return; capSynced = true; if (word) capWord = word; capPaint(n, word); }
 const wait = ms => new Promise(r => setTimeout(r, ms));
 function show(id, on) { $(id).classList.toggle("on", on); }
 
@@ -509,10 +725,10 @@ function show(id, on) { $(id).classList.toggle("on", on); }
 let voiceOn = false;
 try { voiceOn = !MINI && localStorage.getItem("sphere.voice") === "1"; } catch {}     // 小球不出聲（戰情中心那顆會唸）
 let voicing = false, voiceDone = null;
-window.karaVoice = (ev) => {
-  if (ev === "word") wordPulse = 1;
+window.karaVoice = (ev, loc, len) => {
+  if (ev === "word") { wordPulse = 1; if (loc != null) capSync(loc + (len || 1), [loc, len || 1]); }
   else if (ev === "start") voicing = true;
-  else if (ev === "end") { voicing = false; const f = voiceDone; voiceDone = null; f?.(); }
+  else if (ev === "end") { voicing = false; capWord = null; const f = voiceDone; voiceDone = null; f?.(); }
 };
 function renderVoice() {
   $("voice").classList.toggle("on", voiceOn);
@@ -534,17 +750,28 @@ async function speak(text) {
   if (voiceOn && host()) {
     const spoken = new Promise(r => { voiceDone = r; setTimeout(r, 4000 + text.length * 350); });   // 保險：原生端沒回 end 也會往下
     post({ action: "speak", text });
-    await Promise.all([typed, spoken]);
+    await spoken;
+    capDone?.();                                   // 唸完：字幕一定補到整句（同步或打字還沒打完都一樣）
+    await typed;
   } else await typed;
 }
 
 /* ---------- 播報佇列：狀態一變就說，一次說一句 ---------- */
 const queue = []; let talkingNow = false;
-function announce(text) { if (queue.length < 6) queue.push(text); pump(); }
+// v5：一句話可以帶 { pop: 事件卡, banner: 警示橫幅 }，唸的同時彈出來
+function announce(text, extra = {}) { if (queue.length < 6) queue.push({ text, ...extra }); else if (extra.banner) showBanner(extra.banner); pump(); }
 async function pump() {
   if (talkingNow || demoRunning || listening) return;
   talkingNow = true;
-  while (queue.length) { setState("speaking"); await speak(queue.shift()); }
+  while (queue.length) {
+    const q = queue.shift();
+    $("capQ").textContent = queue.length ? `+${queue.length}` : "";
+    if (q.banner) showBanner(q.banner);
+    if (q.pop) showPop(q.pop); else hidePop();
+    setState("speaking"); await speak(q.text);
+    if (q.pop) hidePop(2600);
+  }
+  $("capQ").textContent = "";
   talkingNow = false;
   autoState();
 }
@@ -553,14 +780,165 @@ async function pump() {
 let data = { five_hour: null, seven_day: null, ctx: null, sessions: null, team: [] };
 function pct(v) { return v == null ? "--%" : Math.round(v) + "%"; }
 function meter(id, v) { const b = $(id); b.style.width = (v ?? 0) + "%"; b.style.backgroundColor = v >= 90 ? "var(--bad)" : v >= 70 ? "var(--warn)" : "var(--pink)"; }
-function render() {
-  $("u7").textContent = pct(data.seven_day); $("u7b").textContent = pct(data.seven_day);
-  $("u5").textContent = pct(data.five_hour); $("uc").textContent = pct(data.ctx);
-  meter("m7", data.seven_day); meter("m5", data.five_hour); meter("mc", data.ctx);
-  $("ns").textContent = data.sessions ?? "--";
-  $("teamRows").innerHTML = (data.team || []).slice(0, 6).map((c, i) =>
-    `<div class="row${c.sessionId ? " link" : ""}${c.status === "需要你" ? " need" : ""}" data-i="${i}" title="${c.sessionId ? "點一下跳到這個 session" : ""}"><span class="t">${esc(c.status || "")}</span><span>${esc(c.name || "")}${c.doing ? " · " + esc(c.doing) : ""}</span><span>${c.progress != null ? c.progress + "%" : ""}</span></div>`).join("");
+/* v5 ③：數字滾動（從現在的值滾到新值） */
+function roll(el, to, fmt = v => Math.round(v) + "%") {
+  if (to == null) { el.textContent = "--%"; el._v = null; return; }
+  const from = el._v ?? to; el._v = to;
+  if (from === to) { el.textContent = fmt(to); return; }
+  const t0 = performance.now();
+  cancelAnimationFrame(el._raf);
+  const stepFn = () => { const k = Math.min(1, (performance.now() - t0) / 700), e = 1 - Math.pow(1 - k, 3);
+    el.textContent = fmt(from + (to - from) * e); if (k < 1) el._raf = requestAnimationFrame(stepFn); };
+  stepFn();
 }
+const hm = m => m == null ? "" : m >= 1440 ? `${Math.floor(m / 1440)}d${Math.round(m % 1440 / 60)}h` : m >= 60 ? `${Math.floor(m / 60)}h${String(m % 60).padStart(2, "0")}m` : `${m}m`;
+const hmZh = m => m >= 60 ? `${Math.floor(m / 60)} 小時 ${m % 60} 分` : `${Math.round(m)} 分鐘`;
+const lvlCol = v => v >= 90 ? "var(--bad)" : v >= 70 ? "var(--warn)" : "var(--pink)";
+/* v5 ③：5 小時額度的燒錢速度（最近 45 分鐘的取樣）→ 照這速度幾點用完 */
+let hist5 = [];
+try { hist5 = JSON.parse(localStorage.getItem("sphere.hist5") || "[]"); } catch {}
+function track5(v) {
+  if (v == null) return;
+  const now = Date.now(), last = hist5[hist5.length - 1];
+  if (last && v < last[1] - 3) hist5 = [];                 // 額度重置了
+  if (!last || v !== last[1] || now - last[0] > 5 * 60000) hist5.push([now, v]);
+  while (hist5.length > 2 && now - hist5[0][0] > 45 * 60000) hist5.shift();
+  try { localStorage.setItem("sphere.hist5", JSON.stringify(hist5)); } catch {}
+}
+function forecast() {
+  if (hist5.length < 2 || data.five_hour == null) return null;
+  const [t0, v0] = hist5[0], [t1, v1] = hist5[hist5.length - 1], mins = (t1 - t0) / 60000;
+  if (mins < 6) return null;
+  if (v1 - v0 < 1) return { calm: true };
+  const rate = (v1 - v0) / mins, left = Math.round((100 - v1) / rate);
+  return { left, rate, before: data.five_reset != null && left < data.five_reset };
+}
+function render() {
+  const top = (data.team || []).filter(c => c.ctx != null).sort((a, b) => b.ctx - a.ctx)[0], ctxV = top ? top.ctx : data.ctx;
+  roll($("u7"), data.seven_day); roll($("u7b"), data.seven_day); roll($("u5"), data.five_hour); roll($("uc"), ctxV);
+  meter("m7", data.seven_day); meter("m5", data.five_hour); meter("mc", ctxV);
+  const d7 = $("d7"); d7.setAttribute("stroke-dasharray", `${Math.min(100, data.seven_day ?? 0)} 100`); d7.style.stroke = lvlCol(data.seven_day ?? 0);
+  $("r5").textContent = data.five_reset != null ? `${hm(data.five_reset)} 後重置` : "";
+  $("r7").textContent = data.seven_reset != null ? `${hm(data.seven_reset)} 後重置` : "";
+  $("rc").textContent = top ? `最高：${top.name}` : "最近的 session";
+  track5(data.five_hour);
+  const f = forecast(), fc = $("fc");
+  fc.hidden = !f;
+  if (f) {
+    fc.className = "fc " + (f.calm ? "ok" : f.before ? (f.left < 60 ? "bad" : "warn") : "ok");
+    fc.textContent = f.calm ? "最近 45 分鐘幾乎沒在用額度" : f.before
+      ? `照現在的速度，大約 ${hm(f.left)} 後用完（比重置早 ${hm(data.five_reset - f.left)}）`
+      : `照現在的速度撐得到重置（每小時約 ${Math.round(f.rate * 60)}%）`;
+  }
+  $("ns").textContent = data.sessions ?? "--";
+  renderTeam();
+  drawLinks();
+}
+/* v5 ④ 戰情卡 */
+const ST_COL = { "需要你": "var(--warn)", "進行中": "var(--pink)", "待審": "var(--cyan)", "卡住": "var(--bad)", "完成": "#7dffb0" };
+const lastSt = new Map();
+function renderTeam() {
+  const team = data.team || [], cnt = {};
+  for (const c of team) cnt[c.status] = (cnt[c.status] || 0) + 1;
+  $("chips").innerHTML = Object.keys(ST_COL).filter(k => cnt[k]).map(k => `<span><i style="--c:${ST_COL[k]}"></i>${esc(k)} ${cnt[k]}</span>`).join("");
+  $("teamRows").innerHTML = team.slice(0, 6).map((c, i) => {
+    const col = ST_COL[c.status] || "#8a8494", changed = lastSt.has(c.sessionId) && lastSt.get(c.sessionId) !== c.status;
+    const sub = [esc(c.status || ""), c.ctx != null ? `<span class="${c.ctx >= 80 ? "hi" : ""}">記憶 ${c.ctx}%</span>` : "", c.ago != null ? (c.ago < 1 ? "剛剛" : c.ago < 60 ? `${c.ago} 分鐘前` : `${Math.floor(c.ago / 60)} 小時前`) : ""].filter(Boolean).join(" · ");
+    return `<div class="row trow${c.sessionId ? " link" : ""}${changed ? " flash" : ""}" data-i="${i}" title="${c.sessionId ? "點一下跳到這個 session" : ""}">
+      <span class="dot${c.status === "需要你" || c.status === "進行中" ? " pulse" : ""}" style="--c:${col}"></span>
+      <span class="nm">${esc(c.name || "")}${c.doing ? `<small> · ${esc(c.doing)}</small>` : ""}</span><span>${c.progress != null ? c.progress + "%" : ""}</span>
+      ${c.progress != null ? `<div class="meter"><b style="width:${c.progress}%;background-color:${col}"></b></div>` : ""}
+      <div class="sub">${sub}</div></div>`;
+  }).join("") + (team.length > 6 ? `<div class="more">還有 ${team.length - 6} 個 · 點衛星看</div>` : "");
+  for (const c of team) if (c.sessionId) lastSt.set(c.sessionId, c.status);
+}
+/* v5 ② 拉線：卡片和球之間畫一條「從球邊出發、轉個角、接到卡片」的細線 */
+const projV = new THREE.Vector3();
+function sphereScreen() {
+  projV.set(0, 0, 0).project(camera); const cx = (projV.x + 1) / 2 * innerWidth, cy = (1 - projV.y) / 2 * innerHeight;
+  projV.set(2.0, 0, 0).project(camera); const r = Math.abs((projV.x + 1) / 2 * innerWidth - cx);
+  return { cx, cy, r };
+}
+function linkPath(el, cls = "") {
+  if (!el || !el.classList.contains("on") || getComputedStyle(el).display === "none") return "";
+  const b = el.getBoundingClientRect(), { cx, cy, r } = sphereScreen();
+  const left = b.left + b.width / 2 < cx, ex = left ? b.right : b.left, ey = Math.max(b.top + 18, Math.min(b.bottom - 18, cy));
+  const ty = b.top + 22, a = Math.atan2(ty - cy, ex - cx), sx = cx + Math.cos(a) * r, sy = cy + Math.sin(a) * r;
+  const elbow = ex + (left ? 26 : -26);
+  return `<path class="${cls}" d="M${sx.toFixed(1)},${sy.toFixed(1)} L${elbow.toFixed(1)},${ty.toFixed(1)} L${ex.toFixed(1)},${ty.toFixed(1)}"/><circle class="${cls}" cx="${sx.toFixed(1)}" cy="${sy.toFixed(1)}" r="2.2"/>`;
+}
+function drawLinks() {
+  if (MINI) return;
+  // 外環卡接在額度卡下面（額度卡 v5 變高了，不能再用固定位置）
+  const u = $("cardUsage").getBoundingClientRect();
+  if (innerWidth > 640 && u.height) $("cardSys").style.top = Math.round(u.bottom + 12) + "px";
+  $("lkStatic").innerHTML = ["cardUsage", "cardTeam", "cardSys"].map(id => linkPath($(id))).join("");
+}
+addEventListener("resize", () => { drawLinks(); if (popEl.classList.contains("on")) drawPopLink(); });
+
+/* v5 ② 事件卡：唸到誰就從球拉一條線彈出誰（session／額度／溫度／隊長） */
+const popEl = $("pop"); let popTimer = null, popSid = null;
+function sessionPop(c) {
+  const ln = (k, v) => v == null || v === "" ? "" : `<div class="ln"><span class="t">${k}</span>${esc(v)}</div>`;
+  return { level: c.status === "需要你" ? "warn" : c.status === "卡住" ? "bad" : "", sid: c.sessionId,
+    html: `<div class="k">SESSION · ${esc(c.status || "")}</div><div class="head"><b>${esc(c.name || "")}</b><span style="font-size:12px;color:${ST_COL[c.status] || "var(--ink-dim)"}">${c.progress != null ? c.progress + "%" : ""}</span></div>
+      ${c.progress != null ? `<div class="meter seg" style="margin:0 0 6px"><b style="width:${c.progress}%;background-color:${ST_COL[c.status] || "var(--pink)"}"></b></div>` : ""}
+      ${ln("在做", c.doing)}${ln(c.status === "需要你" ? "問題" : "摘要", clip(c.status === "需要你" ? (c.ask || "") : (c.summary || ""), 90))}${ln("記憶", c.ctx != null ? c.ctx + "%" : null)}` };
+}
+function usagePop(which) {
+  const v = which === "7d" ? data.seven_day : data.five_hour, rs = which === "7d" ? data.seven_reset : data.five_reset, f = forecast();
+  return { level: v >= 90 ? "bad" : "warn", side: "l", flash: "cardUsage",
+    html: `<div class="k">USAGE · ${which === "7d" ? "THIS WEEK" : "5 HOURS"}</div><div class="head"><span>${which === "7d" ? "這週額度" : "5 小時額度"}</span><b style="color:${lvlCol(v)}">${pct(v)}</b></div>
+      <div class="meter seg" style="margin:0 0 6px"><b style="width:${Math.min(100, v ?? 0)}%;background-color:${lvlCol(v)}"></b></div>
+      ${rs != null ? `<div class="ln"><span class="t">重置</span>${hm(rs)} 後</div>` : ""}${which === "5h" && f && !f.calm ? `<div class="ln"><span class="t">預估</span>${f.before ? `${hm(f.left)} 後用完` : "撐得到重置"}</div>` : ""}` };
+}
+function showPop(p) {
+  clearTimeout(popTimer);
+  popEl.className = `card pop ${p.side || "r"} ${p.level || ""}`;
+  popEl.innerHTML = p.html; popSid = p.sid || null;
+  if (p.flash) { $(p.flash).classList.remove("flash"); void $(p.flash).offsetWidth; $(p.flash).classList.add("flash"); }
+  requestAnimationFrame(() => { popEl.classList.add("on"); drawPopLink(true); });
+}
+function drawPopLink(fresh) {
+  const lvl = popEl.classList.contains("bad") ? "bad" : popEl.classList.contains("warn") ? "warn" : "";
+  const g = $("lkPop"); g.innerHTML = linkPath(popEl, "pop " + lvl);
+  const path = g.querySelector("path"); if (!path || !fresh) return;
+  const L = path.getTotalLength(); path.style.strokeDasharray = L; path.style.strokeDashoffset = L;
+  requestAnimationFrame(() => { path.style.strokeDashoffset = 0; });
+}
+function hidePop(after = 0) {
+  clearTimeout(popTimer);
+  popTimer = setTimeout(() => { popEl.classList.remove("on"); $("lkPop").innerHTML = ""; popSid = null; }, after);
+}
+popEl.addEventListener("click", () => { if (popSid) post({ action: "focus", sessionId: popSid }); hidePop(); });
+
+/* v5 ⑥ 警示橫幅：橫過整顆球；需要你＝橘、卡住／額度爆／過熱＝紅；7 秒自己收，點一下跳過去 */
+let bannerOn = false, bannerLevel = "", bannerTimer = null, bannerSid = null;
+const ICON = {
+  warn: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 2 20h20z"/><path d="M12 10v4M12 17.2v.1"/></svg>',
+  user: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>',
+  heat: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M14 14.8V5a2 2 0 0 0-4 0v9.8a4 4 0 1 0 4 0z"/></svg>',
+  gauge: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 18a8 8 0 1 1 16 0"/><path d="M12 18l4-6"/></svg>',
+};
+function showBanner(b) {
+  if (MINI) return;
+  const el = $("banner"), now = new Date();
+  bannerOn = true; bannerLevel = b.level || "warn"; bannerSid = b.sid || null;
+  el.className = bannerLevel === "warn" ? "warn" : "";
+  el.querySelector(".in").innerHTML = `<div class="meta"><span>${esc(b.tag || "WARNING")}</span><span>${esc(b.source || "SHOWORK42")}</span><span>${now.getHours()}:${String(now.getMinutes()).padStart(2, "0")}</span></div>
+    <div class="main">${ICON[b.icon || "warn"]}<span class="bt"></span><span class="cur">_</span></div>${b.sub ? `<div class="sub">${esc(b.sub)}</div>` : ""}`;
+  void el.offsetWidth; el.classList.add("on");
+  decode(el.querySelector(".bt"), b.title, 520);
+  document.body.classList.toggle("bad", bannerLevel === "bad");
+  setState(state);
+  clearTimeout(bannerTimer);
+  bannerTimer = setTimeout(hideBanner, b.ms || 7000);
+}
+function hideBanner() {
+  $("banner").classList.remove("on"); bannerOn = false; bannerSid = null;
+  document.body.classList.remove("bad"); setState(state);
+}
+$("banner").addEventListener("click", () => { if (bannerSid) post({ action: "focus", sessionId: bannerSid }); hideBanner(); });
 function renderSys() {
   const rows = [];
   for (const r of data.runs || []) rows.push(`<div class="row"><span class="t">RUN</span><span>${esc(clip((r.name ? r.name + " · " : "") + (r.label || "背景工作"), 22))}${r.eta ? " · 剩 " + esc(r.eta) : ""}</span><span>${Math.round(r.fraction * 100)}%</span><div class="meter"><b style="width:${Math.round(r.fraction * 100)}%"></b></div></div>`);
@@ -591,10 +969,13 @@ function diff(team) {
       const was = p.status, is = c.status;
       if (is === was && (is !== "需要你" || p?.ask === c.ask)) continue;
       const who = c.name || "有個 session";
-      if (is === "需要你") announce(c.ask ? `${who} 在等你回答：${clip(c.ask, 40)}` : `${who} 在等你回答。`);
-      else if (is === "待審" && was) announce(c.summary ? `${who} 做完了，等你看：${clip(c.summary, 40)}` : `${who} 做完了，等你看。`);
-      else if (is === "完成" && was && was !== "完成") announce(`${who} 完成了。`);
-      else if (is === "卡住" && was !== "卡住") announce(`${who} 卡住了${c.summary ? "：" + clip(c.summary, 30) : "。"}`);
+      const pop = sessionPop(c);
+      if (is === "需要你") announce(c.ask ? `${who} 在等你回答：${clip(c.ask, 40)}` : `${who} 在等你回答。`,
+        { pop, banner: { level: "warn", icon: "user", tag: "需要你 · ACTION", source: who, title: `${who} 在等你`, sub: clip(c.ask || "", 60), sid: c.sessionId } });
+      else if (is === "待審" && was) announce(c.summary ? `${who} 做完了，等你看：${clip(c.summary, 40)}` : `${who} 做完了，等你看。`, { pop });
+      else if (is === "完成" && was && was !== "完成") announce(`${who} 完成了。`, { pop });
+      else if (is === "卡住" && was !== "卡住") announce(`${who} 卡住了${c.summary ? "：" + clip(c.summary, 30) : "。"}`,
+        { pop, banner: { level: "bad", icon: "warn", tag: "卡住 · BLOCKED", source: who, title: `${who} 卡住了`, sub: clip(c.summary || "", 60), sid: c.sessionId } });
     }
   }
   prev = now;
@@ -622,11 +1003,24 @@ function quota() {
   const now = { f: l5(data.five_hour), s: l7(data.seven_day) };
   if (quotaLv && !MINI) {
     const left = m => m == null ? "" : m >= 1440 ? `，${Math.round(m / 1440)} 天後重置` : m >= 60 ? `，大約 ${Math.floor(m / 60)} 小時 ${m % 60} 分後重置` : `，大約 ${m} 分鐘後重置`;
-    if (now.f > quotaLv.f) announce(now.f === 3 ? `5 小時額度用完了，AI 會停下來${left(data.five_reset)}。` : `注意，5 小時額度已經用了 ${pct(data.five_hour)}${left(data.five_reset)}。`);
-    if (now.s > quotaLv.s) announce(`注意，這週的額度已經用了 ${pct(data.seven_day)}${left(data.seven_reset)}。`);
+    const bn = (title, v, rs) => ({ level: "bad", icon: "gauge", tag: "額度 · USAGE", source: "CLAUDE", title, sub: rs != null ? `${hmZh(rs)}後重置` : "" });
+    if (now.f > quotaLv.f) announce(now.f === 3 ? `5 小時額度用完了，AI 會停下來${left(data.five_reset)}。` : `注意，5 小時額度已經用了 ${pct(data.five_hour)}${left(data.five_reset)}。`,
+      { pop: usagePop("5h"), banner: now.f >= 2 ? bn(now.f === 3 ? "5 小時額度用完了" : `5 小時額度 ${pct(data.five_hour)}`, data.five_hour, data.five_reset) : null });
+    if (now.s > quotaLv.s) announce(`注意，這週的額度已經用了 ${pct(data.seven_day)}${left(data.seven_reset)}。`,
+      { pop: usagePop("7d"), banner: now.s >= 2 ? bn(`這週額度 ${pct(data.seven_day)}`, data.seven_day, data.seven_reset) : null });
   }
   quotaLv = now;
+  // v5 ⑥：機器變很熱（cool42 hot／critical）講一次＋紅色橫幅；30 分鐘內不重講
+  const hot = data.heat && (data.heat.level === "hot" || data.heat.level === "critical");
+  if (hot && heatWas === false && !MINI && Date.now() - heatSaid > 30 * 60000) {
+    heatSaid = Date.now();
+    const t = Math.round(data.heat.temp);
+    announce(`機器現在 ${t} 度，有點熱，動畫先降速。`, { banner: { level: "bad", icon: "heat", tag: "溫度 · THERMAL", source: "COOL42", title: `機器 ${t}°C`, sub: "動畫降速中，重的工作可以晚點再跑" },
+      pop: { level: "bad", side: "l", html: `<div class="k">THERMAL · COOL42</div><div class="head"><span>機器溫度</span><b style="color:var(--bad)">${t}°C</b></div><div class="meter seg"><b style="width:${Math.min(100, Math.max(2, (t - 35) / 65 * 100))}%;background-color:var(--bad)"></b></div>` } });
+  }
+  if (data.heat) heatWas = !!hot;
 }
+let heatWas = null, heatSaid = 0;
 
 /* ---------- v3 #5 早報／收工總結 ---------- */
 function resetText(m) { return m == null ? "" : m >= 1440 ? `${Math.round(m / 1440)} 天後重置` : m >= 60 ? `${Math.floor(m / 60)} 小時後重置` : `${m} 分鐘後重置`; }
@@ -748,6 +1142,7 @@ function statusLine() {
 function autoState() {
   const team = data.team || [];
   show("cardUsage", true); show("cardTeam", team.length > 0);
+  drawLinks();
   if (demoRunning || talkingNow) return;
   if (listening) return;
   if (pending().length) setState("alert");
@@ -863,7 +1258,7 @@ function captainReply() {
   if (!handoffAt || Date.now() - handoffAt > 20 * 60 * 1000 || MINI) return;
   handoffAt = 0;
   const plain = String(c.text).replace(/```[\s\S]*?```/g, "（程式碼略）").replace(/[#*`>|_]/g, "").replace(/\s+/g, " ").trim();
-  announce(`隊長回覆：${clip(plain, 90)}`);
+  announce(`隊長回覆：${clip(plain, 90)}`, { pop: { html: `<div class="k">CAPTAIN · 回覆</div><div class="ln" style="border:0">${esc(clip(plain, 220))}</div>` } });
 }
 
 /* ---------- v4 C：點衛星展開小卡 ---------- */
@@ -928,10 +1323,16 @@ async function demo() {
   setState("listening"); await say("我在聽。", 90); await wait(1200);
   setState("thinking"); await say("讓我想一下⋯", 90); await wait(1400);
   setState("searching"); await say("正在查資料、整理給你。"); await wait(1800);
-  setState("speaking"); show("cardUsage", true);
+  setState("speaking"); show("cardUsage", true); drawLinks();
+  showPop(usagePop("5h"));
   await speak(`記憶量 ${pct(data.ctx)}，這 5 小時用了 ${pct(data.five_hour)}，這週 ${pct(data.seven_day)}。`);
-  show("cardTeam", true);
+  hidePop(); show("cardTeam", true); drawLinks();
+  const c0 = (data.team || [])[0];
+  if (c0) showPop(sessionPop(c0));
   await speak(`現在有 ${data.sessions ?? "幾"} 個 session 在線。`);
+  hidePop(1200);
+  showBanner({ level: "warn", icon: "warn", tag: "示範 · DEMO", source: "SHOWORK42", title: "這是警示橫幅", sub: "有人在等你、卡住、額度快爆或機器過熱時會出現", ms: 4500 });
+  await speak("有人在等你或卡住時，會這樣提醒你。");
   await wait(800);
   setState("idle"); await speak("有事再叫我。"); demoRunning = false;
   embedded ? autoState() : null;
