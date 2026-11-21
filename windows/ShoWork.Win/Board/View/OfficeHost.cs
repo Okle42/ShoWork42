@@ -157,7 +157,7 @@ sealed class OfficeHost : IDisposable
     // MARK: 網頁檔的位置
 
     /// exe 旁邊的 Web\（dotnet build 會複製過去）；沒有就把內嵌資源解到 SupportDir（單一 exe、安裝版）
-    static string? WebFolder()
+    internal static string? WebFolder()
     {
         // 單一 exe 一律用自己內嵌的網頁：bin 裡殘留的開發版 Web\ 是舊的（P8 Surface：升級後還在看舊大樓）
         var dev = Path.Combine(AppContext.BaseDirectory, "Web");

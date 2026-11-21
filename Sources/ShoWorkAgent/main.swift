@@ -454,6 +454,7 @@ MainActor.assumeIsolated {
     }
     Arranger.shared.start()
     BoardModel.shared.start()          // 戰情中心的資料（審核、ctx 收尾）視窗沒開也要跑
+    SphereWatch.shared.start()         // 球體 v4：今日時間軸紀錄＋需要你提醒（SphereWatch.swift）
     SphereMini.shared.restore()        // 桌面常駐小球：上次開著就照樣開（球體 v3 #7）
     WebServer.shared.start()           // 網頁版戰情中心：預設關，showork web enable 才開、只綁 Tailscale IP（WebServer.swift）
     NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { _ in

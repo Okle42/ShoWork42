@@ -12,6 +12,7 @@ namespace ShoWork;
 /// 都在這裡接（OnOfficeAction）；對話框在 BoardSheets.cs。只有正式 agent（系統匣開的）會自動審核、自動回報派工、自動收尾（Mac：Engine.current != nil）。
 /// 每 1.5 秒重讀一次看板（同 Mac），沒變就不重畫；島的動畫 8 fps，只在有人在動、視窗看得到、沒開「減少動態效果」時跑。
 /// W6：左上「卡片／大樓」切換；大樓＝WebView2＋three.js（OfficeHost），WebView2 Runtime 不在或壞掉就退回卡片、切換鈕變灰。
+/// 11-21：第三格「球體」＝WebView2＋sphere.html（SphereHost，Mac SphereWebScene 的移植）；資料 UpdateSphere 推、動作 OnSphereAction 接。
 sealed class BoardForm : Form
 {
     public sealed record Options(bool Demo = false, Size? Size = null, string? Shot = null, bool ExitAfterShot = false, bool TopMost = false, bool? Tower = null);
@@ -46,6 +47,9 @@ sealed class BoardForm : Form
     readonly ViewSwitch switcher;
     OfficeHost? office;
     bool tower;                                     // 現在看大樓
+    // 11-21：球體檢視（Mac 戰情中心的「球體」分頁）
+    SphereHost? sphere;
+    bool sphereOn;                                  // 現在看球體
     // 11-02 P8：大樓照搬 Mac（Board\Core＋Board\Source）：OfficeSource 組 office2 JSON（樓層號名冊、主題、閒晃、保全、城市、天氣、圖譜）
     OfficeSource? officeSource;
     OfficeWeather? weather;
@@ -96,7 +100,7 @@ sealed class BoardForm : Form
         scroller.MouseWheel += (_, _) => AnimateTick();
         usage = new UsageBar(this);
         switcher = new ViewSwitch(this);
-        switcher.Changed += t => SetTower(t, remember: true);
+        switcher.Changed += v => SetView(v, remember: true);
         controls = new BoardControls(this);
         controls.NewTask += () => OpenSheet(new NewTaskSheet(this, Folders(lastCards), Toast));
         controls.ToCaptain += () => OpenSheet(new CaptainSheet(this, CaptainCard, BoardWindowTestMode, Toast));
@@ -176,6 +180,7 @@ sealed class BoardForm : Form
     public void Toast(string text)
     {
         if (IsDisposed) return;
+        if (sphereOn && sphere?.Ready == true) { sphere.Toast(text); return; }
         if (tower && office?.Ready == true) { office.Post(new System.Text.Json.Nodes.JsonObject { ["type"] = "toast", ["text"] = text }); return; }
         toastText = text;
         toastAt = DateTime.UtcNow;
@@ -239,11 +244,12 @@ sealed class BoardForm : Form
         base.OnShown(e);
         shown = true;
         Invalidate(true);                           // OnHandleCreated 改過大小：第一次畫的時候可能還是舊大小
-        // 一開始看哪個：--board-tower／SHOWORK_BOARD_VIEW=tower|cards（測試）＞上次選的＞卡片
-        bool want = opt.Tower ?? (Environment.GetEnvironmentVariable("SHOWORK_BOARD_VIEW") is { Length: > 0 } ev ? ev == "tower" : ReadViewPref());
+        // 一開始看哪個：--board-tower／SHOWORK_BOARD_VIEW=tower|cards|sphere（測試）＞上次選的＞卡片
+        string want = opt.Tower is { } ot ? (ot ? ViewSwitch.Tower : ViewSwitch.Cards)
+                    : Environment.GetEnvironmentVariable("SHOWORK_BOARD_VIEW") is { Length: > 0 } ev ? ev : ReadViewPref();
         switcher.Enabled = OfficeHost.RuntimeVersion != null;
         if (!switcher.Enabled) Tips.SetToolTip(switcher, "這台電腦沒有 WebView2 Runtime，只能看卡片（Windows 11 內建；Windows 10 要另外裝）");
-        if (want) SetTower(true, remember: false);
+        if (want != ViewSwitch.Cards) SetView(want, remember: false);
         Log.Note($"BOARD open demo={opt.Demo} dpi={DeviceDpi} size={Size} client={ClientSize} reduce={ReduceMotion}");
         Refresh_();
         refresh.Start();
@@ -297,6 +303,7 @@ sealed class BoardForm : Form
         }
         scroller.Bounds = new Rectangle(pad, top, w, Math.Max(0, ClientSize.Height - top - pad));
         if (office != null) office.View.Bounds = scroller.Bounds;
+        if (sphere != null) sphere.View.Bounds = scroller.Bounds;
         LayoutDetail();
         LayoutGrid();
     }
@@ -437,6 +444,8 @@ sealed class BoardForm : Form
     {
         if (IsDisposed) return;
         lastCards = cards;
+        lastLimits = limits;
+        UpdateSphere();
         if (sig == signature) { usage.Set(limits, islands.Count); UpdateOffice(force: ExtrasChanged()); Retime(); return; }
         signature = sig;
         islands = Islands.Build(cards);
@@ -463,19 +472,31 @@ sealed class BoardForm : Form
 
     // MARK: 大樓（W6）
 
-    static bool ReadViewPref() { try { return File.Exists(ViewPrefPath) && File.ReadAllText(ViewPrefPath).Trim() == "tower"; } catch { return false; } }
-    static void WriteViewPref(bool t)
+    static string ReadViewPref()
     {
-        try { Directory.CreateDirectory(Path.GetDirectoryName(ViewPrefPath)!); File.WriteAllText(ViewPrefPath, t ? "tower" : "cards"); } catch { }
+        try
+        {
+            var v = File.Exists(ViewPrefPath) ? File.ReadAllText(ViewPrefPath).Trim() : "";
+            return v is ViewSwitch.Tower or ViewSwitch.Sphere ? v : ViewSwitch.Cards;
+        }
+        catch { return ViewSwitch.Cards; }
+    }
+    static void WriteViewPref(string v)
+    {
+        try { Directory.CreateDirectory(Path.GetDirectoryName(ViewPrefPath)!); File.WriteAllText(ViewPrefPath, v); } catch { }
     }
 
-    /// 切換卡片／大樓。大樓第一次打開才建 WebView2；不能用就留在卡片
-    void SetTower(bool on, bool remember)
+    /// 切換大樓／卡片／球體。大樓、球體第一次打開才建 WebView2；不能用就留在卡片
+    void SetView(string want, bool remember)
     {
-        if (on && (OfficeHost.RuntimeVersion == null || office?.Failed == true)) on = false;
-        if (remember) WriteViewPref(on);
+        if (want == ViewSwitch.Tower && (OfficeHost.RuntimeVersion == null || office?.Failed == true)) want = ViewSwitch.Cards;
+        if (want == ViewSwitch.Sphere && (OfficeHost.RuntimeVersion == null || sphere?.Failed == true)) want = ViewSwitch.Cards;
+        if (want is not (ViewSwitch.Tower or ViewSwitch.Sphere)) want = ViewSwitch.Cards;
+        if (remember) WriteViewPref(want);
+        bool on = want == ViewSwitch.Tower;
         tower = on;
-        switcher.Tower = on;
+        sphereOn = want == ViewSwitch.Sphere;
+        switcher.Mode = want;
         if (on && office == null)
         {
             office = new OfficeHost();
@@ -487,21 +508,46 @@ sealed class BoardForm : Form
             office.View.BringToFront();
             office.Start();
         }
+        if (sphereOn && sphere == null)
+        {
+            sphere = new SphereHost(testMode: BoardWindowTestMode);
+            sphere.ActionReceived += m => { try { BeginInvoke(() => OnSphereAction(m)); } catch { } };
+            sphere.Broken += why => { try { BeginInvoke(() => SphereBroken(why)); } catch { } };
+            sphere.View.Bounds = scroller.Bounds;
+            Controls.Add(sphere.View);
+            sphere.Start();
+        }
         if (office != null) office.View.Visible = on && visibleOnScreen;
-        scroller.Visible = !on;
+        if (sphere != null)
+        {
+            sphere.View.Visible = sphereOn && visibleOnScreen;
+            if (sphereOn) sphere.View.BringToFront(); else sphere.Hidden();
+        }
+        if (on) office?.View.BringToFront();
+        scroller.Visible = want == ViewSwitch.Cards;
         if (!on) ShowDetail(null);
         UpdateOffice(force: true);
+        UpdateSphere();
         Retime();
-        Log.Note($"BOARD view={(on ? "tower" : "cards")}");
+        Log.Note($"BOARD view={want}");
     }
 
     void OfficeBroken(string why)
     {
         if (IsDisposed) return;
-        switcher.Enabled = false;
+        switcher.TowerOff = true;
         Tips.SetToolTip(switcher, "大樓畫面打不開，先看卡片（" + why + "）");
-        SetTower(false, remember: false);
+        if (tower) SetView(ViewSwitch.Cards, remember: false);
         if (office != null) { Controls.Remove(office.View); office.Dispose(); }
+    }
+
+    void SphereBroken(string why)
+    {
+        if (IsDisposed) return;
+        switcher.SphereOff = true;
+        Tips.SetToolTip(switcher, "球體畫面打不開，先看卡片（" + why + "）");
+        if (sphereOn) SetView(ViewSwitch.Cards, remember: false);
+        if (sphere != null) { Controls.Remove(sphere.View); sphere.Dispose(); }
     }
 
     /// 卡片 → 大樓 JSON（office2），內容變了才推；資料沒變時每 15 秒重組一次（Mac 看板的 15 秒保底刷新：閒晃的時段、2 小時降樓要看時間）
@@ -535,6 +581,108 @@ sealed class BoardForm : Form
                                         scanning: guardScanning, extra: Extras());
         if (detailId != null) ShowDetail(detailId);             // 細節卡跟著資料更新（人走了就收掉）
         office?.Push(officeJson);                               // OfficeHost 自己比對，沒變就不推
+    }
+
+    // MARK: 球體（11-21；Mac SphereWebScene.swift）
+
+    RateLimits? lastLimits;
+
+    /// 卡片 → 球體的 karaUpdate（SpherePayload）；SphereHost 自己比對，內容一樣就不推
+    void UpdateSphere()
+    {
+        if (sphere == null || sphere.Failed) return;
+        sphere.Push(SpherePayload.Build(lastCards, lastLimits, runs, captainThread));
+    }
+
+    /// 球體網頁要卡片資料的動作（ready／speak／setVoice／listen／mini 在 SphereHost 自己處理）。結果一律回 karaToast 一句話
+    void OnSphereAction(JsonElement m)
+    {
+        if (IsDisposed || sphere == null) return;
+        var action = Str(m, "action") ?? "";
+        try { HandleSphereAction(action, m); }
+        catch (Exception x) { Log.Note($"SPHERE action {action} failed: {x}"); sphere?.Toast($"做不到：{x.Message}"); }
+    }
+
+    void HandleSphereAction(string action, JsonElement m)
+    {
+        Log.Note($"SPHERE action {action}");
+        void Say(string? t) { if (!string.IsNullOrEmpty(t)) sphere?.Toast(t.EndsWith('。') ? t : t + "。"); }
+        BoardCard? Card() => SpherePayload.Find(lastCards, Str(m, "sessionId"));
+        switch (action)
+        {
+            case "focus":
+            {
+                if (Card() is not { } c) { Say("找不到這個 session 了"); return; }
+                if (BoardWindowTestMode) { Say($"測試：不跳到 {c.Name ?? c.Project}"); return; }
+                if (DemoCard(c)) { Say("示範資料：不跳到視窗"); return; }
+                Run(() => BoardActions.Focus(c), msg => Say(msg));
+                return;
+            }
+            case "answer":
+            {
+                if (Card() is not { } c) { Say("這個 session 已經不在了"); return; }
+                var text = (Str(m, "text") ?? "").Trim();
+                if (text.Length == 0) return;
+                if (BoardWindowTestMode) { Say($"測試：不送出「{text}」"); return; }
+                if (DemoCard(c)) { Say($"示範資料：不送出（{text.Length} 字）"); return; }
+                Run(() => BoardActions.Answer(c, text), msg => { Say(msg ?? "送不出去"); Refresh_(); });
+                return;
+            }
+            case "permit":
+            {
+                // 同大樓的收件匣按鈕：寫回答檔，等著的 hook（showork permit）讀到就回給 Claude Code
+                if (Card() is not { } c) { Say("這個 session 已經不在了"); return; }
+                var decision = Str(m, "decision") is { } d && d is "allow" or "always" or "deny" ? d : "deny";
+                if (Str(m, "permitId") is { } pid && c.Permit is { } cur && cur.Id != pid) { Say("這個對話框已經關了"); return; }
+                if (BoardWindowTestMode) { Say($"測試：不回答權限（{decision}）"); return; }
+                if (DemoCard(c)) { Say("示範資料：不回答權限"); return; }
+                Dictionary<string, List<string>>? answers = null;
+                if (m.TryGetProperty("answers", out var a) && a.ValueKind == JsonValueKind.Object)
+                {
+                    answers = new();
+                    foreach (var q in a.EnumerateObject())
+                        answers[q.Name] = q.Value.ValueKind == JsonValueKind.Array ? q.Value.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.String).Select(x => x.GetString()!).ToList()
+                                        : q.Value.ValueKind == JsonValueKind.String ? new() { q.Value.GetString()! } : new();
+                }
+                Say(BoardActions.AnswerPermit(c, decision, Str(m, "message"), answers));
+                Refresh_();
+                return;
+            }
+            case "captain":
+            {
+                var text = (Str(m, "text") ?? "").Trim();
+                if (text.Length == 0) return;
+                if (BoardWindowTestMode) { Say($"測試：不交給隊長「{text}」"); return; }
+                if (opt.Demo) { Say("示範資料：不交給隊長"); return; }
+                captainBusy = true;
+                Run(() => BoardActions.AskCaptain(text), msg =>
+                {
+                    captainBusy = false;
+                    BoardHistory.Append(new Dictionary<string, string> { ["ev"] = "tocaptain", ["text"] = text });
+                    Say(msg ?? "送不到隊長");
+                    Refresh_();
+                });
+                return;
+            }
+            case "ask":
+                // 球直接回答問題：Mac 那邊才有；Windows 版先請他交給隊長
+                Say("Windows 版的球還不會直接回答，請交給隊長");
+                return;
+            case "sessionInfo":
+            {
+                if (Card() is not { } c) { Say("這個 session 已經不在了"); return; }
+                sphere?.SessionInfo(SpherePayload.Info(c));
+                return;
+            }
+            case "timeline":
+                Say("Windows 版還沒有今日時間軸");
+                return;
+            case "openBoard":
+                // 小球點一下＝打開戰情中心切到球體；Windows 沒有桌面小球，已經在戰情中心裡
+                if (!sphereOn) SetView(ViewSwitch.Sphere, remember: true);
+                return;
+        }
+        Log.Note($"SPHERE action unknown {action}");
     }
 
     // MARK: 大樓網頁的選填欄位（PROTOCOL.md 的選填表：收件匣、隊長對話、派工單、進度條、天氣列）
@@ -826,7 +974,7 @@ sealed class BoardForm : Form
     /// 要動才開計時器：有人在動、視窗看得到、沒開「減少動態效果」
     void Retime()
     {
-        bool run = visibleOnScreen && !ReduceMotion && !tower && views.Any(v => v.Art.Moving);
+        bool run = visibleOnScreen && !ReduceMotion && !tower && !sphereOn && views.Any(v => v.Art.Moving);
         if (run && !anim.Enabled) anim.Start();
         else if (!run && anim.Enabled) anim.Stop();
     }
@@ -863,6 +1011,7 @@ sealed class BoardForm : Form
         Log.Note($"BOARD visible={v} frames={frames} anim={anim.Enabled}");
         // 看不到就把 WebView2 藏起來：瀏覽器自己停掉 requestAnimationFrame，大樓不耗 GPU
         if (office != null) office.View.Visible = tower && v;
+        if (sphere != null) { sphere.View.Visible = sphereOn && v; if (!v) sphere.Hidden(); }
         if (v) Refresh_();
         Retime();
     }
@@ -982,6 +1131,8 @@ sealed class BoardForm : Form
         SystemEvents.UserPreferenceChanged -= PreferenceChanged;
         office?.Dispose();
         office = null;
+        sphere?.Dispose();
+        sphere = null;
         shotTimer?.Dispose();
         shotTimer = null;
         refresh.Dispose();
@@ -1205,17 +1356,20 @@ sealed class UsageBar : Control
     }
 }
 
-/// 左上角的「大樓／卡片」切換（兩格的分段按鈕）。不能用時整個變灰、點了沒反應。
-/// 照 Mac BoardWindow.controls 的 Picker（.segmented）：左格 SF Symbol「cube」＝3D 辦公室、右格「square.grid.2x2」＝部門島（卡片），
-/// 只有圖示、說明放在滑鼠提示（11-03：原本是「卡片」「大樓」文字、順序也跟 Mac 相反）
+/// 左上角的「大樓／卡片／球體」切換（三格的分段按鈕）。WebView2 不在時整個變灰、點了沒反應；大樓或球體壞掉只把那一格變灰。
+/// 照 Mac BoardWindow.controls 的 Picker（.segmented）：左格 SF Symbol「cube」＝3D 辦公室、中格「square.grid.2x2」＝部門島（卡片），
+/// 只有圖示、說明放在滑鼠提示（11-03：原本是「卡片」「大樓」文字、順序也跟 Mac 相反）。11-21：右邊加第三格「球體」（圓球圖示）
 sealed class ViewSwitch : Control
 {
+    public const string Tower = "tower", Cards = "cards", Sphere = "sphere";
+    static readonly string[] Modes = { Tower, Cards, Sphere };
     readonly BoardForm owner;
-    bool towerOn;
+    string mode = Cards;
+    bool towerOff, sphereOff;
     int tipSeg = -1;
-    /// Mac 的 .help(…)：左格、右格
-    static readonly string[] Help = { "3D 辦公室", "部門島" };
-    public event Action<bool>? Changed;
+    /// Mac 的 .help(…)：左格、中格、右格
+    static readonly string[] Help = { "3D 辦公室", "部門島", "球體助理" };
+    public event Action<string>? Changed;
 
     public ViewSwitch(BoardForm owner)
     {
@@ -1223,16 +1377,24 @@ sealed class ViewSwitch : Control
         SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
         SetStyle(ControlStyles.Selectable, false);
         Cursor = Cursors.Hand;
-        AccessibleName = "檢視：3D 辦公室／部門島";
+        AccessibleName = "檢視：3D 辦公室／部門島／球體助理";
     }
 
     float S => DeviceDpi / 96f;
 
-    public bool Tower { get => towerOn; set { if (towerOn == value) return; towerOn = value; Invalidate(); } }
+    public string Mode { get => mode; set { if (mode == value) return; mode = value; Invalidate(); } }
+    /// 大樓壞掉（這一格變灰、點不動）
+    public bool TowerOff { get => towerOff; set { towerOff = value; Invalidate(); } }
+    /// 球體壞掉
+    public bool SphereOff { get => sphereOff; set { sphereOff = value; Invalidate(); } }
+
+    bool SegOn(int i) => Enabled && !(i == 0 && towerOff) && !(i == 2 && sphereOff);
 
     /// 一格寬：圖示 14 點＋左右留白（Mac 分段按鈕的圖示格）
     int SegW => (int)(36 * S);
-    public override Size GetPreferredSize(Size proposedSize) => new(SegW * 2 + (int)(4 * S), (int)(26 * S));
+    public override Size GetPreferredSize(Size proposedSize) => new(SegW * Modes.Length + (int)(4 * S), (int)(26 * S));
+
+    int SegAt(int x) => Math.Clamp(x * Modes.Length / Math.Max(1, Width), 0, Modes.Length - 1);
 
     protected override void OnEnabledChanged(EventArgs e) { base.OnEnabledChanged(e); Cursor = Enabled ? Cursors.Hand : Cursors.Default; tipSeg = -1; Invalidate(); }
 
@@ -1240,10 +1402,10 @@ sealed class ViewSwitch : Control
     {
         base.OnMouseClick(e);
         if (!Enabled || e.Button != MouseButtons.Left) return;
-        bool t = e.X < Width / 2;           // 左格＝大樓
-        if (t == towerOn) return;
-        Tower = t;
-        Changed?.Invoke(t);
+        int seg = SegAt(e.X);
+        if (!SegOn(seg) || Modes[seg] == mode) return;
+        Mode = Modes[seg];
+        Changed?.Invoke(mode);
     }
 
     /// 滑鼠提示跟著停在哪一格換（不能用時保留 BoardForm 設的「為什麼不能用」）
@@ -1251,10 +1413,10 @@ sealed class ViewSwitch : Control
     {
         base.OnMouseMove(e);
         if (!Enabled) return;
-        int seg = e.X < Width / 2 ? 0 : 1;
+        int seg = SegAt(e.X);
         if (seg == tipSeg) return;
         tipSeg = seg;
-        owner.Tips.SetToolTip(this, Help[seg]);
+        if (SegOn(seg)) owner.Tips.SetToolTip(this, Help[seg]);
     }
     protected override void OnMouseLeave(EventArgs e) { base.OnMouseLeave(e); if (Enabled) tipSeg = -1; }
 
@@ -1267,16 +1429,28 @@ sealed class ViewSwitch : Control
         g.SmoothingMode = SmoothingMode.AntiAlias;
         using (var p = IslandCardView.Rounded(new RectangleF(0.5f, 0.5f, Width - 1, Height - 1), 7 * s))
         using (var b = new SolidBrush(th.Card)) g.FillPath(b, p);
-        float pad = 2 * s, half = (Width - pad * 2) / 2f;
-        using (var p = IslandCardView.Rounded(new RectangleF(pad + (towerOn ? 0 : half), pad, half, Height - pad * 2), 5 * s))
+        int n = Modes.Length, cur = Math.Max(0, Array.IndexOf(Modes, mode));
+        float pad = 2 * s, seg = (Width - pad * 2) / (float)n;
+        using (var p = IslandCardView.Rounded(new RectangleF(pad + cur * seg, pad, seg, Height - pad * 2), 5 * s))
         using (var b = new SolidBrush(th.Dark ? Color.FromArgb(0x55, 0x55, 0x58) : Color.White)) g.FillPath(b, p);
         float k = 14 * s;
-        for (int i = 0; i < 2; i++)
+        for (int i = 0; i < n; i++)
         {
-            var c = !Enabled ? th.Tertiary : (i == 0) == towerOn ? th.Text : th.Secondary;
-            var r = new RectangleF(pad + i * half + (half - k) / 2, (Height - k) / 2, k, k);
-            if (i == 0) Cube(g, r, c, s); else Grid(g, r, c, s);
+            var c = !SegOn(i) ? th.Tertiary : i == cur ? th.Text : th.Secondary;
+            var r = new RectangleF(pad + i * seg + (seg - k) / 2, (Height - k) / 2, k, k);
+            if (i == 0) Cube(g, r, c, s); else if (i == 1) Grid(g, r, c, s); else Ball(g, r, c, s);
         }
+    }
+
+    /// 球體：圓外框＋一條赤道、一條經線（像 SF Symbols 的 globe 簡化版）
+    static void Ball(Graphics g, RectangleF r, Color c, float s)
+    {
+        var o = RectangleF.Inflate(r, -0.7f * s, -0.7f * s);
+        using var pen = new Pen(c, 1.4f * s);
+        g.DrawEllipse(pen, o);
+        using var thin = new Pen(c, 1.0f * s);
+        g.DrawEllipse(thin, o.X, o.Y + o.Height * 0.36f, o.Width, o.Height * 0.28f);
+        g.DrawEllipse(thin, o.X + o.Width * 0.32f, o.Y, o.Width * 0.36f, o.Height);
     }
 
     /// SF Symbols 的 cube：等角立方體外框（上面一個菱形、正面兩片），線寬同 plus 圖示

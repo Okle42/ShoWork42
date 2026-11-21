@@ -54,6 +54,8 @@ final class SphereMini: NSObject, NSWindowDelegate {
         panel = p; host = h
     }
 
+    func bounce() { host?.bounce() }
+
     func hide() {
         host?.tearDown(); host = nil
         panel?.orderOut(nil); panel = nil

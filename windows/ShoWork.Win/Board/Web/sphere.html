@@ -125,6 +125,28 @@
   body.mini #caption .text { margin: 0; font-size: 11px; min-height: 0; line-height: 1.35; max-height: 2.7em; overflow: hidden; text-align: center; }
   body.mini #caption.quiet { opacity: 0; }
   body.mini #caption { transition: opacity .4s; }
+  /* v4 C：衛星小卡 */
+  #satCard { background: rgba(14,12,20,.95); position: fixed; width: 280px; z-index: 6; pointer-events: auto; }
+  #satCard .head b { font-size: 14px; font-weight: 500; }
+  #satCard .ln { font-size: 12px; line-height: 1.5; padding: 4px 0; border-top: 1px solid var(--line); color: var(--ink); }
+  #satCard .ln .t { color: var(--ink-dim); font-size: 10px; letter-spacing: .12em; margin-right: 6px; }
+  #satCard .detail { color: var(--ink-dim); max-height: 4.5em; overflow: hidden; }
+  #satCard .btns { display: flex; gap: 6px; margin-top: 8px; }
+  #satCard:not(.on) { pointer-events: none; }
+  /* v4 E：今日時間軸 */
+  #tlCard { background: rgba(14,12,20,.97); left: 50%; top: 50%; transform: translate(-50%, -48%) scale(.98); width: min(760px, calc(100% - 32px)); max-height: calc(100% - 140px);
+    overflow: auto; z-index: 7; pointer-events: auto; }
+  #tlCard.on { transform: translate(-50%, -50%); }
+  #tlCard:not(.on) { pointer-events: none; }
+  .tl { display: grid; grid-template-columns: 110px 1fr; gap: 4px 10px; align-items: center; font-size: 12px; margin-top: 8px; }
+  .tl .nm { color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tl .bar { position: relative; height: 12px; background: rgba(255,255,255,.04); border-radius: 2px; }
+  .tl .bar i { position: absolute; top: 0; bottom: 0; border-radius: 2px; }
+  .tl .axis { position: relative; height: 14px; font-size: 10px; color: var(--ink-dim); }
+  .tl .axis span { position: absolute; transform: translateX(-50%); }
+  .tl .axis span::before { content: ""; position: absolute; left: 50%; top: -3px; height: 3px; border-left: 1px solid var(--line); }
+  .legend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 11px; color: var(--ink-dim); margin-top: 10px; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
   @media (max-width: 640px) {
     #cardUsage { left: 16px; top: auto; bottom: 120px; min-width: 0; width: calc(50% - 24px); }
     #cardTeam { right: 16px; top: auto; bottom: 120px; min-width: 0; width: calc(50% - 24px); }
@@ -162,17 +184,20 @@
 </div>
 
 <div id="askCard" role="dialog" aria-label="等你回答"></div>
+<div class="card" id="satCard" role="dialog" aria-label="session 詳情"></div>
+<div class="card" id="tlCard" role="dialog" aria-label="今日時間軸"></div>
 <div id="tip"></div>
 
 <div id="tools">
   <button class="pill sm" id="bBrief" title="唸一次早報（今天的狀況與額度）">早報</button>
   <button class="pill sm" id="bWrap" title="唸收工總結（今天做完什麼、還剩什麼）">收工</button>
+  <button class="pill sm" id="bTl" title="今天每個 session 的狀態變化">時間軸</button>
   <button class="pill sm" id="bMini" title="桌面常駐小球：開／關">小球</button>
   <select class="pill sm" id="voiceSel" title="播報的聲音（選了會試聽一句）" aria-label="播報的聲音" hidden></select>
   <button class="pill sm" id="voice" aria-label="語音開關"></button>
 </div>
 <div id="state">待命</div>
-<div id="hint">點球聽現況 · 按住球（或空白鍵）講話交給隊長 · 點衛星跳到那個 session</div>
+<div id="hint">點球聽現況 · 按住球（或空白鍵）問問題或交給隊長 · 點衛星看詳情</div>
 <div id="controls">
   <button data-s="idle">待命</button>
   <button data-s="listening">聆聽</button>
@@ -379,7 +404,7 @@ addEventListener("resize", resize); resize();
 /* ---------- 動畫 ---------- */
 const clock = new THREE.Clock();
 const tmp = new THREE.Vector3();
-let lastDraw = 0, wordPulse = 0;
+let lastDraw = 0, wordPulse = 0, bounceAt = -1e9;
 const bitMats = new Set(bits.map(b => b.material));
 function frame(now) {
   requestAnimationFrame(frame);
@@ -433,6 +458,9 @@ function frame(now) {
     m.color.copy(accent); m.opacity = m.userData.base * (0.45 + cur.glow * 0.55 + speakAmp * 0.35);
   }
   animSats(dt, t);
+  // v4 D：彈一下（新的「需要你」）：衰減的正弦
+  const bt = (performance.now() - bounceAt) / 1000;
+  root.scale.setScalar(bt < 1.6 ? 1 + 0.16 * Math.exp(-bt * 3) * Math.abs(Math.sin(bt * 9)) : 1);
   outer.lookAt(camera.position);
   const hc = heatFade.step();
   for (const a of outerArcs) if (a.mesh.userData.heat) { a.mesh.material.color.copy(hc); a.track.material.color.copy(hc); }
@@ -445,7 +473,10 @@ requestAnimationFrame(frame);
 
 /* ---------- 狀態、字幕、小卡 ---------- */
 const $ = id => document.getElementById(id);
-const host = () => window.webkit?.messageHandlers?.sphere;      // 嵌在戰情中心才有（每次現查：測試可以事後掛假的）
+// 嵌在戰情中心才有（每次現查：測試可以事後掛假的）。Mac＝WKWebView 的 webkit.messageHandlers.sphere；
+// Windows（v4 G）＝WebView2 的 chrome.webview.postMessage，訊息形狀一樣（{action, …}），C# 端用 ExecuteScriptAsync 呼叫 window.kara*
+const winHost = window.chrome?.webview ? { postMessage: o => window.chrome.webview.postMessage(o) } : null;
+const host = () => window.webkit?.messageHandlers?.sphere || winHost;
 const post = o => { try { host()?.postMessage(o); } catch {} };
 function setState(s) {
   if (!STATES[s]) return;
@@ -574,7 +605,7 @@ window.karaUpdate = (d) => {
   embedded = true; document.body.classList.add("embedded");
   Object.assign(data, d); render(); renderSys();
   syncSats(data.team || []); syncOuter(data.runs, data.heat);
-  diff(data.team || []); quota(); renderAsk(); autoState(); brief();
+  diff(data.team || []); quota(); captainReply(); renderAsk(); autoState(); brief();
 };
 window.karaPrefs = (p) => {
   if (p.voices) {
@@ -691,6 +722,8 @@ $("askCard").addEventListener("submit", e => {
 });
 function done(c) { sentKey.set(c.sessionId, askKey(c)); askSid = null; $("askCard").dataset.sig = ""; renderAsk(); autoState(); }
 window.karaSetState = setState;
+window.karaData = () => data;            // 測試注入碼讀資料用（SHOWORK_TEST_SPHERE_JS）
+window.karaAnchor = (x, y) => { satAnchor = { x, y }; };
 window.karaSay = (text) => announce(text);
 window.karaToast = (text) => announce(text);
 let embedded = false;
@@ -749,7 +782,8 @@ let holdTimer = null, listening = false, heard = "", heardFinal = null, heardDon
 canvas.addEventListener("pointerdown", e => {
   if (e.button !== 0) return;
   const s = satAt(e);
-  if (s?.c) { post({ action: "focus", sessionId: s.c.sessionId }); return; }
+  if (s?.c) { satAnchor = { x: e.clientX, y: e.clientY }; post({ action: "sessionInfo", sessionId: s.c.sessionId }); return; }
+  closeSat();
   holdTimer = setTimeout(() => { holdTimer = null; startListen(); }, 380);
 });
 addEventListener("pointerup", () => {
@@ -786,9 +820,99 @@ function finishListen() {
   listening = false;
   const text = heard.trim();
   if (!text) { announce("沒聽清楚，再按住球講一次。"); return; }
-  post({ action: "captain", text });
+  const local = /^(交給|跟|告訴|請)隊長/.test(text) ? null : answerLocal(text);
+  if (local) { announce(local); return; }
+  post({ action: "captain", text: text.replace(/^(交給|跟|告訴|請)隊長(說)?[，,：:\s]*/, "") || text });
+  handoffAt = Date.now();
   announce(`交給隊長：${clip(text, 40)}`);
 }
+
+/* ---------- v4 B：簡單的問題球自己答（用手上的資料，不花隊長的額度）；答不了才交給隊長 ---------- */
+function answerLocal(q) {
+  const t = q.replace(/\s+/g, "");
+  const team = data.team || [];
+  if (/早報|今天(的)?狀況/.test(t)) return briefText();
+  if (/收工|總結/.test(t)) return wrapText();
+  if (/額度|用量|用了多少|剩多少|還剩/.test(t)) {
+    return `5 小時額度用了 ${pct(data.five_hour)}${data.five_reset != null ? "，" + resetText(data.five_reset) : ""}；這週用了 ${pct(data.seven_day)}${data.seven_reset != null ? "，" + resetText(data.seven_reset) : ""}。`;
+  }
+  if (/溫度|很熱|多熱|風扇/.test(t)) return data.heat?.temp != null ? `機器現在 ${Math.round(data.heat.temp)} 度，${{ ok: "正常", warm: "偏熱", hot: "很熱", critical: "過熱" }[data.heat.level] || data.heat.level}。` : "現在讀不到機器溫度。";
+  if (/幾點|現在時間/.test(t) && t.length < 12) { const d = new Date(); return `現在 ${d.getHours()} 點 ${d.getMinutes()} 分。`; }
+  if (/誰.*(等我|需要我|找我)|需要我|等我(回答|決定)|有什麼要我/.test(t)) {
+    const p = pending();
+    return p.length ? `${p.length} 個在等你：${p.slice(0, 4).map(c => `${c.name}${c.ask ? "（" + clip(c.ask, 18) + "）" : ""}`).join("、")}。` : "現在沒有人在等你。";
+  }
+  const asksStatus = /在幹嘛|在做什麼|在忙什麼|進度|狀況|怎麼樣|好了沒|做完了?沒|做到哪/.test(t);
+  if (asksStatus) {
+    const lower = t.toLowerCase();
+    const c = team.filter(c => c.name).sort((a, b) => b.name.length - a.name.length).find(c => lower.includes(c.name.toLowerCase()));
+    if (c) return `${c.name}${c.status === "需要你" ? " 在等你回答" + (c.ask ? "：" + clip(c.ask, 30) : "") : "：" + c.status}${c.doing ? "，正在" + clip(c.doing, 24) : ""}${c.progress != null ? "，進度 " + c.progress + "%" : ""}${c.summary && c.status !== "進行中" ? "。" + clip(c.summary, 40) : ""}。`;
+    if (/大家|全部|現況|整體/.test(t)) return `${statusLine()}。`;
+  }
+  if (/^(現況|大家呢?|狀況如何)/.test(t)) return `${statusLine()}。`;
+  return null;
+}
+
+/* ---------- v4 A：交給隊長後，隊長回話就唸出來（20 分鐘內的第一句回覆） ---------- */
+let handoffAt = 0, captainSeen = undefined;
+function captainReply() {
+  const c = data.captain; if (!c?.id) return;
+  if (captainSeen === undefined) { captainSeen = c.id; return; }      // 第一次只記下來
+  if (c.id === captainSeen) return;
+  captainSeen = c.id;
+  if (!handoffAt || Date.now() - handoffAt > 20 * 60 * 1000 || MINI) return;
+  handoffAt = 0;
+  const plain = String(c.text).replace(/```[\s\S]*?```/g, "（程式碼略）").replace(/[#*`>|_]/g, "").replace(/\s+/g, " ").trim();
+  announce(`隊長回覆：${clip(plain, 90)}`);
+}
+
+/* ---------- v4 C：點衛星展開小卡 ---------- */
+let satAnchor = { x: 0, y: 0 }, satSid = null;
+window.karaSessionInfo = (o) => {
+  satSid = o.sessionId;
+  const ln = (k, v) => v == null || v === "" ? "" : `<div class="ln"><span class="t">${k}</span>${esc(v)}</div>`;
+  const ago = o.ago == null ? null : o.ago < 1 ? "剛剛" : o.ago < 60 ? `${o.ago} 分鐘前` : `${Math.floor(o.ago / 60)} 小時前`;
+  const el = $("satCard");
+  el.innerHTML = `<div class="k">SESSION · ${esc(o.project || "")}</div>
+    <div class="head"><b>${esc(o.name)}</b><span style="font-size:12px;color:${o.status === "需要你" ? "var(--warn)" : "var(--ink-dim)"}">${esc(o.status)}</span></div>
+    ${ln("做", o.doing)}${ln("進度", o.progress != null ? o.progress + "%" : null)}${ln("記憶", o.ctx != null ? o.ctx + "%" : null)}
+    ${ln("動靜", ago)}${ln("子代理", o.subagents ? o.subagents + " 個在跑" : null)}${ln("摘要", o.summary)}
+    ${o.detail ? `<div class="ln detail"><span class="t">最後一句</span>${esc(o.detail)}</div>` : ""}
+    <div class="btns"><button class="pill sm" data-go>跳到它的視窗</button><button class="pill sm no" data-x>關閉</button></div>`;
+  const w = 280, h = el.offsetHeight || 220;
+  el.style.left = Math.max(12, Math.min(satAnchor.x + 16, innerWidth - w - 12)) + "px";
+  el.style.top = Math.max(12, Math.min(satAnchor.y - 20, innerHeight - h - 12)) + "px";
+  show("satCard", true);
+};
+function closeSat() { show("satCard", false); satSid = null; }
+$("satCard").addEventListener("click", e => {
+  if (e.target.closest("[data-go]") && satSid) { post({ action: "focus", sessionId: satSid }); closeSat(); }
+  else if (e.target.closest("[data-x]")) closeSat();
+});
+
+/* ---------- v4 D：彈一下 ---------- */
+window.karaBounce = () => { bounceAt = performance.now(); if (MINI) $("caption").classList.remove("quiet"); };
+
+/* ---------- v4 E：今日時間軸 ---------- */
+const TL_COLOR = { "需要你": "var(--warn)", "進行中": "var(--pink)", "待審": "var(--cyan)", "卡住": "var(--bad)", "完成": "#7dffb0", "待辦": "#8a8494" };
+$("bTl").onclick = () => { if ($("tlCard").classList.contains("on")) return show("tlCard", false); post({ action: "timeline" }); };
+window.karaTimeline = (d) => {
+  const lanes = d.lanes || [], now = d.now || 0;
+  const first = Math.min(now - 60, ...lanes.flatMap(l => l.segs.map(s => s.s)));
+  const from = Math.max(0, Math.floor(first / 60) * 60), span = Math.max(60, now - from);
+  const x = m => ((m - from) / span * 100).toFixed(2) + "%";
+  const ticks = []; for (let h = Math.ceil(from / 60); h * 60 <= now; h += span > 600 ? 2 : 1) ticks.push(`<span style="left:${x(h * 60)}">${h}:00</span>`);
+  const rows = lanes.map(l => `<div class="nm" title="${esc(l.name)}">${esc(l.name)}</div><div class="bar">${l.segs.map(s =>
+    `<i style="left:${x(s.s)};width:${Math.max(0.3, (s.e - s.s) / span * 100).toFixed(2)}%;background:${TL_COLOR[s.status] || "#8a8494"}" title="${esc(s.status)} ${fmt(s.s)}–${fmt(s.e)}"></i>`).join("")}</div>`).join("");
+  $("tlCard").innerHTML = `<div class="k">今日時間軸 · 每個 session 的狀態</div>
+    <div class="head"><span>${lanes.length ? `${lanes.length} 個 session` : "今天還沒有紀錄（從這版裝好後開始記）"}</span><button class="pill sm no" data-x>關閉</button></div>
+    ${lanes.length ? `<div class="tl">${rows}<div></div><div class="axis">${ticks.join("")}</div></div>` : ""}
+    <div class="legend">${Object.entries(TL_COLOR).map(([k, c]) => `<span><i style="background:${c}"></i>${k}</span>`).join("")}</div>`;
+  show("tlCard", true);
+};
+function fmt(m) { m = Math.round(m); return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}`; }
+$("tlCard").addEventListener("click", e => { if (e.target.closest("[data-x]")) show("tlCard", false); });
+addEventListener("keydown", e => { if (e.key === "Escape") { closeSat(); show("tlCard", false); } });
 addEventListener("keydown", e => {
   if (e.code !== "Space" || e.repeat || !embedded || e.target.closest?.("input,textarea")) return;
   e.preventDefault(); e.stopImmediatePropagation(); startListen();

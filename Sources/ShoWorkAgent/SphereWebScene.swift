@@ -73,7 +73,7 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
         guard let m = message.body as? [String: Any], let a = m["action"] as? String else { return }
         let str = { (k: String) in m[k] as? String }
         switch a {
-        case "ready": loaded = true; sent = nil; push()
+        case "ready": loaded = true; sent = nil; push(); pushPrefs()
         case "focus":
             guard let c = card(str("sessionId")) else { return say("找不到這個 session 了。") }
             jump(c)
@@ -109,6 +109,11 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
             SphereMini.shared.enabled = m["on"] as? Bool ?? !SphereMini.shared.enabled
             pushPrefs()
         case "openBoard": openBoard()
+        case "sessionInfo":     // v4 C：點衛星展開小卡
+            guard let c = card(str("sessionId")) else { return say("這個 session 已經不在了。") }
+            js("window.karaSessionInfo", Self.info(c))
+        case "timeline":        // v4 E：今日時間軸
+            js("window.karaTimeline", SphereWatch.todayTimeline())
         default: break
         }
     }
@@ -118,6 +123,23 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
         UserDefaults(suiteName: "ai.okle42.showork")?.set("sphere", forKey: "board.mode")
         if !blocked { NSApp.activate(ignoringOtherApps: true) }
         BoardWindow.shared.show()
+    }
+
+    /// 小球彈一下（SphereWatch 發現新的「需要你」）
+    func bounce() { web.evaluateJavaScript("window.karaBounce && window.karaBounce()") }
+
+    static func info(_ c: BoardCard, now: Date = Date()) -> [String: Any] {
+        var o: [String: Any] = ["sessionId": c.sessionId, "name": c.name ?? c.project, "project": c.project,
+                                "status": needsYou(c) ? "需要你" : c.column.title, "reason": c.reason]
+        if let d = c.report?.doing { o["doing"] = d }
+        if let s = c.report?.summary { o["summary"] = String(s.prefix(240)) }
+        if let p = c.report?.progress { o["progress"] = p }
+        if let x = c.ctx { o["ctx"] = x.percent.rounded() }
+        if let t = c.lastActivity { o["ago"] = max(0, Int(now.timeIntervalSince(t) / 60)) }
+        if let d = c.detail { o["detail"] = String(d.trimmingCharacters(in: .whitespacesAndNewlines).prefix(240)) }
+        if !c.subagents.isEmpty { o["subagents"] = c.subagents.count }
+        if let k = c.kind { o["kind"] = k }
+        return o
     }
 
     private func card(_ sid: String?) -> BoardCard? {
@@ -226,7 +248,7 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
                     guard let img, let t = img.tiffRepresentation, let r = NSBitmapImageRep(data: t),
                           let png = r.representation(using: .png, properties: [:]) else { print("sphere shot failed"); fflush(stdout); return }
                     try? png.write(to: URL(fileURLWithPath: out))
-                    print("sphere shot saved \(out)"); fflush(stdout)
+                    print("sphere shot saved \(out)", self?.web.title ?? ""); fflush(stdout)
                 }
             }
         }
@@ -251,6 +273,10 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
         let heat = CityParse.cool42(FileManager.default.contents(atPath: HeatGate.cool42Path), now: Date())
         var o = Self.payload(model.cards, model.rateLimits, runs: model.runs, heat: heat)
         o["paused"] = HeatGate.shared.paused
+        // v4 A：隊長最後一句（網頁判斷是不是回覆剛交辦的事）
+        if let l = model.captainThread.last(where: { $0.role == .captain }) {
+            o["captain"] = ["id": l.id, "text": String(l.text.prefix(400)), "at": l.at.map { ISO8601DateFormatter().string(from: $0) } ?? ""]
+        }
         guard let d = try? JSONSerialization.data(withJSONObject: o, options: .sortedKeys) else { return }
         let s = String(decoding: d, as: UTF8.self)
         guard s != sent else { return }
