@@ -7,27 +7,36 @@ import ShoWorkCore
 
 // 戰情中心第四個分頁「球體」（11-21 Kang：參考 IG 的 K.A.R.A 2.0 球體助理）。
 // WKWebView 載 Web 資料夾的 sphere.html（three.js 用 vendor 那份，離線可用）；資料單向推：
-//   原生端 → 網頁：window.karaUpdate({five_hour, seven_day, ctx, sessions, team})、window.karaVoice("start"|"word"|"end")
-//   網頁 → 原生端：webkit.messageHandlers.sphere.postMessage({action: "ready"|"focus"|"speak"|"stopSpeaking", …})
+//   原生端 → 網頁：window.karaUpdate({five_hour, seven_day, ctx, sessions, team, runs, heat, …})、window.karaVoice("start"|"word"|"end")、
+//                 window.karaHeard(text, final)（按住球講話的辨識結果）、window.karaToast(一句話)
+//   網頁 → 原生端：webkit.messageHandlers.sphere.postMessage({action: …})
+//     ready／focus／speak／stopSpeaking（v2）
+//     answer {sessionId, text}、permit {sessionId, permitId, decision, answers}（v3 #1：球旁邊的選項按鈕）
+//     listen {on}、captain {text}（v3 #2：按住球講話 → 交給隊長）
+//     mini {on}、openBoard（v3 #7：桌面常駐小球）
 // 球體的狀態與播報由網頁自己判（狀態一變就說一句）。
 // 語音（v2，11-21）：macOS 內建台灣中文語音（AVSpeechSynthesizer），網頁上的喇叭按鈕開關，預設關。
-// ⚠ 不准用 Keng 本人的聲音（11-21 Keng 下令；記憶 feedback_不准用Keng的聲音）。
+// ⚠ 不准用 Keng 本人的聲音（11-21 Keng 下令；記憶 feedback_不准用Keng的聲音）。按住講話只做本機即時辨識成文字，不存音檔。
 
 @MainActor
 final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandler, AVSpeechSynthesizerDelegate {
     let web: WKWebView
+    let mini: Bool
     private var loaded = false
     private var sent: String?
     private var pending = false
     private var subs: [AnyCancellable] = []
+    private var ticker: Timer?
     private var model: BoardModel { BoardModel.shared }
     private let synth = AVSpeechSynthesizer()
+    private var listener: SphereListener?
     private static let voice: AVSpeechSynthesisVoice? =
         AVSpeechSynthesisVoice.speechVoices().filter { $0.language == "zh-TW" }.max { $0.quality.rawValue < $1.quality.rawValue }
         ?? AVSpeechSynthesisVoice(language: "zh-TW")
 
-    init?(dir: URL? = WorkWindow.webDir) {
+    init?(dir: URL? = WorkWindow.webDir, mini: Bool = false) {
         guard let dir, FileManager.default.fileExists(atPath: dir.appendingPathComponent("sphere.html").path) else { return nil }
+        self.mini = mini
         let cfg = WKWebViewConfiguration()
         cfg.setURLSchemeHandler(OfficeWebSchemeHandler(root: dir), forURLScheme: OfficeWebSchemeHandler.scheme)
         web = WKWebView(frame: .zero, configuration: cfg)
@@ -42,37 +51,80 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
             unsafeBitCast(method_getImplementation(m), to: SetBool.self)(web, occ, false)
         }
         web.navigationDelegate = self
-        web.load(URLRequest(url: URL(string: "\(OfficeWebSchemeHandler.scheme)://web/sphere.html")!))
+        web.load(URLRequest(url: URL(string: "\(OfficeWebSchemeHandler.scheme)://web/sphere.html\(mini ? "?mini=1" : "")")!))
         model.start()
         model.objectWillChange.sink { [weak self] _ in self?.schedule() }.store(in: &subs)
+        // 溫度、額度重置倒數不會觸發 objectWillChange：每 10 秒補一次（內容一樣就不推）
+        ticker = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in MainActor.assumeIsolated { self?.push() } }
+        NotificationCenter.default.publisher(for: HeatGate.changed).sink { [weak self] _ in self?.schedule() }.store(in: &subs)
     }
 
     func tearDown() {
         subs.removeAll()
+        ticker?.invalidate(); ticker = nil
+        listener?.stop(); listener = nil
         synth.stopSpeaking(at: .immediate)
         web.configuration.userContentController.removeScriptMessageHandler(forName: "sphere")
     }
+
+    private var blocked: Bool { BoardWindow.testMode }
 
     // MARK: 網頁 → 原生端
 
     func userContentController(_ ucc: WKUserContentController, didReceive message: WKScriptMessage) {
         guard let m = message.body as? [String: Any], let a = m["action"] as? String else { return }
+        let str = { (k: String) in m[k] as? String }
         switch a {
         case "ready": loaded = true; sent = nil; push()
         case "focus":
-            guard let sid = m["sessionId"] as? String,
-                  let c = model.cards.first(where: { $0.sessionId == sid && !$0.id.contains("#") }) ?? model.cards.first(where: { $0.sessionId == sid })
-            else { return say("找不到這個 session 了。") }
+            guard let c = card(str("sessionId")) else { return say("找不到這個 session 了。") }
             jump(c)
-        case "speak": speak(m["text"] as? String ?? "")
+        case "speak": speak(str("text") ?? "")
         case "stopSpeaking": synth.stopSpeaking(at: .immediate)
+        case "answer":
+            guard let c = card(str("sessionId")) else { return say("這個 session 已經不在了。") }
+            let text = (str("text") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { return }
+            if blocked { return say("測試：不送出「\(text)」。") }
+            say(BoardActions.answer(c, text: text) + "。")
+        case "permit":
+            guard let c = card(str("sessionId")) else { return say("這個 session 已經不在了。") }
+            let d = PermitAnswer.Decision(rawValue: str("decision") ?? "") ?? .deny
+            if let pid = str("permitId"), let cur = c.permit?.id, pid != cur { return say("這個對話框已經關了。") }
+            if blocked { return say("測試：不回答權限（\(d.rawValue)）。") }
+            say(BoardActions.permit(c, PermitAnswer(d, message: str("message"), answers: m["answers"] as? [String: [String]])) + "。")
+        case "listen": (m["on"] as? Bool ?? false) ? startListening() : listener?.finish()
+        case "captain":
+            let text = (str("text") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { return }
+            if blocked { return say("測試：不交給隊長「\(text)」。") }
+            DispatchQueue.global().async {
+                let msg = BoardActions.askCaptain(text)
+                DispatchQueue.main.async { MainActor.assumeIsolated { self.say(msg + "。") } }
+            }
+        case "mini":
+            SphereMini.shared.enabled = m["on"] as? Bool ?? !SphereMini.shared.enabled
+            pushPrefs()
+        case "openBoard": openBoard()
         default: break
         }
     }
 
+    /// 打開戰情中心、切到球體分頁（小球點一下）
+    func openBoard() {
+        UserDefaults(suiteName: "ai.okle42.showork")?.set("sphere", forKey: "board.mode")
+        if !blocked { NSApp.activate(ignoringOtherApps: true) }
+        BoardWindow.shared.show()
+    }
+
+    private func card(_ sid: String?) -> BoardCard? {
+        guard let sid else { return nil }
+        return model.cards.first(where: { $0.sessionId == sid && !$0.id.contains("#") }) ?? model.cards.first(where: { $0.sessionId == sid })
+    }
+
     /// 跳到那個 session：戰情中心自己開的（kind board）開工作視窗，其他的把終端機視窗叫到前面
     private func jump(_ c: BoardCard) {
-        if BoardWindow.testMode { return say("測試：不跳到 \(c.name ?? c.project)。") }
+        if blocked { return say("測試：不跳到 \(c.name ?? c.project)。") }
         if c.kind == "board" {
             WorkWindow.show(SessionHost.shared.handle(for: c.sessionId) ?? c.sessionId, cwd: c.cwd)
         } else if !BoardActions.focus(pid: c.pid) {
@@ -81,9 +133,37 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
     }
 
     /// 結果回網頁當一句播報
-    private func say(_ s: String) {
-        guard let d = try? JSONSerialization.data(withJSONObject: [s]) else { return }
-        web.evaluateJavaScript("window.karaToast && window.karaToast(\(String(decoding: d, as: UTF8.self))[0])")
+    private func say(_ s: String) { js("window.karaToast", s) }
+
+    private func js(_ fn: String, _ args: Any...) {
+        guard let d = try? JSONSerialization.data(withJSONObject: args) else { return }
+        web.evaluateJavaScript("\(fn) && \(fn)(...\(String(decoding: d, as: UTF8.self)))")
+    }
+
+    // MARK: 按住球講話（v3 #2）：本機即時辨識成文字，網頁顯示、放開後交給隊長
+
+    private func startListening() {
+        listener?.stop()
+        if blocked {
+            // 測試不碰麥克風：假裝聽到一句
+            let words = ["幫我", "幫我看一下", "幫我看一下 Alex", "幫我看一下 Alex 的進度"]
+            for (i, w) in words.enumerated() {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4 * Double(i + 1)) { [weak self] in self?.js("window.karaHeard", w, i == words.count - 1) }
+            }
+            return
+        }
+        synth.stopSpeaking(at: .immediate)
+        let l = SphereListener { [weak self] text, final, err in
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    if let err { self.js("window.karaHeard", "", true); self.say(err); return }
+                    self.js("window.karaHeard", text, final)
+                }
+            }
+        }
+        listener = l
+        l.start()
     }
 
     // MARK: 語音
@@ -92,7 +172,7 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty else { return voice("end") }
         // 測試不出聲：照字數估時間，假裝唸完
-        if BoardWindow.testMode {
+        if blocked {
             voice("start")
             DispatchQueue.main.asyncAfter(deadline: .now() + min(8, 0.18 * Double(t.count))) { [weak self] in self?.voice("end") }
             return
@@ -120,9 +200,14 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
     }
 
     func webView(_ w: WKWebView, didFinish n: WKNavigation!) {
-        loaded = true; sent = nil; push()
+        loaded = true; sent = nil; push(); pushPrefs()
         // 測試：SHOWORK_TEST_SPHERE_SHOT=<png> 12 秒後（等卡片讀完）用 WebKit 自己截（BoardWindow.snapshot 的 cacheDisplay 拍不到 WebGL 的顏色）
-        if BoardWindow.testMode, let out = ProcessInfo.processInfo.environment["SHOWORK_TEST_SPHERE_SHOT"] {
+        let env = ProcessInfo.processInfo.environment
+        if BoardWindow.testMode, let out = env[mini ? "SHOWORK_TEST_SPHERE_MINI_SHOT" : "SHOWORK_TEST_SPHERE_SHOT"] {
+            // SHOWORK_TEST_SPHERE_JS：截圖前先跑一段網頁程式（例如假一筆「需要你」看選項按鈕）
+            if let code = env["SHOWORK_TEST_SPHERE_JS"], !mini {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 9) { [weak self] in self?.web.evaluateJavaScript(code) }
+            }
             DispatchQueue.main.asyncAfter(deadline: .now() + 12) { [weak self] in
                 self?.web.takeSnapshot(with: nil) { img, _ in
                     guard let img, let t = img.tiffRepresentation, let r = NSBitmapImageRep(data: t),
@@ -143,25 +228,37 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
         }
     }
 
+    private func pushPrefs() { js("window.karaPrefs", ["mini": SphereMini.shared.enabled]) }
+
     private func push() {
-        guard loaded, let d = try? JSONSerialization.data(withJSONObject: Self.payload(model.cards, model.rateLimits), options: .sortedKeys) else { return }
+        guard loaded else { return }
+        let heat = CityParse.cool42(FileManager.default.contents(atPath: HeatGate.cool42Path), now: Date())
+        var o = Self.payload(model.cards, model.rateLimits, runs: model.runs, heat: heat)
+        o["paused"] = HeatGate.shared.paused
+        guard let d = try? JSONSerialization.data(withJSONObject: o, options: .sortedKeys) else { return }
         let s = String(decoding: d, as: UTF8.self)
         guard s != sent else { return }
         sent = s
-        if ProcessInfo.processInfo.environment["SHOWORK_TEST_SPHERE_LOG"] != nil { print("sphere push", s.prefix(120)); fflush(stdout) }
+        if ProcessInfo.processInfo.environment["SHOWORK_TEST_SPHERE_LOG"] != nil { print("sphere push", s.prefix(160)); fflush(stdout) }
         web.evaluateJavaScript("window.karaUpdate && window.karaUpdate(\(s))")
     }
 
     /// 網頁要的資料（純函式，方便測）
-    static func payload(_ cards: [BoardCard], _ limits: RateLimits?, now: Date = Date()) -> [String: Any] {
+    static func payload(_ cards: [BoardCard], _ limits: RateLimits?, runs: [RunProgress] = [], heat: CityPower? = nil, now: Date = Date()) -> [String: Any] {
         let people = cards.filter { !$0.id.contains("#") }
         let l = limits?.current(now: now)
         var o: [String: Any] = ["sessions": people.count]
         o["five_hour"] = l?.fiveHour.map { $0.used.rounded() } ?? NSNull()
         o["seven_day"] = l?.sevenDay.map { $0.used.rounded() } ?? NSNull()
+        // 重置倒數（分鐘；額度預警、早報用）
+        func mins(_ d: Date?) -> Any { d.map { max(0, Int(($0.timeIntervalSince(now) / 60).rounded())) } ?? NSNull() }
+        o["five_reset"] = mins(l?.fiveHour?.resetsAt)
+        o["seven_reset"] = mins(l?.sevenDay?.resetsAt)
         // 記憶量：最近有動靜的那個 session
         let recent = people.filter { $0.ctx != nil }.max { ($0.lastActivity ?? .distantPast) < ($1.lastActivity ?? .distantPast) }
         o["ctx"] = recent?.ctx.map { $0.percent.rounded() } ?? NSNull()
+        // 今天做完（待審＋完成、最後動靜在今天）的件數：收工總結用
+        o["doneToday"] = people.filter { ($0.column == .review || $0.column == .done) && $0.lastActivity.map { Calendar.current.isDate($0, inSameDayAs: now) } == true }.count
         // 需要你的排最前，再來進行中
         func rank(_ c: BoardCard) -> Int { needsYou(c) ? 0 : c.column == .active ? 1 : 2 }
         o["team"] = people.sorted { rank($0) < rank($1) }.map { c -> [String: Any] in
@@ -169,10 +266,31 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
             if let p = c.report?.progress { t["progress"] = p }
             if let d = c.report?.doing { t["doing"] = d }
             if let s = c.report?.summary { t["summary"] = s }
-            if let a = c.asks.first?.ask { t["ask"] = a }
-            else if let p = c.permit { t["ask"] = "要不要讓它執行 \(p.tool)：\(p.summary)" }
+            if let a = c.asks.first {
+                t["ask"] = a.ask
+                if let opts = a.options, !opts.isEmpty { t["options"] = opts }
+            } else if let p = c.permit {
+                t["ask"] = p.isAsk ? (p.questions?.first?.question ?? "有選擇題要你回答")
+                    : p.isPlan ? "計畫要你核准" : "要不要讓它執行 \(p.tool)：\(p.summary)"
+                var pm: [String: Any] = ["id": p.id, "kind": p.isAsk ? "ask" : p.isPlan ? "plan" : "tool", "tool": p.tool, "summary": String(p.summary.prefix(200))]
+                if let d = p.detail { pm["detail"] = String(d.prefix(200)) }
+                if let qs = p.questions {
+                    pm["questions"] = qs.map { ["question": $0.question, "multi": $0.multiSelect, "options": $0.options.map(\.label)] as [String: Any] }
+                }
+                t["permit"] = pm
+            }
             return t
         }
+        // 外環（v3 #6）：背景長工作進度、cool42 溫度
+        o["runs"] = runs.filter { $0.fresh(now) }.prefix(3).map { r -> [String: Any] in
+            var x: [String: Any] = ["label": r.label, "fraction": (r.fraction * 100).rounded() / 100]
+            if let n = r.name { x["name"] = n }
+            if let e = r.eta { x["eta"] = e }
+            return x
+        }
+        if let h = heat, h.known, let t = h.temp {
+            o["heat"] = ["temp": t.rounded(), "level": h.level ?? "ok"] as [String: Any]
+        } else { o["heat"] = NSNull() }
         return o
     }
 

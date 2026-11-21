@@ -326,6 +326,7 @@ if argv.count == 2, argv[1] == "--board-window" {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { print("edit menu:", EditMenu.dump().joined(separator: " | ")); fflush(stdout) }
         }
         BoardWindow.shared.show()
+        if ProcessInfo.processInfo.environment["SHOWORK_TEST_SPHERE_MINI"] != nil { SphereMini.shared.show() }   // 小球開在螢幕外
         // SHOWORK_TEST_REOPEN=1（10-24 C）：4 秒後先打開互動板、選大廳、記一個鏡頭，再關窗（內容拆掉）、1 秒後重開；截圖要看到原樣
         if ProcessInfo.processInfo.environment["SHOWORK_TEST_REOPEN"] != nil {
             DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
@@ -453,6 +454,7 @@ MainActor.assumeIsolated {
     }
     Arranger.shared.start()
     BoardModel.shared.start()          // 戰情中心的資料（審核、ctx 收尾）視窗沒開也要跑
+    SphereMini.shared.restore()        // 桌面常駐小球：上次開著就照樣開（球體 v3 #7）
     WebServer.shared.start()           // 網頁版戰情中心：預設關，showork web enable 才開、只綁 Tailscale IP（WebServer.swift）
     NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { _ in
         MainActor.assumeIsolated { BoardWindow.terminating = true }

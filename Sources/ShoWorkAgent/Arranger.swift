@@ -407,6 +407,7 @@ final class Menu: NSObject, NSMenuDelegate {
         if shown.isEmpty { menu.addItem(withTitle: "目前沒有工作中的 AI 視窗", action: nil, keyEquivalent: "").isEnabled = false }
         menu.addItem(.separator())
         menu.addItem(withTitle: "AI工作戰情中心⋯", action: #selector(openBoard), keyEquivalent: "")
+        menu.addItem(withTitle: "桌面小球", action: #selector(toggleMini), keyEquivalent: "").state = SphereMini.shared.enabled ? .on : .off
         let a = Arranger.shared
         menu.addItem(withTitle: "立即排版", action: #selector(arrangeNow), keyEquivalent: "l").keyEquivalentModifierMask = [.control, .option]
         menu.addItem(withTitle: "設定⋯", action: #selector(openSettings), keyEquivalent: ",")
@@ -426,5 +427,6 @@ final class Menu: NSObject, NSMenuDelegate {
     @objc private func arrangeNow() { Arranger.shared.arrange() }
     @objc private func openSettings() { SettingsPanel.shared.toggle() }
     @objc private func openBoard() { BoardWindow.shared.show() }
+    @objc private func toggleMini() { SphereMini.shared.enabled.toggle() }    // 球體 v3 #7（SphereMini.swift）
     @objc private func quit() { NSApp.terminate(nil) }
 }
