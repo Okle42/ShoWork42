@@ -50,8 +50,12 @@ if args.first == "brief" {
         if let sid, let ctx = Handover.claim(sid: sid, pid: Handover.claudePID(), cwd: cwdPath, source: source) {
             print(ctx)
         }
+        let named = sid.map { NicknameStore.ensure($0) }
         print(CardRules.brief(showork: URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL.path,
-                              name: sid.map { NicknameStore.ensure($0).name }))
+                              name: named?.name))
+        // 11-23 Keng：剛開、還沒交代工作的 session 標題沒有英文名（Quinn 閒置 148 分鐘，戰情中心報卡住卻找不到是哪個視窗）
+        // ⇒ 一開就把標題寫成「✳ 英文名」；等 Claude Code 啟動畫完自己的標題再寫，閒置時它不會再改
+        if let named { writeTitleLater(named, done: true, delay: 3) }
     }
     exit(0)
 }
@@ -161,16 +165,20 @@ if args.first == "title" {
         print(Nicknames.hookOutput(n, done: done, event: event, context: ctx))
         // 做完時 Claude Code 會在 Stop hook 之後把標題改回它自己的 session 標題（10-19 實測：Dora 一閒下來就變回「✳ Handoff 88」），
         // 所以 1.5 秒後直接寫一次 OSC 0 到這個 session 的 tty；閒置時 Claude 不會再動標題
-        if done, let tty = TTYFinder.find()?.tty {
-            let p = Process()
-            p.executableURL = URL(fileURLWithPath: "/bin/sh")
-            p.arguments = ["-c", #"sleep 1.5; printf '\033]0;%s\007' "$SW_TITLE" > "$SW_TTY""#]
-            p.environment = ["SW_TITLE": Nicknames.terminalTitle(n, done: true), "SW_TTY": tty]
-            p.standardInput = FileHandle.nullDevice; p.standardOutput = FileHandle.nullDevice; p.standardError = FileHandle.nullDevice
-            try? p.run()
-        }
+        if done { writeTitleLater(n, done: true, delay: 1.5) }
     }
     exit(0)
+}
+
+/// 過 delay 秒後直接寫 OSC 0 到這個 session 的 tty（Claude Code 會在 hook 之後改標題，所以要晚一點寫）
+func writeTitleLater(_ n: Nickname, done: Bool, delay: Double) {
+    guard let tty = TTYFinder.find()?.tty else { return }
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: "/bin/sh")
+    p.arguments = ["-c", #"sleep "$SW_DELAY"; printf '\033]0;%s\007' "$SW_TITLE" > "$SW_TTY""#]
+    p.environment = ["SW_TITLE": Nicknames.terminalTitle(n, done: done), "SW_TTY": tty, "SW_DELAY": String(delay)]
+    p.standardInput = FileHandle.nullDevice; p.standardOutput = FileHandle.nullDevice; p.standardError = FileHandle.nullDevice
+    try? p.run()
 }
 
 /// guard-push 用：跑外部指令拿輸出（git、gh）
