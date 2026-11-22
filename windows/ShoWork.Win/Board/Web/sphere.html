@@ -206,7 +206,7 @@
   svg#links path { fill: none; stroke: var(--acc); stroke-width: 1; opacity: .55; }
   svg#links path.pop { stroke-width: 1.2; opacity: .9; transition: stroke-dashoffset .45s ease-out; }
   svg#links circle { fill: var(--acc); }
-  svg#links text { fill: var(--ink); stroke: none; font: 600 10px ui-monospace, Menlo, monospace; letter-spacing: .08em; paint-order: stroke; }
+  svg#links text { pointer-events: auto; cursor: pointer; fill: var(--ink); stroke: none; font: 600 10px ui-monospace, Menlo, monospace; letter-spacing: .08em; paint-order: stroke; }
   svg#links text.warn, svg#links text.bad { fill: var(--acc); }
   svg#links .warn { stroke: var(--warn); fill: var(--warn); }
   svg#links .bad { stroke: var(--bad); fill: var(--bad); }
@@ -641,14 +641,16 @@ const gmat = (op) => new THREE.MeshBasicMaterial({ color: BALL, transparent: tru
 function gauge(r, w, n, ticks) {
   const track = new THREE.Mesh(segGeo(r, w, n), gmat(0.13)), fill = new THREE.Mesh(segGeo(r, w, n), gmat(0.85));
   const tk = new THREE.LineSegments(tickGeo(r - 0.05, r + w + 0.05, ticks), new THREE.LineBasicMaterial({ color: ALERT, transparent: true, opacity: 0.55, blending: BLEND, depthWrite: false }));
-  fill.geometry.setDrawRange(0, 0); outer.add(track, fill, tk);
-  return { r, w, n, track, fill, tk, cur: 0, target: null, col: new THREE.Color().copy(BALL), flip: 1 };
+  // 點擊帶：比刻度寬、看不見，點到就打開對應的小視窗（11-22 Keng）
+  const hit = new THREE.Mesh(segGeo(r - 0.1, w + 0.2, 24, 0), new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide }));
+  fill.geometry.setDrawRange(0, 0); outer.add(track, fill, tk, hit);
+  return { r, w, n, track, fill, tk, hit, cur: 0, target: null, col: new THREE.Color().copy(BALL), flip: 1 };
 }
 /** 環長在卡片那一側：卡片在球右邊就鏡像 */
 function gaugeSide(g, rect) {
   if (!rect) return;
   const { cx } = sphereScreen(), f = rect.left + rect.width / 2 > cx ? -1 : 1;
-  if (f !== g.flip) { g.flip = f; for (const m of [g.track, g.fill, g.tk]) m.scale.x = f; }
+  if (f !== g.flip) { g.flip = f; for (const m of [g.track, g.fill, g.tk, g.hit]) m.scale.x = f; }
 }
 const g5 = gauge(2.98, 0.07, 72, [0.7, 0.9]), g7 = gauge(3.09, 0.035, 72, [0.8, 0.95]);
 const gHeat = gauge(3.62, 0.055, 65, [(70 - 35) / 65, (85 - 35) / 65]);       // 一格＝1°C
@@ -665,7 +667,7 @@ function animGauges(dt, t) {
   gHeat.target = h?.temp == null ? null : Math.min(1, Math.max(0.02, (h.temp - 35) / 65));
   for (const g of [g5, g7, gHeat]) {
     const on = g.target != null;
-    g.track.visible = g.fill.visible = g.tk.visible = on; if (!on) continue;
+    g.track.visible = g.fill.visible = g.tk.visible = g.hit.visible = on; if (!on) continue;
     g.cur += (g.target - g.cur) * Math.min(1, dt * (g === gHeat ? 0.9 : 2.2));        // 溫度慢慢走過去
     g.fill.geometry.setDrawRange(0, Math.round(Math.min(1, g.cur) * g.n) * 6);
     g.track.material.color.copy(GRAY); g.tk.material.color.copy(ALERT);
@@ -1239,6 +1241,8 @@ function linkFrame() {
   }
 }
 function ballEdge(rect) { const { cx, cy, r } = sphereScreen(), x = rect.left + rect.width / 2, y = rect.top + rect.height / 2, a = Math.atan2(y - cy, x - cx); return { x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r }; }
+$("lt_cardUsage").addEventListener("click", () => openPanelFor("cardUsage"));
+$("lt_cardSys").addEventListener("click", () => openPanelFor("cardSys"));
 $("teamRows").addEventListener("mouseover", e => { const row = e.target.closest(".row"); const c = row && (data.team || [])[+row.dataset.i]; rowSid = c?.sessionId || null; });
 $("teamRows").addEventListener("mouseleave", () => { rowSid = null; });
 addEventListener("resize", () => { drawLinks(); if (popEl.classList.contains("on")) drawPopLink(); });
@@ -1536,6 +1540,18 @@ function satAt(e) {
   const hit = ray.intersectObjects([...sats.values()].map(s => s.hit), false)[0];
   return hit ? sats.get(hit.object.userData.sid) : null;
 }
+/** 點到哪個資料環：額度（5 小時／7 天）或溫度 */
+function gaugeAt(e) {
+  mouse.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+  ray.setFromCamera(mouse, camera);
+  const hit = ray.intersectObjects([g5.hit, g7.hit, gHeat.hit].filter(m => m.visible), false)[0];
+  return !hit ? null : hit.object === gHeat.hit ? "cardSys" : "cardUsage";
+}
+/** 打開那個小視窗（已經開著就閃一下讓你看到在哪） */
+function openPanelFor(id) {
+  if (hidden.has(id)) setPanel(id, true);
+  const el = $(id); el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash");
+}
 let hovered = null;
 canvas.addEventListener("pointermove", e => {
   const s = satAt(e);
@@ -1547,12 +1563,14 @@ canvas.addEventListener("pointermove", e => {
     tip.style.left = Math.min(e.clientX + 14, innerWidth - tip.offsetWidth - 8) + "px"; tip.style.top = (e.clientY + 14) + "px";
   }
   tip.classList.toggle("on", !!s);
+  canvas.style.cursor = s || gaugeAt(e) ? "pointer" : "";
 });
 let holdTimer = null, listening = false, heard = "", heardFinal = null, heardDone = false;
 canvas.addEventListener("pointerdown", e => {
   if (e.button !== 0) return;
   const s = satAt(e);
   if (s?.c) { satAnchor = { x: e.clientX, y: e.clientY }; post({ action: "sessionInfo", sessionId: s.c.sessionId }); return; }
+  const gk = gaugeAt(e); if (gk) { openPanelFor(gk); return; }
   closeSat();
   holdTimer = setTimeout(() => { holdTimer = null; startListen(); }, 380);
 });
