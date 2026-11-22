@@ -1671,7 +1671,10 @@ function answerLocal(q) {
   const asksStatus = /在幹嘛|在做什麼|在忙什麼|進度|狀況|怎麼樣|好了沒|做完了?沒|做到哪/.test(t);
   if (asksStatus) {
     const lower = t.toLowerCase();
-    const c = team.filter(c => c.name).sort((a, b) => b.name.length - a.name.length).find(c => lower.includes(c.name.toLowerCase()));
+    // 顯示名（職稱／專案／任務）或背後的英文名都對得上（11-22 起畫面不顯示英文名，但嘴巴還是可能叫 Hana）
+    const keys = c => [c.name, c.address].filter(Boolean);
+    const c = team.filter(c => keys(c).length).sort((a, b) => Math.max(...keys(b).map(k => k.length)) - Math.max(...keys(a).map(k => k.length)))
+      .find(c => keys(c).some(k => lower.includes(k.toLowerCase())));
     if (c) return `${c.name}${c.status === "需要你" ? " 在等你回答" + (c.ask ? "：" + clip(c.ask, 30) : "") : "：" + c.status}${c.doing ? "，正在" + clip(c.doing, 24) : ""}${c.progress != null ? "，進度 " + c.progress + "%" : ""}${c.summary && c.status !== "進行中" ? "。" + clip(c.summary, 40) : ""}。`;
     if (/大家|全部|現況|整體/.test(t)) return `${statusLine()}。`;
   }

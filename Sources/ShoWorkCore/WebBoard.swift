@@ -257,7 +257,7 @@ public struct WebSnapshot: Codable, Sendable, Equatable {
         let ss: [Session] = cards.filter { !$0.unused && !$0.id.contains("#") }.map { c in
             let it = items[c.sessionId]
             let summary = c.report?.summary ?? c.detail
-            return Session(id: c.sessionId, name: c.name ?? c.title, project: c.project, column: c.column.rawValue,
+            return Session(id: c.sessionId, name: c.display, project: c.project, column: c.column.rawValue,
                            columnTitle: columnTitle(c.column), reason: c.reason, doing: c.report?.doing,
                            summary: summary.map { String($0.prefix(400)) },
                            idleSeconds: c.lastActivity.map { max(0, Int(now.timeIntervalSince($0))) }, captain: c.captain,

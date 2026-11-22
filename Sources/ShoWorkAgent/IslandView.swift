@@ -324,7 +324,7 @@ struct BubbleDetail: View {
                 if c.captain { Text("👑") }
                 Text(c.title).font(.headline).lineLimit(2)
             }
-            Text([c.project, c.name].compactMap { $0 }.joined(separator: "・")).font(.caption).monospaced().foregroundStyle(.secondary)
+            Text([c.label ?? c.project, c.report?.doing].compactMap { $0 }.joined(separator: "・")).font(.caption).monospaced().foregroundStyle(.secondary)
             if c.report?.ask == nil {      // 有「要你決定」就只在下面的框講一次
                 Label { Text(c.reason).lineLimit(3) } icon: {
                     Image(systemName: c.column.symbol).foregroundStyle(Color(nsColor: KuboArt.tint(p.mood)))

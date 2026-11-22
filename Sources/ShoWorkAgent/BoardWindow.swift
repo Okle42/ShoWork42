@@ -439,7 +439,7 @@ struct DispatchSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("派工給 \(card.name ?? card.title)").font(.headline)
+            Text("派工給 \(card.display)").font(.headline)
             Text("\(card.project)・\(card.title)").font(.callout).foregroundStyle(.secondary).lineLimit(1)
             if !card.sameProject.isEmpty {
                 Label("同專案還有 \(card.sameProject.joined(separator: "、"))", systemImage: "exclamationmark.2").font(.callout).foregroundStyle(.orange)
@@ -481,7 +481,7 @@ struct DispatchSheet: View {
                 case .success(let id):
                     BoardModel.shared.append(["ev": "dispatch", "id": id, "to": c.sessionId, "text": t])
                     BoardModel.shared.refresh()
-                    onDone("已派工 \(id) 給 \(c.name ?? c.title)"); dismiss()
+                    onDone("已派工 \(id) 給 \(c.display)"); dismiss()
                 case .failure(let e): error = "送不出去：\(e.message)"
                 }
             }

@@ -152,7 +152,7 @@ final class WebServer {
             return WebSnapshot.target(id, cards: cards).flatMap { c in
                 BoardActions.dispatch(to: c, text: WebSnapshot.sendPrefix + text, thenTo: nil, thenText: nil,
                                       captain: CaptainStore.captain()?.sessionId)
-                    .map { "已派工 \($0) 給 \(c.name ?? c.title)" }
+                    .map { "已派工 \($0) 給 \(c.display)" }
             }
         case .cancel(let id):
             // 跟 showork task cancel 同一條（Captain.cancel）

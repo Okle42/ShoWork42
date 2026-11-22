@@ -296,7 +296,10 @@ public struct BoardCard: Codable, Sendable, Equatable, Identifiable {
     public var report: SelfReport?         // 這一輪的自報（舊的不放）
     public var review: Review?             // 這一輪的審核
     public var ctx: ContextUse?            // context 用量（狀態列存的）
-    public var name: String? = nil         // session 名（SendMessage 的地址，例如 you-9e）
+    public var name: String? = nil         // session 名（SendMessage 的地址，例如 you-9e）；11-22 起畫面不顯示，只當地址
+    public var label: String? = nil        // 11-22 顯示名：職稱，沒有就專案（家目錄＝nil，畫面改顯示任務）
+    /// 畫面上叫它的名字：職稱／專案；家目錄的沒有專案 ⇒ 用正在做的任務（11-22 Keng：英文人名不再顯示）
+    public var display: String { label ?? report?.doing ?? title }
     public var captain = false             // 是不是隊長
     public var sameProject: [String] = []  // 同專案的其他 session（重工警告）
     public var tasks: [CaptainTask] = []   // 隊長：派出去的單；其他人：交給它、還沒結束的單
@@ -332,6 +335,7 @@ extension BoardCard {
         report = try c.decodeIfPresent(SelfReport.self, forKey: .report)
         review = try c.decodeIfPresent(Review.self, forKey: .review)
         ctx = try c.decodeIfPresent(ContextUse.self, forKey: .ctx)
+        label = try c.decodeIfPresent(String.self, forKey: .label)
         name = try c.decodeIfPresent(String.self, forKey: .name)
         captain = try c.decodeIfPresent(Bool.self, forKey: .captain) ?? false
         sameProject = try c.decodeIfPresent([String].self, forKey: .sameProject) ?? []
@@ -469,13 +473,14 @@ public enum Board {
             let names = team?.teammates.map(\.name) ?? []
             let msgs = team == nil ? [] : inbox.filter { m in names.contains(m.from) || names.contains(m.to ?? "") }
             out.append(BoardCard(id: s.sessionId, column: col, reason: why, project: project,
-                                 title: Nicknames.title(nicknames[s.sessionId], fallback: t.title ?? t.lastPrompt.map { String($0.prefix(40)) } ?? (s.name ?? "未命名")),
+                                 title: Nicknames.title(nicknames[s.sessionId], project: project, fallback: t.title ?? t.lastPrompt.map { String($0.prefix(40)) } ?? (s.name ?? "未命名")),
                                  detail: t.lastAssistantText.map { String(plain($0).prefix(240)) },
                                  lastActivity: t.lastActivity, pid: s.pid, sessionId: s.sessionId,
                                  teammates: names, messages: Array(msgs.suffix(5)),
                                  cwd: t.lastWorkCwd ?? t.lastCwd ?? s.cwd, kind: s.kind, report: report, review: review,
                                  ctx: contexts[s.sessionId], name: s.name))
             if col == .active { out[out.count - 1].visiting = visiting }
+            out[out.count - 1].label = Nicknames.label(nicknames[s.sessionId], project: project)
             out[out.count - 1].asks = pending
             out[out.count - 1].stillWorking = !pending.isEmpty && (base.0 == .active || base.0 == .stuck)
             out[out.count - 1].unused = t.lastActivity == nil && t.lastPrompt == nil   // 只有正在做事才有影分身，閒著不留幽靈

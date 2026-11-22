@@ -42,7 +42,7 @@ final class SphereWatch {
             let st = SphereWebHost.needsYou(c) ? "需要你" : c.column.title
             if last[c.sessionId] != st {
                 last[c.sessionId] = st
-                lines.append(["at": ISO8601DateFormatter().string(from: now), "sid": c.sessionId, "name": c.name ?? c.project, "status": st])
+                lines.append(["at": ISO8601DateFormatter().string(from: now), "sid": c.sessionId, "name": c.display, "status": st])
             }
         }
         for sid in last.keys where !seen.contains(sid) {
@@ -70,7 +70,7 @@ final class SphereWatch {
         SphereMini.shared.bounce()
         if BoardWindow.testMode { return }
         for c in fresh.prefix(3) {
-            let who = NicknameStore.get(c.sessionId)?.name ?? c.name ?? c.project
+            let who = c.display
             let q = c.asks.first?.ask ?? c.permit.map { "要不要讓它執行 \($0.tool)：\($0.summary)" } ?? "在等你"
             Self.notify(title: "\(who) 在等你", body: String(q.prefix(120)))
         }
@@ -116,7 +116,7 @@ final class SphereWatch {
         }
         evs.sort { $0.at < $1.at }
         var names: [String: String] = [:]
-        for c in cards where !c.id.contains("#") { names[c.sessionId] = c.name ?? c.project }
+        for c in cards where !c.id.contains("#") { names[c.sessionId] = c.display }
         var lanes: [String: [[String: Any]]] = [:]
         var cur: [String: (Date, String)] = [:]
         var order: [String] = []

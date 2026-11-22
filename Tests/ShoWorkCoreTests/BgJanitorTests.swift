@@ -99,3 +99,27 @@ struct SpareHiddenTests {
         #expect(ids == ["job2"])
     }
 }
+
+// 11-22 顯示名：職稱 > 專案 > 任務（家目錄不算專案）；英文名不上畫面
+@Suite("DisplayName")
+struct DisplayNameTests {
+    @Test func labelAndTitle() {
+        var n = Nickname(name: "Hana", doing: "全部測試")
+        #expect(Nicknames.title(n, project: "Room42v2", fallback: "x") == "Room42v2 · 全部測試")
+        #expect(Nicknames.title(n, project: "（家目錄）", fallback: "x") == "全部測試")
+        n.role = "隊長"
+        #expect(Nicknames.title(n, project: "Room42v2", fallback: "x") == "隊長 · 全部測試")
+        #expect(Nicknames.label(n, project: "（家目錄）") == "隊長")
+        #expect(Nicknames.title(nil, project: "Room42v2", fallback: "開場那句") == "Room42v2 · 開場那句")
+    }
+}
+
+@Suite("InheritName")
+struct InheritNameTests {
+    func head(_ title: String) -> Data { Data(#"{"type":"custom-title","customTitle":"\#(title)"}"#.utf8) }
+    @Test func onlyPoolNamesAreInherited() {
+        #expect(Nicknames.inherited(head("Bella-點衛星開戰情卡")) == "Bella")
+        #expect(Nicknames.inherited(head("Alex2-測試")) == "Alex2")
+        #expect(Nicknames.inherited(head("clear-conversation")) == nil)        // Claude 自動標題不是英文名
+    }
+}

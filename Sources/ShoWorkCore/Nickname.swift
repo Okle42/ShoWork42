@@ -8,6 +8,7 @@ public struct Nickname: Codable, Sendable, Equatable {
     public var doing: String?
     public var at: Date?
     public var handoverFrom: String? = nil   // 自動交接（Handover.swift）：接手的是哪個舊 sessionId
+    public var role: String? = nil           // 11-22 職稱（showork role 隊長）：有就顯示職稱，沒有就「專案 · 任務」
     public init(name: String, doing: String? = nil, at: Date? = nil) { self.name = name; self.doing = doing; self.at = at }
 }
 
@@ -24,7 +25,9 @@ public enum Nicknames {
             guard let o = try? JSONSerialization.jsonObject(with: Data(raw)) as? [String: Any] else { continue }
             let v = (o["type"] as? String == "custom-title" ? o["customTitle"] : o["type"] as? String == "agent-name" ? o["agentName"] : nil) as? String
             guard let t = v?.split(separator: "-", maxSplits: 1).first.map(String.init) else { continue }
-            if let f = t.first, f.isLetter, f.isASCII, t.count <= 12, t.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber) }) { return t }
+            // 11-22：Claude 自動取的標題（clear-conversation）也長這樣 ⇒ 只認名單裡的英文名（可帶數字：Alex2）
+            let base = String(t.prefix { $0.isLetter })
+            if pool.contains(base), t.dropFirst(base.count).allSatisfy(\.isNumber) { return t }
         }
         return nil
     }
@@ -59,10 +62,15 @@ public enum Nicknames {
         return t.count > 24 ? String(t.prefix(24)) + "⋯" : t
     }
 
-    /// 卡片標題：有英文名就「名字-任務」，還沒自報過任務就接原本的標題
-    public static func title(_ n: Nickname?, fallback: String) -> String {
-        guard let n else { return fallback }
-        return "\(n.name)-\(n.doing ?? fallback)"
+    /// 11-22 Keng：畫面上不再顯示英文人名（英文名只當收件地址）⇒ 顯示名＝職稱，沒有職稱就用專案（家目錄不算專案）
+    public static func label(_ n: Nickname?, project: String) -> String? {
+        if let r = n?.role?.trimmingCharacters(in: .whitespaces), !r.isEmpty { return r }
+        return project == "（家目錄）" || project.isEmpty ? nil : project
+    }
+    /// 卡片標題：「職稱／專案 · 任務」；沒有職稱又在家目錄就只有任務；還沒自報過任務就接原本的標題
+    public static func title(_ n: Nickname?, project: String = "（家目錄）", fallback: String) -> String {
+        let task = n?.doing ?? fallback
+        return label(n, project: project).map { $0 == task ? $0 : "\($0) · \(task)" } ?? task
     }
 }
 
@@ -111,11 +119,14 @@ public enum NicknameStore {
     /// 現在活著的 session（~/.claude/sessions/<pid>.json 而且 pid 還在）
     public static func liveSessions() -> [SessionRecord] {
         let fm = FileManager.default
-        return ((try? fm.contentsOfDirectory(atPath: sessionsDir)) ?? []).compactMap { f -> SessionRecord? in
+        let all = ((try? fm.contentsOfDirectory(atPath: sessionsDir)) ?? []).compactMap { f -> SessionRecord? in
             guard f.hasSuffix(".json"), let d = fm.contents(atPath: sessionsDir + "/" + f), let r = SessionRecord.decode(d),
                   kill(r.pid, 0) == 0 || errno == EPERM else { return nil }
             return r
         }
+        // 11-22：終端機把對話停放到背景後只剩空殼，跟接手的背景 session 同名 ⇒ 不算活著（不然叫 Bella 會撞名、派工報錯）
+        let jobs = Set(all.compactMap(\.jobId))
+        return all.filter { r in !(r.parkedJobId.map { jobs.contains($0) } ?? false) }
     }
 
     /// 這個 session 的名字；還沒有就從活著的 session 沒用到的名字裡挑一個存起來
@@ -123,7 +134,15 @@ public enum NicknameStore {
     public static func ensure(_ sid: String) -> Nickname {
         if let n = get(sid) { return n }
         let all = all()
-        let live = Set(liveSessions().map(\.sessionId))
+        let recs = liveSessions()
+        let live = Set(recs.map(\.sessionId))
+        // 11-22 Keng「Bella 停放到背景就變 Fiona」：背景 session 是某個終端機停放出來的（終端機的 parkedJobId 指向它）⇒ 沿用那個終端機的英文名和職稱
+        if let me = recs.first(where: { $0.sessionId == sid }), let job = me.jobId ?? (me.kind == "bg" ? String(sid.prefix(8)) : nil),
+           let host = recs.first(where: { $0.parkedJobId == job && $0.sessionId != sid }), let hn = all[host.sessionId] {
+            var n = Nickname(name: hn.name, doing: hn.doing, at: Date()); n.role = hn.role
+            save(sid, n)
+            return n
+        }
         // 10-22 Bella→Kyle：同一個程序換了 sessionId（transcript 換一個檔，開頭抄著舊的 custom-title「Bella」）⇒ 沿用那個名字，
         // 只要現在沒有別的活著的 session 用它
         if let old = Nicknames.inherited(headOfTranscript(sid)),
@@ -153,6 +172,14 @@ public enum NicknameStore {
     public static func touch(_ sid: String, now: Date = Date()) {
         guard var n = get(sid), (n.at ?? .distantPast) < now.addingTimeInterval(-3600) else { return }
         n.at = now; save(sid, n)
+    }
+
+    /// 設／清職稱（showork role）
+    @discardableResult
+    public static func setRole(_ sid: String, _ role: String?) -> Nickname {
+        var n = ensure(sid)
+        n.role = role.flatMap { let r = $0.trimmingCharacters(in: .whitespaces); return r.isEmpty ? nil : r }
+        save(sid, n); return n
     }
 
     /// 自報帶了 --doing 就更新任務

@@ -17,10 +17,10 @@ import Testing
         #expect(Nicknames.cleanDoing(String(repeating: "字", count: 30))?.count == 25)
     }
 
-    @Test("卡片標題＝英文名-任務；沒報任務接原標題；沒名字照舊")
+    @Test("卡片標題（11-22 起）＝職稱／專案 · 任務；英文名不上標題；沒報任務接原標題")
     func title() {
-        #expect(Nicknames.title(Nickname(name: "Bella", doing: "訊息分頁"), fallback: "Handoff 88") == "Bella-訊息分頁")
-        #expect(Nicknames.title(Nickname(name: "Bella"), fallback: "Handoff 88") == "Bella-Handoff 88")
+        #expect(Nicknames.title(Nickname(name: "Bella", doing: "訊息分頁"), fallback: "Handoff 88") == "訊息分頁")
+        #expect(Nicknames.title(Nickname(name: "Bella"), project: "ShoWork42", fallback: "Handoff 88") == "ShoWork42 · Handoff 88")
         #expect(Nicknames.title(nil, fallback: "Handoff 88") == "Handoff 88")
     }
 
@@ -31,6 +31,6 @@ import Testing
         let cards = Board.build(sessions: [s], transcripts: ["A": t], glows: [:], teams: [], inbox: [],
                                 nicknames: ["A": Nickname(name: "Chris", doing: "硬碟清理")],
                                 now: Date(), home: "/h", isRepo: { _ in false })
-        #expect(cards.first?.title == "Chris-硬碟清理")
+        #expect(cards.first?.title == "x · 硬碟清理" && cards.first?.display == "x")      // 專案 x（/h/x）
     }
 }

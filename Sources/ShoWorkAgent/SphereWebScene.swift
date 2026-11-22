@@ -141,9 +141,9 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
     func bounce() { web.evaluateJavaScript("window.karaBounce && window.karaBounce()") }
 
     static func info(_ c: BoardCard, now: Date = Date()) -> [String: Any] {
-        var o: [String: Any] = ["sessionId": c.sessionId, "name": c.name ?? c.project, "project": c.project,
+        var o: [String: Any] = ["sessionId": c.sessionId, "name": c.display, "address": c.name ?? "", "project": c.project,
                                 "status": needsYou(c) ? "需要你" : c.column.title, "reason": c.reason]
-        if let d = c.report?.doing { o["doing"] = d }
+        if let d = c.report?.doing, c.label != nil { o["doing"] = d }      // 沒職稱／專案時名字就是任務，不重複
         if let s = c.report?.summary { o["summary"] = String(s.prefix(240)) }
         if let p = c.report?.progress { o["progress"] = p }
         if let x = c.ctx { o["ctx"] = x.percent.rounded() }
@@ -161,7 +161,7 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
 
     /// 跳到那個 session：戰情中心自己開的（kind board）開工作視窗，其他的把終端機視窗叫到前面
     private func jump(_ c: BoardCard) {
-        if blocked { return say("測試：不跳到 \(c.name ?? c.project)。") }
+        if blocked { return say("測試：不跳到 \(c.display)。") }
         if c.kind == "board" {
             WorkWindow.show(SessionHost.shared.handle(for: c.sessionId) ?? c.sessionId, cwd: c.cwd)
         } else if !BoardActions.focus(pid: c.pid) {
@@ -319,9 +319,10 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
         // 需要你的排最前，再來進行中
         func rank(_ c: BoardCard) -> Int { needsYou(c) ? 0 : c.column == .active ? 1 : 2 }
         o["team"] = people.sorted { rank($0) < rank($1) }.map { c -> [String: Any] in
-            var t: [String: Any] = ["name": c.name ?? c.project, "status": needsYou(c) ? "需要你" : c.column.title, "sessionId": c.sessionId]
+            var t: [String: Any] = ["name": c.display, "status": needsYou(c) ? "需要你" : c.column.title, "sessionId": c.sessionId]
             if let p = c.report?.progress { t["progress"] = p }
-            if let d = c.report?.doing { t["doing"] = d }
+            if let d = c.report?.doing, c.label != nil { t["doing"] = d }   // 沒職稱／專案時名字就是任務，不重複
+            if let a = c.name { t["address"] = a }                            // 英文名：只給語音「Hana 在幹嘛」這種問法對得上
             if let s = c.report?.summary { t["summary"] = s }
             if let x = c.ctx { t["ctx"] = x.percent.rounded() }          // v5：戰情卡每列的記憶量
             if let t0 = c.lastActivity { t["ago"] = max(0, Int(now.timeIntervalSince(t0) / 60)) }

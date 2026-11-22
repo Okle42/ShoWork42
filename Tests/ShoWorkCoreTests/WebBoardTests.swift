@@ -224,18 +224,19 @@ struct WebBoardTests {
         acked.acked = t0
         let inbox = [acked, CaptainInboxItem(id: "BBBBB", kind: .block, at: t0, sid: "a", name: "Na", project: "P", text: "git push")]
         let s = WebSnapshot.make(cards: cards, tasks: tasks, inbox: inbox, answered: ["a": t0.addingTimeInterval(5)], now: t0)
-        #expect(s.sessions.map(\.id) == ["a", "m", "w", "d"])
-        let a = s.sessions[0]
-        #expect(a.name == "Na" && a.column == "review" && a.columnTitle == "待審" && a.doing == "修 bug" && a.summary == "做好了")
+        // 11-22：畫面上的名字改成顯示名（職稱／專案／任務），同一層級照顯示名排 ⇒ m（標題 t-m）排在 a（任務「修 bug」）前面
+        #expect(s.sessions.map(\.id) == ["m", "a", "w", "d"])
+        let a = s.sessions[1]
+        #expect(a.name == "修 bug" && a.column == "review" && a.columnTitle == "待審" && a.doing == "修 bug" && a.summary == "做好了")
         #expect(a.question == "要 push 嗎" && a.options == ["好，push", "先不要"] && a.canAnswer && a.answeredAt == t0.addingTimeInterval(5))
-        #expect(s.sessions[1].question != nil && !s.sessions[1].canAnswer && s.sessions[1].options.isEmpty)   // 終端機選單：只能看
+        #expect(s.sessions[0].question != nil && !s.sessions[0].canAnswer && s.sessions[0].options.isEmpty)   // 終端機選單：只能看
         #expect(s.sessions[2].columnTitle == "工作中" && s.sessions[2].idleSeconds == 120 && s.sessions[2].question == nil)
         #expect(s.tasks.map(\.id) == ["T1110000001"] && s.tasks[0].stateTitle == "已派出")
         #expect(s.inbox.map(\.id) == ["BBBBB"] && s.inbox[0].kind == "block")
 
         let o = try #require(try JSONSerialization.jsonObject(with: BoardJSON.encoder.encode(s)) as? [String: Any])
         #expect(Set(o.keys) == ["generatedAt", "sessions", "tasks", "inbox"])
-        let s0 = try #require((o["sessions"] as? [[String: Any]])?.first)
+        let s0 = try #require((o["sessions"] as? [[String: Any]])?.first { $0["id"] as? String == "a" })
         for k in ["id", "name", "project", "column", "columnTitle", "reason", "doing", "summary", "idleSeconds", "captain", "question", "options", "canAnswer", "answeredAt"] {
             #expect(s0[k] != nil, "sessions[].\(k)")
         }

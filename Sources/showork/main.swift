@@ -347,13 +347,32 @@ if args.first == "asks" {
     exit(0)
 }
 
+// 11-22 職稱：`showork role 隊長`（設自己的）、`showork role --clear`、`showork role --for <英文名> 審核員`（設別人的）
+// 畫面上有職稱就顯示職稱，沒有就「專案 · 任務」；英文名只當收件地址
+if args.first == "role" {
+    var rest = Array(args.dropFirst()), target = ProcessInfo.processInfo.environment["CLAUDE_CODE_SESSION_ID"]
+    if rest.first == "--for", rest.count >= 2 {
+        let who = rest[1]; rest.removeFirst(2)
+        let names = NicknameStore.all()
+        let live = NicknameStore.liveSessions()
+        let hit = ShortName.match(who, among: live.map { ($0.sessionId, $0.name) }, nick: names.mapValues(\.name))
+        guard hit.count == 1 else { FileHandle.standardError.write(Data("找不到（或不只一個）叫 \(who) 的 session\n".utf8)); exit(1) }
+        target = hit[0]
+    }
+    guard let sid = target, !sid.isEmpty else { FileHandle.standardError.write(Data("用法：showork role <職稱>｜--clear｜--for <英文名> <職稱>（要在 Claude Code 裡跑，或用 --for）\n".utf8)); exit(1) }
+    let role = rest.first == "--clear" ? nil : rest.joined(separator: " ")
+    let n = NicknameStore.setRole(sid, role)
+    print(n.role.map { "\(n.name) 的職稱設為「\($0)」：畫面上會顯示這個" } ?? "\(n.name) 的職稱已清掉：畫面上改顯示「專案 · 任務」")
+    exit(0)
+}
+
 if args.first == "names" {
     let names = NicknameStore.all()
     let rows = NicknameStore.liveSessions().sorted { (names[$0.sessionId]?.name ?? "~") < (names[$1.sessionId]?.name ?? "~") }
     let owned = SessionHost.shared.boardLiveIds()     // 戰情中心持有的 sdk-cli session 也列
     for r in rows where r.entrypoint != "sdk-cli" || owned.contains(r.sessionId) {
         let n = names[r.sessionId]
-        print("\(n?.name ?? "（還沒取名）")\t\(r.name ?? "-")\t\(n?.doing ?? "（還沒報任務）")")
+        print("\(n?.name ?? "（還沒取名）")\t\(r.name ?? "-")\t\(n?.role.map { "【\($0)】" } ?? "")\(n?.doing ?? "（還沒報任務）")")
     }
     exit(0)
 }
