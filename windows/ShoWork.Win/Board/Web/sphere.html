@@ -1577,7 +1577,7 @@ function auditScores(a) {
     t.cache_hit == null ? 0 : cl((0.95 - t.cache_hit) / 0.15 * 0.85),     // 80% 以下＝紅
     cl(((t.opener_median || 0) - 25000) / 15000 * 0.85),                  // 開場 40k＝紅
     bigIdle ? cl(0.6 + bigIdle * 0.15) : 0,                                // 有大記憶量閒置就偏黑、越多越紅
-    shells ? cl(0.4 + shells * 0.15) : 0,
+    shells ? cl(0.5 + shells * 0.15) : 0,                                 // 有可以關的就至少偏黑
     cl((share - 0.15) / 0.25 * 0.85),                                      // 子 agent 佔 40%＝紅
     Math.max(cl(((st.memory_index || 0) - 3000) / 3000 * 0.85), cl(((st.mcp_servers || 0) - 4) / 4 * 0.85)),   // 記憶索引 6k／MCP 8 個＝紅
     net ? cl(((net.in_Bps || 0) + (net.out_Bps || 0) - 500000) / 1500000 * 0.85) : 0,   // 2 MB/s＝紅
@@ -1604,7 +1604,10 @@ function syncAudit() {
 function auditRows() {
   const a = data.audit, rows = [];
   const busy = data.auditBusy;
-  const btns = `<span class="abtn"><button class="pill sm" data-audit="run"${busy ? " disabled" : ""}>${busy ? "自檢中⋯" : "重跑"}</button><button class="pill sm" data-audit="send"${busy || !a ? " disabled" : ""}>送 #自檢回報</button></span>`;
+  // 11-22 Keng「加，直接處理」：有停放空殼／預備程序才出現「處理」鈕（原生端重新讀 session 再動手，不靠舊報告）
+  const fixN = (a?.sessions || []).filter(s => /^(停放|預備)/.test(String(s.cat || ""))).length;
+  const fixBtn = fixN && !busy ? `<button class="pill sm" data-audit="fix" title="關掉停放空殼、停掉 Claude 預備程序（對話都不會丟）">處理 ${fixN} 項</button>` : "";
+  const btns = `<span class="abtn">${fixBtn}<button class="pill sm" data-audit="run"${busy ? " disabled" : ""}>${busy ? "自檢中⋯" : "重跑"}</button><button class="pill sm" data-audit="send"${busy || !a ? " disabled" : ""}>送 #自檢回報</button></span>`;
   if (!a) { rows.push(`<div class="row"><span class="t">AUDIT</span><span>還沒跑過自檢（開工／收工會自動跑）</span><span></span>${btns}</div>`); return rows; }
   const f = auditScores(a), bad = f.filter(x => x >= 0.6).length;
   const chips = AUDIT_KEYS.map((k, i) => `<span class="ak" style="color:${f[i] >= 0.85 ? "var(--bad)" : f[i] >= 0.6 ? "var(--ink)" : "var(--ink-dim)"}">${f[i] >= 0.6 ? "●" : "○"} ${k}</span>`).join("");
@@ -1635,7 +1638,8 @@ function renderSys() {
 }
 for (const id of ["sysRows", "sysWrap"]) $(id).addEventListener("click", e => {
   const b = e.target.closest("[data-audit]"); if (!b || b.disabled) return;
-  e.stopPropagation(); post({ action: "audit", send: b.dataset.audit === "send" });
+  e.stopPropagation();
+  if (b.dataset.audit === "fix") post({ action: "auditFix" }); else post({ action: "audit", send: b.dataset.audit === "send" });
 });
 $("teamRows").onclick = e => {
   const row = e.target.closest(".row"); if (!row) return;

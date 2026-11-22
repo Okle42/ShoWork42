@@ -136,6 +136,17 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
                 if send { self?.say(ok ? "自檢已送到 Discord #自檢回報。" : "自檢送出失敗（看 ~/.claude/flow-audit/sphere/last.log）。") }
             }) { say("自檢正在跑，等它跑完。") }
             sent = nil; push()
+        case "auditFix":        // 11-22 Keng 選「加，直接處理」：關掉停放空殼、停掉 Claude 預備程序（都不會丟對話），做完重跑自檢
+            if blocked { return say("測試模式不動手。") }
+            say("處理中⋯")
+            DispatchQueue.global(qos: .utility).async {
+                let r = SphereAudit.fix()
+                Task { @MainActor [weak self] in
+                    self?.say(r)
+                    SphereAudit.run(send: false) { _ in self?.sent = nil; self?.push() }
+                    self?.sent = nil; self?.push()
+                }
+            }
         default: break
         }
     }
@@ -448,6 +459,41 @@ enum SphereAudit {
         cache = (path, mtime, v)
         return v
     }
+
+    /// 「處理」：重新讀 ~/.claude/sessions（不靠舊報告），只動兩種保證不丟對話的：
+    ///   停放空殼＝終端機把對話停放到背景後留下的殼（parkedJobId 指向活著的背景 job）⇒ 對殼的程序送 SIGTERM（對話在背景繼續）
+    ///   預備程序＝Claude 背景常駐程式先開好的空 session（bg、沒名字、沒講過話）⇒ `claude stop`（跟 BgJanitor 同一招）
+    /// 大記憶量閒置、開場太重、常駐設定這些要人判斷的，不動。記錄在 ~/.claude/flow-audit/sphere/fix.log
+    nonisolated static func fix() -> String {
+        let fm = FileManager.default, dir = BoardPaths.claude + "/sessions"
+        let recs = ((try? fm.contentsOfDirectory(atPath: dir)) ?? []).filter { $0.hasSuffix(".json") }.compactMap { f -> SessionRecord? in
+            guard let d = fm.contents(atPath: dir + "/" + f), let r = SessionRecord.decode(d), kill(r.pid, 0) == 0 else { return nil }
+            return r
+        }
+        let jobs = Set(recs.compactMap(\.jobId)), me = getpid()
+        var lines: [String] = [], shells = 0, spares = 0
+        for r in recs where r.pid != me {
+            if let pj = r.parkedJobId, jobs.contains(pj) {
+                let ok = kill(r.pid, SIGTERM) == 0
+                if ok { shells += 1 }
+                lines.append("\(ok ? "關空殼" : "關空殼失敗") \(r.name ?? String(r.sessionId.prefix(8)))（pid \(r.pid)，對話在背景 \(pj)）")
+            } else if r.kind == "bg", r.entrypoint != "sdk-cli", r.name == nil || r.name == String(r.sessionId.prefix(8)), !BgJanitorRunner.hasWork(r) {
+                let id = r.jobId ?? String(r.sessionId.prefix(8))
+                let (ok, out) = BgJanitorRunner.claudeStop(id)
+                if ok { spares += 1 }
+                lines.append("\(ok ? "停預備程序" : "停預備程序失敗") \(id)\(ok ? "" : "｜\(out)")")
+            }
+        }
+        try? fm.createDirectory(at: dir_, withIntermediateDirectories: true)
+        let stamp = ISO8601DateFormatter().string(from: Date())
+        let text = (lines.isEmpty ? ["\(stamp) 沒有可以自動處理的"] : lines.map { "\(stamp) \($0)" }).joined(separator: "\n") + "\n"
+        let log = dir_.appendingPathComponent("fix.log")
+        if let h = try? FileHandle(forWritingTo: log) { h.seekToEndOfFile(); h.write(Data(text.utf8)); try? h.close() }
+        else { try? Data(text.utf8).write(to: log) }
+        if shells + spares == 0 { return lines.isEmpty ? "沒有可以自動處理的（閒置、常駐設定這些要你自己決定）。" : "處理失敗，看 ~/.claude/flow-audit/sphere/fix.log。" }
+        return "已處理：關掉 \(shells) 個停放空殼、停掉 \(spares) 個預備程序（對話都還在）。正在重跑自檢。"
+    }
+    nonisolated private static var dir_: URL { dir }
 
     /// 背景跑一次；已經在跑就回 false。done 在主執行緒呼叫（ok＝結束代碼 0）
     @discardableResult

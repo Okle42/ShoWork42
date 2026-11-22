@@ -131,7 +131,7 @@
 - 何時跑（Keng 選「開工／收工各跑一次」）：早報時段（5–11 點）、收工時段（19 點後）每天各一次（localStorage sphere.audit.am／pm）；按「早報」「收工」鈕也會跑
 - 原生端 `SphereAudit`（SphereWebScene.swift）：背景跑 `python3 -I flow_audit.py --label Keng --names --out ~/.claude/flow-audit/sphere [--send]`（約 20 秒，含網路取樣 10 秒），輸出寫 last.log；payload `audit`（at、today、standing、sessions、net、advice）＋`auditBusy`
 - 安裝腳本把 scripts/flow_audit.py 複製進 App 包 Resources；送出（--send）一律去隱私
-- 「處理」鈕（直接關空殼等）**沒做**：Keng 沒回答要不要讓它直接動手，目前只顯示建議
+- 「處理 N 項」鈕（Keng 選「加，直接處理」）：原生 `SphereAudit.fix()` 重讀 ~/.claude/sessions，只動不丟對話的兩種——停放空殼（parkedJobId 指向活的背景 job）送 SIGTERM、預備程序（bg、沒名字、沒講過話）`claude stop`；做完重跑自檢；記錄 ~/.claude/flow-audit/sphere/fix.log；閒置大記憶量／常駐設定不動。**沒實按過**（按了會真的關程序）
 - 驗證：螢幕外桌面版 1000×860 深／淺色截圖，環 7 段有上色、卡片區塊正常；重跑／送出按鈕沒實按過
 
 ## 字幕跟語音（11-22）
