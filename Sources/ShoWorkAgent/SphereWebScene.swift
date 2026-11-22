@@ -189,8 +189,8 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
         if blocked { return say("測試：不跳到 \(c.display)。") }
         if c.kind == "board" {
             WorkWindow.show(SessionHost.shared.handle(for: c.sessionId) ?? c.sessionId, cwd: c.cwd)
-        } else if !BoardActions.focus(pid: c.pid) {
-            say(c.kind == "bg" ? "這是背景 session，沒有視窗。" : "找不到這個 session 的視窗。")
+        } else if let msg = BoardActions.jumpOrAttach(c) {
+            say(msg)
         }
     }
 

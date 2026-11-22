@@ -181,8 +181,8 @@ struct IslandCard: View {
     }
 
     private func jump(_ c: BoardCard) {
-        if !BoardActions.focus(pid: c.pid) {
-            onToast(c.kind == "bg" ? "這是背景 session，沒有視窗；用 claude attach 打開" : "找不到這個 session 的視窗")
+        if let msg = BoardActions.jumpOrAttach(c) {
+            onToast(msg)
         }
     }
 

@@ -300,6 +300,34 @@ enum BoardActions {
 
     /// 跳到那個 AI 的終端機視窗（光暈引擎知道它在哪；不知道就照它的 tty 現找）
     @discardableResult
+    /// 11-23 Keng「明明我正在跟它對話，點衛星卻說背景 session 沒有視窗」：
+    /// 先找它本身的視窗；背景 session 再找有沒有開著的 `claude attach <job>` 視窗，有就叫到前面，沒有就開一個 Ghostty 視窗 attach 上去。
+    /// 回 nil＝跳過去了；回字串＝要講給使用者聽的結果
+    static func jumpOrAttach(_ c: BoardCard) -> String? {
+        if focus(pid: c.pid) { return nil }
+        guard c.kind == "bg", let job = c.jobId ?? c.name else { return "找不到這個 session 的視窗。" }
+        if let viewer = attachViewer(job), focus(pid: viewer) { return nil }
+        let cwd = c.cwd ?? FileManager.default.homeDirectoryForCurrentUser.path
+        if Script.run(OwnedActions.ghosttyScript(cwd: cwd, input: "claude attach \(job)"))?.stringValue == "ok" {
+            return "開了一個終端機視窗看 \(c.display)（關掉視窗不會停掉它）。"
+        }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString("claude attach \(job)", forType: .string)
+        return "開不了 Ghostty；指令 claude attach \(job) 已拷貝，貼到終端機就能看。"
+    }
+
+    /// 正在看這個背景 job 的 `claude attach` 程序（有的話）
+    static func attachViewer(_ job: String) -> Int32? {
+        let out = Tools.run("/bin/ps", ["-axo", "pid=,command="], timeout: 5).out
+        for line in out.split(separator: "\n") {
+            let parts = line.trimmingCharacters(in: .whitespaces).split(separator: " ", maxSplits: 1)
+            guard parts.count == 2, let pid = Int32(parts[0]) else { continue }
+            let cmd = parts[1].split(separator: " ")
+            if let i = cmd.firstIndex(of: "attach"), i > 0, cmd[i - 1].hasSuffix("claude"), i + 1 < cmd.count, cmd[i + 1] == job { return pid }
+        }
+        return nil
+    }
+
     static func focus(pid: Int32) -> Bool {
         guard let p = Engine.current?.placement(forPID: pid),
               let el = AXQuery.element(pid: p.pid, wid: p.wid) else { return false }

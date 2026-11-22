@@ -451,8 +451,8 @@ struct OfficeView: View {
     private func jump(_ id: String) {
         guard let c = shown.first(where: { $0.id == id }) else { return }
         if c.kind == "board" { openWork(c); return }          // 戰情中心自己持有的 session 沒有終端機視窗：開工作視窗（11-08 H3）
-        if !BoardActions.focus(pid: c.pid) {
-            onToast(c.kind == "bg" ? "這是背景 session，沒有視窗；用 claude attach 打開" : "找不到這個 session 的視窗")
+        if let msg = BoardActions.jumpOrAttach(c) {
+            onToast(msg)
         }
     }
 

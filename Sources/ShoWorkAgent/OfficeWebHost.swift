@@ -259,8 +259,8 @@ final class OfficeWebHost: NSObject, WKScriptMessageHandler, WKNavigationDelegat
     private func jump(_ c: BoardCard) {
         if c.kind == "board" { openWork(c); return }
         if blocked { return toast("測試：不跳到視窗") }
-        if !BoardActions.focus(pid: c.pid) {
-            toast(c.kind == "bg" ? "這是背景 session，沒有視窗；用 claude attach 打開" : "找不到這個 session 的視窗")
+        if let msg = BoardActions.jumpOrAttach(c) {
+            toast(msg)
         }
     }
 

@@ -298,6 +298,7 @@ public struct BoardCard: Codable, Sendable, Equatable, Identifiable {
     public var ctx: ContextUse?            // context 用量（狀態列存的）
     public var name: String? = nil         // session 名（SendMessage 的地址，例如 you-9e）；11-22 起畫面不顯示，只當地址
     public var label: String? = nil        // 11-22 顯示名：職稱，沒有就專案（家目錄＝nil，畫面改顯示任務）
+    public var jobId: String? = nil        // 11-23：背景 session 的 job id（點衛星時 `claude attach <jobId>` 開視窗看它）
     /// 畫面上叫它的名字：職稱／專案；家目錄的沒有專案 ⇒ 用正在做的任務（11-22 Keng：英文人名不再顯示）
     public var display: String { label ?? report?.doing ?? title }
     public var captain = false             // 是不是隊長
@@ -336,6 +337,7 @@ extension BoardCard {
         review = try c.decodeIfPresent(Review.self, forKey: .review)
         ctx = try c.decodeIfPresent(ContextUse.self, forKey: .ctx)
         label = try c.decodeIfPresent(String.self, forKey: .label)
+        jobId = try c.decodeIfPresent(String.self, forKey: .jobId)
         name = try c.decodeIfPresent(String.self, forKey: .name)
         captain = try c.decodeIfPresent(Bool.self, forKey: .captain) ?? false
         sameProject = try c.decodeIfPresent([String].self, forKey: .sameProject) ?? []
@@ -485,6 +487,7 @@ public enum Board {
                                  ctx: contexts[s.sessionId], name: s.name))
             if col == .active { out[out.count - 1].visiting = visiting }
             out[out.count - 1].label = Nicknames.label(nicknames[s.sessionId], project: project)
+            out[out.count - 1].jobId = s.jobId
             out[out.count - 1].asks = pending
             out[out.count - 1].stillWorking = !pending.isEmpty && (base.0 == .active || base.0 == .stuck)
             out[out.count - 1].unused = t.lastActivity == nil && t.lastPrompt == nil   // 只有正在做事才有影分身，閒著不留幽靈
