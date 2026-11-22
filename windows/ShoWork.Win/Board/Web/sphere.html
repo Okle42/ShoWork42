@@ -2134,6 +2134,7 @@ const THEME_LABEL = { auto: "配色：自動（跟系統）", dark: "配色：�
 const hhmm = d => `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
 function applyTheme() {
   const name = themeName(), t = THEME3[name];
+  if (!DESK) post({ action: "theme", mode: themeMode, name });      // 終端機跟著換（只由分頁那顆送，避免兩顆搶）
   document.documentElement.dataset.theme = name;
   BALL.set(t.ball); GRAY.set(t.gray); ALERT.set(t.alert); BAD.set(t.bad); DONE.set(t.done);
   BLEND = t.blend;

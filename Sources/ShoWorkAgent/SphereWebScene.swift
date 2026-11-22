@@ -121,6 +121,8 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
         case "deskChrome":
             (web as? SphereWebView)?.noDrag = (m["noDrag"] as? [[Double]] ?? []).filter { $0.count == 4 }.map { NSRect(x: $0[0], y: $0[1], width: $0[2], height: $0[3]) }
         case "openBoard": openBoard()
+        case "theme":           // 11-22 Keng：終端機（Ghostty）配色跟球體連動
+            GhosttyTheme.apply(mode: str("mode") ?? "auto", now: str("name") ?? "dark", blocked: blocked)
         case "sessionInfo":     // v4 C：點衛星展開小卡
             guard let c = card(str("sessionId")) else { return say("這個 session 已經不在了。") }
             js("window.karaSessionInfo", Self.info(c))
@@ -356,6 +358,31 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
     }
 
     static func needsYou(_ c: BoardCard) -> Bool { !c.asks.isEmpty || c.permit != nil }
+}
+
+/// 11-22 Keng：Ghostty 終端機跟球體的配色連動。只改設定檔裡 `theme =` 那一行（色票在 ~/.config/ghostty/themes/Okle42-Dark／Light），
+/// 改了才叫 Ghostty 重新載入設定（輔助使用點選單，不切前景）。自動＝跟系統外觀（Ghostty 自己切）；深／淺＝固定；日出日落＝照球體當下算的深淺
+@MainActor
+enum GhosttyTheme {
+    static let config = NSHomeDirectory() + "/Library/Application Support/com.mitchellh.ghostty/config.ghostty"
+    private static var last: String?
+    static func apply(mode: String, now: String, blocked: Bool) {
+        let line = mode == "auto" ? "theme = light:Okle42-Light,dark:Okle42-Dark" : "theme = Okle42-\(now == "light" ? "Light" : "Dark")"
+        guard line != last, !blocked else { return }
+        last = line
+        guard FileManager.default.fileExists(atPath: NSHomeDirectory() + "/.config/ghostty/themes/Okle42-Dark"),
+              let text = try? String(contentsOfFile: config, encoding: .utf8), text.contains("theme =") else { return }   // 沒裝 Okle42 主題就不動
+        let lines = text.components(separatedBy: "\n").map { $0.hasPrefix("theme =") ? line : $0 }
+        let out = lines.joined(separator: "\n")
+        guard out != text else { return }
+        try? out.write(toFile: config, atomically: true, encoding: .utf8)
+        DispatchQueue.global().async {
+            let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+            p.arguments = ["-e", "tell application \"System Events\" to if exists process \"Ghostty\" then tell process \"Ghostty\" to click menu item \"Reload Configuration\" of menu 1 of menu bar item 2 of menu bar 1"]
+            p.standardOutput = FileHandle.nullDevice; p.standardError = FileHandle.nullDevice
+            try? p.run(); p.waitUntilExit()
+        }
+    }
 }
 
 /// 11-22 Keng：球右半邊的硬碟空間（每顆一圈）。只列看得到的實體硬碟：內建（/）＋ /Volumes 底下可瀏覽、不是 Recovery 的
