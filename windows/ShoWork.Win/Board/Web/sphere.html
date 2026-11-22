@@ -271,6 +271,13 @@
     @media (prefers-reduced-motion: reduce) { #banner.on, .pop.on::after, .trow .dot.pulse, .card.flash, .trow.flash { animation: none; } }
   /* 疊排（body.stack，resize() 判斷）：球左右放不下兩張卡片時（直式、偏方的視窗、桌面版小／中），
      球往上移、卡片排到下面左右兩張，太高就捲動；外環卡併進額度卡（#sysRows2）。11-22 Keng 截圖：分頁視窗偏直時卡片蓋住球、拉線亂繞 */
+  /* 11-22 Keng：每個面板都能拖、能拉右下角調大小（位置大小記在 localStorage sphere.layout.tab／desk） */
+  .drag { cursor: grab; resize: both; overflow: auto; min-height: 48px; }
+  .drag.dragging { cursor: grabbing; user-select: none; -webkit-user-select: none; }
+  .card.drag.on { pointer-events: auto; }
+  .drag .row, .drag .q, .drag .text { cursor: auto; }
+  .drag .row.link { cursor: pointer; }
+  .drag::-webkit-resizer { background: transparent; }
   #sysWrap { display: none; }
   body.stack #sysWrap:not(:empty) { display: block; }
   body.stack #cardSys { display: none; }
@@ -349,12 +356,13 @@
   <button class="pill sm deskOnly" id="bSize" title="換尺寸：小 → 中 → 大（拖右下角也可以）">尺寸</button>
   <button class="pill sm deskOnly" id="bBoard" title="打開戰情中心">戰情<span class="wide">中心</span></button>
   <select class="pill sm" id="voiceSel" title="播報的聲音（選了會試聽一句）" aria-label="播報的聲音" hidden></select>
+  <button class="pill sm" id="bReset" title="面板位置、大小、球的縮放都回到預設">重排</button>
   <button class="pill sm" id="bTheme" title="配色：自動（跟系統）→ 深色 → 淺色" aria-label="配色">◐</button>
   <button class="pill sm" id="voice" aria-label="語音開關"></button>
   <button class="pill sm deskOnly" id="bClose" title="收起桌面版（選單列「桌面球體」可再打開）" aria-label="收起">✕</button>
 </div>
 <div id="state"><span class="zh" id="stZh">待命</span><span class="en" id="stEn">STANDBY</span></div>
-<div id="hint">點球聽現況 · 按住球（或空白鍵）問問題或交給隊長 · 點衛星看詳情</div>
+<div id="hint">點球聽現況 · 按住球（或空白鍵）講話 · 滾輪縮放球 · 拖面板移動、拉右下角調大小</div>
 <div id="controls">
   <button data-s="idle">待命</button>
   <button data-s="listening">聆聽</button>
@@ -597,6 +605,11 @@ const shocks = [0, 1, 2].map(() => {
 });
 let shockNext = 0;
 
+// 滾輪縮放球體（11-22 Keng）：0.45–2 倍，記在 localStorage sphere.zoom.tab／desk
+const ZKEY = "sphere.zoom." + (DESK ? "desk" : "tab");
+let zoom = 1, camZ = 10.5;
+try { zoom = Math.min(2, Math.max(0.45, +localStorage.getItem(ZKEY) || 1)); } catch {}
+let zoomCur = zoom;
 function resize() {
   const w = innerWidth, h = innerHeight;
   renderer.setSize(w, h, false);
@@ -604,14 +617,22 @@ function resize() {
   camera.position.z = w < h ? 15 : 10.5;  // 直式畫面拉遠一點；v3 外環（3.2–3.7）也要進框
   // 疊排判斷：球（半徑 2 的那圈）的直徑 ≈ 5.49·h／z 像素；左右兩張卡片＋邊距吃掉之後剩的寬度放不下球 ⇒ 卡片改排到下面
   const side = DESK && w <= 1100 ? 2 * (16 + 270) : 2 * (24 + 310);
-  const stack = w - side < 5.49 * h / camera.position.z * 1.05;
+  // 11-22 Keng 不喜歡分頁自動疊排（面板改成自己拖）⇒ 只有桌面版小／中（≤640 寬）預設疊排
+  const stack = DESK && w - side < 5.49 * h / camera.position.z * 1.05;
   document.body.classList.toggle("stack", stack);
   // 疊排：球拉遠一點、往上移到 40% 高（外環半徑約四分之一高），不被下面的卡片蓋住
   if (stack) { camera.position.z = 20; camera.setViewOffset(w, h, 0, h * 0.1, w, h); }
   else camera.clearViewOffset();
+  camZ = camera.position.z;
+  camera.position.z = camZ / zoomCur;            // 滾輪縮放（zoomCur 在 frame 裡漸近 zoom）
   camera.updateProjectionMatrix();
 }
 addEventListener("resize", resize); resize();
+canvas.addEventListener("wheel", e => {
+  e.preventDefault();
+  zoom = Math.min(2, Math.max(0.45, zoom * Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0015))));      // ctrlKey＝觸控板捏合
+  try { localStorage.setItem(ZKEY, String(zoom)); } catch {}
+}, { passive: false });
 
 /* ---------- 動畫 ---------- */
 const clock = new THREE.Clock();
@@ -633,6 +654,10 @@ function frame(now) {
   if (now - lastDraw < gap - 4) return;          // 留 4ms 誤差，避免 60Hz 螢幕上偶爾跳過一格變成頓
   lastDraw = now;
   const dt = Math.min(clock.getDelta(), 0.08), t = clock.elapsedTime;
+  if (Math.abs(zoomCur - zoom) > 0.0005) {
+    zoomCur += (zoom - zoomCur) * Math.min(1, dt * 10);
+    camera.position.z = camZ / zoomCur; drawLinks(); if (popEl.classList.contains("on")) drawPopLink(); motionAt = now;
+  }
   for (const k in cur) cur[k] += (tgt[k] - cur[k]) * Math.min(1, dt * 3);
   accentFade.step();
 
@@ -969,24 +994,24 @@ function sphereScreen() {
 }
 function linkPath(el, cls = "") {
   if (!el || !el.classList.contains("on") || getComputedStyle(el).display === "none") return "";
-  const stacked = document.body.classList.contains("stack");
-  if (stacked && el.id !== "pop" && document.body.classList.contains("asking")) return "";     // 疊排：卡片讓位給選項面板時不拉線
+  if (document.body.classList.contains("stack") && el.id !== "pop" && document.body.classList.contains("asking")) return "";     // 疊排：卡片讓位給選項面板時不拉線
   const b = el.getBoundingClientRect(), { cx, cy, r } = sphereScreen();
-  if (stacked && el.id !== "pop") {
-    // 疊排：卡片在球下面 ⇒ 從球邊往卡片方向出發、轉直角、垂直落到卡片上緣（靠球那一側的四分之一處）
-    const left = b.left + b.width / 2 < cx, ex = left ? b.right - b.width * 0.25 : b.left + b.width * 0.25, ey = b.top;
-    const a = Math.atan2(ey - cy, ex - cx), sx = cx + Math.cos(a) * r, sy = cy + Math.sin(a) * r, ky = Math.max(sy + 10, ey - 18);
-    return `<path class="${cls}" d="M${sx.toFixed(1)},${sy.toFixed(1)} L${ex.toFixed(1)},${ky.toFixed(1)} L${ex.toFixed(1)},${ey.toFixed(1)}"/><circle class="${cls}" cx="${sx.toFixed(1)}" cy="${sy.toFixed(1)}" r="2.2"/>`;
-  }
-  const left = b.left + b.width / 2 < cx, ex = left ? b.right : b.left, ey = Math.max(b.top + 18, Math.min(b.bottom - 18, cy));
-  const ty = b.top + 22, a = Math.atan2(ty - cy, ex - cx), sx = cx + Math.cos(a) * r, sy = cy + Math.sin(a) * r;
-  const elbow = ex + (left ? 26 : -26);
-  return `<path class="${cls}" d="M${sx.toFixed(1)},${sy.toFixed(1)} L${elbow.toFixed(1)},${ty.toFixed(1)} L${ex.toFixed(1)},${ty.toFixed(1)}"/><circle class="${cls}" cx="${sx.toFixed(1)}" cy="${sy.toFixed(1)}" r="2.2"/>`;
+  const cl = (v, a, z) => Math.max(a, Math.min(z, v));
+  // 11-22 面板可以拖到任何地方 ⇒ 線接到卡片「離球最近的那一邊」：卡片在球左右＝從側邊水平接進去（接在上緣下 22px）；在球上下＝垂直接上／下緣
+  const gx = cx < b.left ? b.left - cx : cx > b.right ? cx - b.right : 0, gy = cy < b.top ? b.top - cy : cy > b.bottom ? cy - b.bottom : 0;
+  if (!gx && !gy) return "";                                   // 卡片蓋在球心上：不拉線
+  const side = gx >= gy;
+  const ex = side ? (cx < b.left ? b.left : b.right) : cl(cx, b.left + b.width * 0.25, b.right - b.width * 0.25);
+  const ey = side ? cl(b.top + 22, b.top, b.bottom) : (cy < b.top ? b.top : b.bottom);
+  const kx = side ? ex + (cx < ex ? -26 : 26) : ex, ky = side ? ey : ey + (cy < ey ? -18 : 18);
+  const a = Math.atan2(ky - cy, kx - cx), sx = cx + Math.cos(a) * r, sy = cy + Math.sin(a) * r;
+  if (Math.hypot(kx - cx, ky - cy) < r + 8) return "";          // 卡片貼著球：線會穿進球裡，不畫
+  return `<path class="${cls}" d="M${sx.toFixed(1)},${sy.toFixed(1)} L${kx.toFixed(1)},${ky.toFixed(1)} L${ex.toFixed(1)},${ey.toFixed(1)}"/><circle class="${cls}" cx="${sx.toFixed(1)}" cy="${sy.toFixed(1)}" r="2.2"/>`;
 }
 function drawLinks() {
   // 外環卡接在額度卡下面（額度卡 v5 變高了，不能再用固定位置）
   const u = $("cardUsage").getBoundingClientRect();
-  if (!document.body.classList.contains("stack") && u.height) $("cardSys").style.top = Math.round(u.bottom + 12) + "px";
+  if (!document.body.classList.contains("stack") && u.height && !(layout && layout.cardSys)) $("cardSys").style.top = Math.round(u.bottom + 12) + "px";
   $("lkStatic").innerHTML = ["cardUsage", "cardTeam", "cardSys"].map(id => linkPath($(id))).join("");
 }
 addEventListener("resize", () => { drawLinks(); if (popEl.classList.contains("on")) drawPopLink(); });
@@ -1477,6 +1502,67 @@ async function demo() {
 document.querySelectorAll("#controls button[data-s]").forEach(b => b.onclick = () => setState(b.dataset.s));
 $("demo").onclick = demo;
 addEventListener("keydown", e => { if (e.code === "Space" && !embedded) { e.preventDefault(); demo(); } });
+
+/* ---------- 11-22 面板拖移／調大小（Keng：每個視窗都要能拖、能調）---------- */
+const PANELS = ["caption", "cardUsage", "cardTeam", "cardSys", "askCard"];
+const LKEY = "sphere.layout." + (DESK ? "desk" : "tab");
+var layout = {};
+try { layout = JSON.parse(localStorage.getItem(LKEY) || "{}") || {}; } catch {}
+const saveLayout = () => { try { localStorage.setItem(LKEY, JSON.stringify(layout)); } catch {} };
+const topMin = () => DESK ? 36 : 0;
+function place(id) {
+  const el = $(id), L = layout[id]; if (!L) return;
+  if (L.w) el.style.width = L.w + "px";
+  if (L.h) { el.style.height = L.h + "px"; el.style.maxHeight = "none"; }
+  if (L.x == null) return;
+  const w = el.offsetWidth || L.w || 240;
+  // 至少留 60px 在畫面裡（視窗縮小後面板不會跑到外面找不到）
+  el.style.left = Math.max(60 - w, Math.min(innerWidth - 60, L.x)) + "px";
+  el.style.top = Math.max(topMin(), Math.min(innerHeight - 40, L.y)) + "px";
+  el.style.right = "auto"; el.style.bottom = "auto"; el.style.transform = "none";
+}
+let resizing = false;
+for (const id of PANELS) {
+  const el = $(id); el.classList.add("drag"); place(id);
+  el.addEventListener("pointerdown", e => {
+    if (e.button !== 0 || e.target.closest("button,input,select,textarea,a,.row.link,[data-act],[data-nav]")) return;
+    const r = el.getBoundingClientRect();
+    if (e.clientX > r.right - 16 && e.clientY > r.bottom - 16) { resizing = true; return; }      // 右下角＝調大小（交給瀏覽器）
+    if (e.clientX - r.left > el.clientWidth + 1) return;                                              // 捲軸
+    e.preventDefault(); e.stopPropagation();
+    const dx = e.clientX - r.left, dy = e.clientY - r.top;
+    try { el.setPointerCapture(e.pointerId); } catch {}
+    el.classList.add("dragging");
+    let x = r.left, y = r.top;
+    const move = ev => {
+      x = Math.max(60 - r.width, Math.min(innerWidth - 60, ev.clientX - dx)); y = Math.max(topMin(), Math.min(innerHeight - 40, ev.clientY - dy));
+      el.style.left = x + "px"; el.style.top = y + "px"; el.style.right = "auto"; el.style.bottom = "auto"; el.style.transform = "none";
+      drawLinks();
+    };
+    const up = () => {
+      el.removeEventListener("pointermove", move); el.removeEventListener("pointerup", up); el.removeEventListener("pointercancel", up);
+      el.classList.remove("dragging");
+      layout[id] = { ...layout[id], x: Math.round(x), y: Math.round(y) }; saveLayout(); drawLinks();
+    };
+    el.addEventListener("pointermove", move); el.addEventListener("pointerup", up); el.addEventListener("pointercancel", up);
+  });
+  // 拉右下角調大小：瀏覽器改的是 style.width／height ⇒ 放開時記下來
+  new ResizeObserver(() => { drawLinks(); }).observe(el);
+}
+addEventListener("pointerup", () => {
+  if (!resizing) return; resizing = false;
+  for (const id of PANELS) { const el = $(id); if (el.style.width || el.style.height) {
+    layout[id] = { ...layout[id], w: Math.round(el.offsetWidth), h: Math.round(el.offsetHeight) };
+    el.style.maxHeight = "none";
+  } }
+  saveLayout();
+}, true);
+addEventListener("resize", () => { for (const id of PANELS) place(id); drawLinks(); });
+$("bReset").onclick = () => {
+  layout = {}; saveLayout(); zoom = 1; try { localStorage.setItem(ZKEY, "1"); } catch {}
+  for (const id of PANELS) { const st = $(id).style; for (const k of ["left", "top", "right", "bottom", "width", "height", "maxHeight", "transform"]) st[k] = ""; }
+  drawLinks();
+};
 
 /* ---------- 11-22 配色：自動（跟系統）／深色／淺色 ---------- */
 const THEME_LABEL = { auto: "配色：自動（跟系統）", dark: "配色：深色", light: "配色：淺色" };

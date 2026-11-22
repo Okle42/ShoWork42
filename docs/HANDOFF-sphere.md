@@ -41,6 +41,13 @@
 - 效能：環形每圈併成 2 個物件、看不見的碎片／光暈／彗星／衝擊波不畫（draw call 230 → 40）；Retina 不開 MSAA；拿掉卡片毛玻璃；分頁閒置 30 張、有動作才 60；播完關 AVAudioEngine
 - 實測（螢幕外，分頁＋桌面版同開）：平常 32% → 22% CPU、過熱模式 31% → 24%；`window.karaPerf()` 看每格毫秒與 draw call
 
+## 面板拖移／縮放（11-22，Keng 不喜歡自動疊排）
+- 字幕、額度、戰情、外環、選項面板（`PANELS`）都能拖、拉右下角調大小；記在 `localStorage sphere.layout.tab／desk`；視窗變小會夾回畫面內（至少留 60px）
+- 分頁不再自動疊排（桌面版小／中仍預設疊排，拖過就照拖的位置）
+- 拉線接卡片離球最近的那一邊（側邊水平、上下垂直）；卡片蓋在球上就不畫
+- 滾輪（觸控板捏合）縮放球 0.45–2 倍，記在 `sphere.zoom.tab／desk`；工具列「重排」全部回預設
+- 測試程式的 WKWebView 資料在 `~/Library/WebKit/ShoWorkAgent`，正式 App 在 `ai.okle42.showork.agent`，互不影響
+
 ## 坑
 - **tap 在 mainMixer 輸出端**：`outputVolume` 會影響量到的頻譜（測試設 0 會量到全 0，不是壞掉）
 - 頻譜正規化 `(dB + 18) / 56`：用曉臻 mp3 校正，中位數約 0.3
