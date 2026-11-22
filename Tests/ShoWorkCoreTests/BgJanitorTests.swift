@@ -78,7 +78,7 @@ struct BgJanitorTests {
 struct ParkedHostTests {
     @Test func parkedHostIsHiddenWhileJobAlive() {
         var host = SessionRecord(pid: 1, sessionId: "host", cwd: "/tmp", status: "idle", kind: "interactive"); host.parkedJobId = "job1"
-        var job = SessionRecord(pid: 2, sessionId: "job1-full", cwd: "/tmp", status: "busy", kind: "bg"); job.jobId = "job1"
+        var job = SessionRecord(pid: 2, sessionId: "job1-full", cwd: "/tmp", name: "Bella", status: "busy", kind: "bg"); job.jobId = "job1"
         let now = Date()
         func build(_ s: [SessionRecord]) -> [String] {
             Board.build(sessions: s, transcripts: [:], glows: [:], teams: [], inbox: [], now: now, home: "/Users/x", isRepo: { _ in false }).map(\.sessionId)
@@ -93,8 +93,9 @@ struct ParkedHostTests {
 struct SpareHiddenTests {
     @Test func prewarmSpareIsHidden() {
         let spare = SessionRecord(pid: 3, sessionId: "spare", cwd: "/tmp", status: "idle", kind: "bg")
-        var job = SessionRecord(pid: 4, sessionId: "job2", cwd: "/tmp", status: "idle", kind: "bg"); job.jobId = "job2"
-        let ids = Board.build(sessions: [spare, job], transcripts: [:], glows: [:], teams: [], inbox: [], now: Date(), home: "/Users/x", isRepo: { _ in false }).map(\.sessionId)
+        var spare2 = SessionRecord(pid: 5, sessionId: "02da6c42-xxxx", cwd: "/tmp", status: "idle", kind: "bg"); spare2.jobId = "02da6c42"   // 帶 jobId 的預備程序
+        var job = SessionRecord(pid: 4, sessionId: "job2", cwd: "/tmp", name: "Dora", status: "idle", kind: "bg"); job.jobId = "job2"
+        let ids = Board.build(sessions: [spare, spare2, job], transcripts: [:], glows: [:], teams: [], inbox: [], now: Date(), home: "/Users/x", isRepo: { _ in false }).map(\.sessionId)
         #expect(ids == ["job2"])
     }
 }

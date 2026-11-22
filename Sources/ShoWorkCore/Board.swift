@@ -452,7 +452,8 @@ public enum Board {
             && !(s.parkedJobId.map { liveJobs.contains($0) } ?? false)
             // 11-22 Keng「為什麼會有空的背景 session」：Claude 背景常駐程式會先備好一個「預備程序」（daemon.log：bg spawned <id> (spare)），
             // 下次轉背景時秒接手。它也寫 sessions/<pid>.json（kind bg）但沒有 jobId、沒有對話紀錄 ⇒ 不是你開的工作，不上看板
-            && !(s.kind == "bg" && s.jobId == nil && transcripts[s.sessionId]?.lastActivity == nil && !owned.contains(s.sessionId)) {
+            // （11-22 實測 02da6c42：預備程序也可能帶 jobId ⇒ 改認「沒名字（或名字就是 id）＋沒對話紀錄」）
+            && !(s.kind == "bg" && (s.name == nil || s.name == String(s.sessionId.prefix(8))) && transcripts[s.sessionId]?.lastActivity == nil && !owned.contains(s.sessionId)) {
             if owned.contains(s.sessionId) { s.kind = "board" }
             let t = transcripts[s.sessionId] ?? TranscriptInfo()
             var base = column(status: s.status, glow: glows[s.pid], lastActivity: t.lastActivity, now: now)
