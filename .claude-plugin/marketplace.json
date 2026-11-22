@@ -1,0 +1,11 @@
+{
+  "name": "showork42",
+  "owner": { "name": "Okle42" },
+  "plugins": [
+    {
+      "name": "okle42",
+      "source": "./mods/okle42",
+      "description": "Okle42 black/white/gray/red rendering for Claude Code replies (fork of prismantis, MIT)"
+    }
+  ]
+}

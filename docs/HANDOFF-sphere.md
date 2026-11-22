@@ -107,10 +107,18 @@
 - 驗證：螢幕外桌面版 540×720、1000×700、淺色主題各截一張（假頻譜＋karaSay），絲帶與圓角都看得到；**Keng 還沒實機看**
 - 測試指令：`SHOWORK_WEB_DIR=$PWD/windows/ShoWork.Win/Board/Web SHOWORK_TEST_SPHERE_MINI=1 SHOWORK_TEST_DESK_SIZE='{1000,700}' SHOWORK_TEST_SPHERE_MINI_SHOT=<png> SHOWORK_TEST_SPHERE_DESK_JS='<假頻譜 setInterval＋karaSay>' perl -e 'alarm 24; exec @ARGV' .build/debug/ShoWorkAgent --board-window`（本機沒有 timeout 指令，用 perl alarm）
 
-## 下一件（未開工，Keng 11-22 21:20 指示）：把 prismantis 外掛內化成我們自己的樣式，之後停用 prismantis
-- Keng 選：放進 **ShoWork42 repo**
-- prismantis 0.46.0：~/.claude/plugins/cache/prismantis/prismantis/0.46.0，MIT（Nahum Litvin），約 8,100 行 TS／TSX，hooks.json → register.tsx；主題在 hooks/theme.ts、繪製在 render.tsx
-- 步驟：①複製到 ShoWork42 新資料夾（例如 mods/okle42-render/），保留 LICENSE 與出處註記、改外掛名 ②主題換黑白灰紅、回覆框透明（framed／無底色）、跟 Claude Code auto 主題深淺 ③用 plugin-authoring skill 了解 mod 安裝／本機 marketplace，裝上並在新 session 驗證畫得正常 ④確認可用後才在 settings.json 停用 prismantis@prismantis（先換上再拆，避免中間沒樣式）⑤推 main
+## prismantis 內化（11-22 晚，完成）
+- mod 在 `mods/okle42/`（fork 自 prismantis 0.46.0，MIT，LICENSE／THIRD_PARTY_NOTICES 保留，說明在 mods/okle42/README.md）；repo 根 `.claude-plugin/marketplace.json`（marketplace 名 showork42）
+- 改名：外掛 okle42、指令 `/okle42`、`$.okle42`、事件 `okle42.markdown`、設定 `pluginConfigs["okle42@showork42"]`
+- 配色：新增 `okle42` 色票（預設），全用 ANSI 色名（red／white／whiteBright／blackBright），靠 Ghostty Okle42-Dark／Light 的 palette 自動跟深淺；回覆／提問／程式碼預設 framed；issueHint 預設關
+- 本機：`claude plugin marketplace add`（目前指向這個 worktree 路徑，directory 來源＝直接從資料夾載入，改檔就生效）＋`install okle42@showork42`；**prismantis@prismantis 已停用**（沒刪）；備份 ~/.claude/settings.json.bak-20261122-okle42
+- 驗證：`claude plugin validate mods/okle42` 通過；新 session（claude -p --debug-file）確認 okle42 載入、/okle42 註冊、prismantis 不註冊。**畫面效果要 Keng 開新終端機 session 看**
+- 回退：`claude plugin enable prismantis@prismantis && claude plugin disable okle42@showork42`
+- 待辦：worktree 收掉前要把 marketplace 改指 ~/github-repos/ShoWork42（`claude plugin marketplace remove showork42` 再 add 主 repo 路徑）
+
+## 下一件（Keng 11-22 21:3x）：聲波改成粒子
+- Keng：「這個聲音曲線我沒有那麼愛，看能不能換成這樣的型，但是用粒子表示不要用線條」——他說的「這樣的型」是一張圖，**沒傳到**，等他重貼
+- 現在的絲帶在 sphere.html `ribbons`（RIB_*）；改粒子可用 THREE.Points（一個 draw call）沿同樣的形狀取點
 
 ## 字幕跟語音（11-22）
 - 開語音時 `say(..., follow=true)`：不先打字，等原生報「唸到哪」才出字（Mac：逐詞 marker＋合成完算出總長後的播放進度；微軟：播放進度）；`karaVoice('start')` 後 1.2 秒沒同步才退回照速度打字
