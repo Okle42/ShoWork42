@@ -10,7 +10,7 @@
        ① 狀態：中英雙標籤＋解碼動畫、思考掃描彗星、警示衝擊波 ② 事件卡從球拉線彈出（講到誰就彈誰）
        ③ 額度儀表：數字滾動、分段刻度、重置倒數、照目前速度預估幾點用完 ④ 戰情卡：狀態色點、進度細條、記憶量、狀態一變就閃
        ⑤ 字幕跟「唸到哪」逐詞同步（Mac 系統語音用 marker、微軟語音照播放進度）＋字幕下的聲波 ⑥ 警示橫幅（需要你／卡住／額度／過熱）
-       聲波：原生端 window.karaLevels({b:[32 段頻譜], r:音量, p:已播秒, d:總秒, mic})，球外三條聲波絲帶（低／中／高頻各一條，細線殘影）跟著真的聲音飄；
+       聲波：原生端 window.karaLevels({b:[32 段頻譜], r:音量, p:已播秒, d:總秒, mic})，球外三條聲波星塵帶（粒子，低／中／高頻各一條，殘影拖尾＋火花）跟著真的聲音流動；
        沒收到（Windows SAPI、測試）就用假的波形頂著。
      球體桌面版（11-22 Keng 選定最終型態，T1122091602）：?desk=1＝SphereMini.swift 的浮動面板，功能跟分頁完全一樣（舊的 ?mini=1 精簡小球拿掉了）。
        上方 34px 是標題列（原生端拖移；按鈕位置用 deskChrome 回報）、右下角拖曳縮放、工具列多「尺寸／戰情中心／收起」。
@@ -789,26 +789,44 @@ function gaugeTip(g) {
   return _tip.set(Math.cos(a) * rr * g.flip, Math.sin(a) * rr, 0).applyMatrix4(outer.matrixWorld);
 }
 
-// 8. 聲波絲帶（11-22 Keng 對照 KARA 錄影：它的聲波是一束束髮絲細線繞球飄、有殘影，比放射條好看很多）
-//    做得比它好的地方：①真的頻譜驅動（KARA 是假動畫）——三條絲帶各吃一段頻率：低／中／高
-//    ②每條絲帶 RIB_S 根細線＝同一條波形的「過去幾格」⇒ 自然的殘影拖尾，越舊越淡、越往外
-//    ③細線之間沿著角度扭轉（像綢帶翻面），被聲音推出去的地方變亮變白（漸層），沒聲音時只剩淡淡呼吸
-//    ④整束一個 draw call（頂點色帶透明度），三條共 3 個
-const NB = 32, RIB_N = 3, RIB_S = 12, RIB_P = 160, RIB_H = RIB_S * 2, RIB_R = 1.74;
+// 8. 聲波星塵（11-22 晚 Keng：線條版不夠愛 ⇒ 改用粒子、形狀交給我設計）
+//    三條繞球的星塵帶（軌道面跟原本絲帶一樣：一條近正面、兩條斜的），每條 RIB_PN 顆粒子：
+//    ①形狀＝真頻譜推出去的波形，三條各吃低／中／高頻；粒子在帶上依高斯分布有寬度，綢帶翻面處變窄變亮
+//    ②粒子沿軌道一直流動（各條方向、速度不同），沒聲音時剩稀疏慢流的星塵＋呼吸
+//    ③每顆粒子固定「落後幾格」：新的貼著波形、舊的在外側淡掉 ⇒ 殘影變成拖尾的塵
+//    ④被聲音推出去的地方，約 18% 粒子變火花往外噴、邊飛邊淡；亮處深色主題往白、淺色往黑
+//    ⑤一條一個 draw call（Points＋頂點色帶透明度＋圓形柔邊貼圖），三條共 3 個
+const NB = 32, RIB_N = 3, RIB_S = 12, RIB_P = 160, RIB_H = RIB_S * 2, RIB_R = 1.74, RIB_PN = 1800;   // 2400 顆時每格 JS 5.4ms，省電降到 1800
 const lv = { bands: new Float32Array(NB), sm: new Float32Array(NB), rms: 0, at: -1e9, mic: false };
 const ribGroup = new THREE.Group(); root.add(ribGroup);
+const dotTex = (() => {
+  const c = document.createElement("canvas"); c.width = c.height = 32; const x = c.getContext("2d");
+  const g = x.createRadialGradient(16, 16, 0, 16, 16, 16);
+  g.addColorStop(0, "rgba(255,255,255,1)"); g.addColorStop(0.35, "rgba(255,255,255,0.85)"); g.addColorStop(1, "rgba(255,255,255,0)");
+  x.fillStyle = g; x.fillRect(0, 0, 32, 32); return new THREE.CanvasTexture(c);
+})();
 const ribbons = [];
 for (let r = 0; r < RIB_N; r++) {
   const g = new THREE.BufferGeometry();
-  g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(RIB_S * RIB_P * 2 * 3), 3));
-  g.setAttribute("color", new THREE.BufferAttribute(new Float32Array(RIB_S * RIB_P * 2 * 4), 4));
-  const m = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 1, blending: BLEND, depthWrite: false });
-  const line = new THREE.LineSegments(g, m); line.frustumCulled = false;
-  const pv = new THREE.Group(); pv.add(line); ribGroup.add(pv);
-  // 三條軌道面：一條接近正面、兩條斜的，像 KARA 繞球的綢帶
+  g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(RIB_PN * 3), 3));
+  g.setAttribute("color", new THREE.BufferAttribute(new Float32Array(RIB_PN * 4), 4));
+  const m = new THREE.PointsMaterial({ size: 0.075, map: dotTex, vertexColors: true, transparent: true, opacity: 1, blending: BLEND, depthWrite: false, sizeAttenuation: true });
+  const pts = new THREE.Points(g, m); pts.frustumCulled = false;
+  const pv = new THREE.Group(); pv.add(pts); ribGroup.add(pv);
   pv.rotation.set([0.25, 1.15, -0.95][r], [0, 0.6, -0.5][r], [0, 0.4, 1.9][r]);
-  ribbons.push({ line, pv, hist: Array.from({ length: RIB_H }, () => new Float32Array(RIB_P)), head: 0,
-    lo: [0, 6, 14][r], hi: [10, 20, 31][r], ph: r * 2.1, w: [0.07, -0.05, 0.04][r] });
+  // 每顆粒子的固定屬性：起始角、帶上位置（近似高斯）、落後格數（偏向新的）、流速、是不是火花、火花相位
+  const th0 = new Float32Array(RIB_PN), lane = new Float32Array(RIB_PN), lag = new Uint8Array(RIB_PN),
+        spd = new Float32Array(RIB_PN), spark = new Uint8Array(RIB_PN), sph = new Float32Array(RIB_PN);
+  const dir = [1, -1, 1][r];
+  for (let i = 0; i < RIB_PN; i++) {
+    th0[i] = Math.random() * Math.PI * 2;
+    lane[i] = (Math.random() + Math.random() + Math.random() - 1.5) / 1.5;
+    lag[i] = Math.min(RIB_S - 1, Math.floor(Math.pow(Math.random(), 1.8) * RIB_S));
+    spd[i] = dir * (0.12 + Math.random() * 0.3);
+    spark[i] = Math.random() < 0.18 ? 1 : 0; sph[i] = Math.random();
+  }
+  ribbons.push({ pts, pv, hist: Array.from({ length: RIB_H }, () => new Float32Array(RIB_P)), head: 0,
+    th0, lane, lag, spd, spark, sph, lo: [0, 6, 14][r], hi: [10, 20, 31][r], ph: r * 2.1, w: [0.07, -0.05, 0.04][r] });
 }
 const ribHi = new THREE.Color(), ribBase = new THREE.Color();
 // 9. v5 ① 思考／搜尋：沿內環跑的掃描彗星；警示：往外擴散的衝擊波
@@ -979,28 +997,26 @@ function animWave(dt, t, talking, hearing, live) {
       const f = rb.lo + k * span, f0 = Math.floor(f), b = lv.sm[f0] + (lv.sm[Math.min(NB - 1, f0 + 1)] - lv.sm[f0]) * (f - f0);
       H[i] = 0.018 * Math.sin(th * 3 + t * 0.9 + rb.ph) + b * 0.95 * (0.55 + 0.45 * Math.sin(th * 2 - t * 1.7 + rb.ph));
     }
-    const pos = rb.line.geometry.attributes.position.array, col = rb.line.geometry.attributes.color.array;
-    let o = 0, oc = 0;
-    for (let s = 0; s < RIB_S; s++) {
-      const Hs = rb.hist[(rb.head - s * 2 + RIB_H * 4) % RIB_H];
-      const age = s / RIB_S, aS = Math.pow(1 - age, 1.4) * (0.1 + 0.9 * ribLevel) * (s ? 0.75 : 1);
-      const zOff = (s - RIB_S / 2) * 0.03;
-      let px = 0, py = 0, pz = 0, pa = 0, pr = 0, pg = 0, pb = 0;
-      for (let i = 0; i <= RIB_P; i++) {
-        const ii = i % RIB_P, th = ii / RIB_P * Math.PI * 2, d = Hs[ii];
-        const tw = Math.sin(th * 2 + t * 0.8 + rb.ph);                 // 綢帶翻面：細線之間的間距沿角度變寬變窄
-        const rr = RIB_R + d * (1 - age * 0.35) + s * 0.016 * (0.3 + Math.abs(tw));
-        const x = Math.cos(th) * rr, y = Math.sin(th) * rr, z = zOff * (0.4 + 1.2 * Math.abs(tw)) * (1 + d * 3);
-        const hot = Math.min(1, Math.max(0, d) * 2.4), a = aS * (0.28 + 0.72 * hot);
-        const cr = ribBase.r + (ribHi.r - ribBase.r) * hot, cg = ribBase.g + (ribHi.g - ribBase.g) * hot, cb = ribBase.b + (ribHi.b - ribBase.b) * hot;
-        if (i) {
-          pos[o++] = px; pos[o++] = py; pos[o++] = pz; pos[o++] = x; pos[o++] = y; pos[o++] = z;
-          col[oc++] = pr; col[oc++] = pg; col[oc++] = pb; col[oc++] = pa; col[oc++] = cr; col[oc++] = cg; col[oc++] = cb; col[oc++] = a;
-        }
-        px = x; py = y; pz = z; pa = a; pr = cr; pg = cg; pb = cb;
+    const pos = rb.pts.geometry.attributes.position.array, col = rb.pts.geometry.attributes.color.array, TAU = Math.PI * 2;
+    const flow = 0.35 + ribLevel * 1.4;                                  // 講話時流得快
+    for (let n = 0, o = 0, oc = 0; n < RIB_PN; n++) {
+      const th = ((rb.th0[n] + t * rb.spd[n] * flow) % TAU + TAU) % TAU;
+      const fi = th / TAU * RIB_P, i0 = Math.floor(fi) % RIB_P, i1 = (i0 + 1) % RIB_P, fr = fi - Math.floor(fi);
+      const s = rb.lag[n], Hs = rb.hist[(rb.head - s * 2 + RIB_H * 4) % RIB_H], d = Hs[i0] + (Hs[i1] - Hs[i0]) * fr;
+      const age = s / RIB_S, u = rb.lane[n];
+      const tw = Math.sin(th * 2 + t * 0.8 + rb.ph), wid = 0.35 + Math.abs(tw);
+      const hot = Math.min(1, Math.max(0, d) * 2.4);
+      let rr = RIB_R + d * (1 - age * 0.35) + age * 0.05 + u * 0.045 * wid, a = Math.pow(1 - age, 1.2) * (0.22 + 0.78 * ribLevel) * (0.45 + 0.55 * hot);
+      if (rb.spark[n]) {                                                   // 火花：有聲音才噴，沿半徑往外飛、越飛越淡
+        const k = (rb.sph[n] + t * 0.9) % 1;
+        rr += hot * k * 0.42; a *= hot * (1 - k);
       }
+      const z = u * 0.085 * wid * (1 + d * 3);
+      pos[o++] = Math.cos(th) * rr; pos[o++] = Math.sin(th) * rr; pos[o++] = z;
+      col[oc++] = ribBase.r + (ribHi.r - ribBase.r) * hot; col[oc++] = ribBase.g + (ribHi.g - ribBase.g) * hot;
+      col[oc++] = ribBase.b + (ribHi.b - ribBase.b) * hot; col[oc++] = a * (1 - Math.abs(u) * 0.45);
     }
-    rb.line.geometry.attributes.position.needsUpdate = true; rb.line.geometry.attributes.color.needsUpdate = true;
+    rb.pts.geometry.attributes.position.needsUpdate = true; rb.pts.geometry.attributes.color.needsUpdate = true;
   }
   drawCapWave(active ? (live ? lv.rms : speakAmp * 0.6) : 0, hearing);
 }

@@ -116,9 +116,11 @@
 - 回退：`claude plugin enable prismantis@prismantis && claude plugin disable okle42@showork42`
 - 待辦：worktree 收掉前要把 marketplace 改指 ~/github-repos/ShoWork42（`claude plugin marketplace remove showork42` 再 add 主 repo 路徑）
 
-## 下一件（Keng 11-22 21:3x）：聲波改成粒子
-- Keng：「這個聲音曲線我沒有那麼愛，看能不能換成這樣的型，但是用粒子表示不要用線條」——他說的「這樣的型」是一張圖，**沒傳到**，等他重貼
-- 現在的絲帶在 sphere.html `ribbons`（RIB_*）；改粒子可用 THREE.Points（一個 draw call）沿同樣的形狀取點
+## 聲波改粒子（11-22 晚，完成；Keng 從戰情中心選「你自己設計粒子版」）
+- 絲帶線條 → 星塵帶：三條 `THREE.Points`（`RIB_PN=1800` 顆／條，圓形柔邊貼圖 `dotTex`，頂點色帶透明度），軌道面同原本
+- 粒子固定屬性：起始角、帶上位置（近似高斯）、落後格數（偏新）、流速（三條方向不同、講話時流快）、18% 是火花（有聲音才往外噴、邊飛邊淡）
+- 截圖：深色、淺色都看得到；效能 2400 顆時每格 JS 5.4ms（30 張），降到 1800；Keng 還沒實機看
+- 上面「KARA 對照改版」講的線條絲帶已被這版取代
 
 ## 字幕跟語音（11-22）
 - 開語音時 `say(..., follow=true)`：不先打字，等原生報「唸到哪」才出字（Mac：逐詞 marker＋合成完算出總長後的播放進度；微軟：播放進度）；`karaVoice('start')` 後 1.2 秒沒同步才退回照速度打字
