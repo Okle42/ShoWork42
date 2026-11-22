@@ -476,10 +476,12 @@ def send(shared, text):
         safe = re.sub(r"[^\w.\-]", "_", f"{shared['label']}-{shared['at'].replace(' ', '_').replace(':', '')}-{fn}")
         part(f'Content-Disposition: form-data; name="files[{i}]"; filename="{safe}"\r\nContent-Type: application/octet-stream', data)
     body.extend(f"--{b}--\r\n".encode())
+    url += ("&" if "?" in url else "?") + "wait=true"      # 等 Discord 回傳訊息，確認附件真的有上去
     req = urllib.request.Request(url, data=bytes(body), method="POST", headers={"Content-Type": f"multipart/form-data; boundary={b}", "User-Agent": "ShoWork42-flow-audit/1"})
     try:
         with urllib.request.urlopen(req, timeout=30) as res:
-            print(f"已送出到回報頻道（HTTP {res.status}）")
+            msg = json.loads(res.read() or b"{}")
+            print(f"已送出到回報頻道（HTTP {res.status}，附件：{'、'.join(x.get('filename', '') for x in msg.get('attachments', [])) or '無'}）")
     except Exception as e:
         sys.exit(f"送出失敗：{e}")
 
