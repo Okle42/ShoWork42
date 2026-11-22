@@ -82,6 +82,13 @@
 - Claude 背景常駐程式的預備程序（daemon.log `bg spawned <id> (spare)`：bg、沒名字、沒對話）不上看板
 - `BgJanitor`：背景、從沒接過工作、閒置 10 分鐘 ⇒ `claude stop`（kill 會被重開）；做過事、/clear 過、比監看早出生、有自報卡都不動；記錄 `board/guard/bg-janitor.log`
 
+## 流量架構自檢（11-22 晚，scripts/flow_audit.py，說明 docs/FLOW-AUDIT.md）
+- Claude 額度＋網路自檢，去隱私（S1…、專案代號、程式類別）後 `--send` 送到 Okle42 Discord #自檢回報（私人頻道，id 1574003208366460988，在「文字頻道」類別）
+- webhook 只存本機 `~/.claude/flow-audit/config.json`（600），不可進 repo；Okle42 Secretary 已加「管理 Webhooks」權限（Keng 授權、screen42 操作）
+- 本機已實送兩次成功（附件 report.json／report.txt）
+- **未完成／下一步**：①把 webhook 網址交給學弟（機爵）——Keng 還沒決定用機器人私訊或自己傳；②學弟跑 `--set-webhook` → `--label 學弟 --send`，拿兩份 JSON 用 `--compare` 對照；③若要自動彙整多台報告：機器人需開 Message Content intent 才讀得到附件
+- 機器人讀不到別人訊息內容（沒開 Message Content intent），驗證送出要用 `--send` 的回傳（wait=true 會列附件）
+
 ## 字幕跟語音（11-22）
 - 開語音時 `say(..., follow=true)`：不先打字，等原生報「唸到哪」才出字（Mac：逐詞 marker＋合成完算出總長後的播放進度；微軟：播放進度）；`karaVoice('start')` 後 1.2 秒沒同步才退回照速度打字
 
