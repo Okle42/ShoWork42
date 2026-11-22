@@ -157,7 +157,6 @@
   body.desk #tools .pill { white-space: nowrap; }
   body.desk #askCard { background: var(--panel-solid); }
   body.desk #cardTeam { max-height: calc(58% - 24px); overflow: auto; }
-  body.desk #caption { top: 44px; }
   body.desk .pop { top: 156px; }
   body.desk #deskGrip { display: block; position: fixed; right: 0; bottom: 0; width: 18px; height: 18px; cursor: nwse-resize; z-index: 21; color: var(--ink-faint); }
   body.desk #deskGrip:hover { color: var(--acc); }
@@ -273,25 +272,32 @@
      球往上移、卡片排到下面左右兩張，太高就捲動；外環卡併進額度卡（#sysRows2）。11-22 Keng 截圖：分頁視窗偏直時卡片蓋住球、拉線亂繞 */
   /* 11-22 Keng：每個面板都能拖、能拉右下角調大小（位置大小記在 localStorage sphere.layout.tab／desk） */
   .drag { cursor: grab; resize: both; overflow: auto; min-height: 48px; }
+  .drag.snap { transition: left .28s ease, top .28s ease, width .28s ease, height .28s ease, opacity .35s, transform .35s; }
   .drag.dragging { cursor: grabbing; user-select: none; -webkit-user-select: none; }
   .card.drag.on { pointer-events: auto; }
   .drag .row, .drag .q, .drag .text { cursor: auto; }
   .drag .row.link { cursor: pointer; }
   .drag::-webkit-resizer { background: transparent; }
   #sysWrap { display: none; }
+  /* 11-22 Keng：上方「球體 · 思考中」字幕框拿掉（底下本來就有狀態字）⇒ 現況／字幕移到狀態字下面，不要框：
+     平常＝「1 個進行中，4 個待審」，講話時＝逐詞字幕＋聲波 */
+  #caption { top: auto; bottom: 38px; width: min(680px, calc(100% - 32px)); background: none; border: 0; padding: 0; text-align: center; }
+  #caption .who, #caption .bar { display: none; }
+  #caption .text { margin-top: 0; font-size: 14px; line-height: 1.45; min-height: 1.45em; }
+  #wave { height: 16px; margin-top: 3px; }
+  #state { bottom: 98px; }
+  #hint { bottom: 12px; }
+  #askCard { bottom: 168px; }
   body.stack #sysWrap:not(:empty) { display: block; }
   body.stack #cardSys { display: none; }
-  body.stack #cardUsage, body.stack #cardTeam { top: auto; bottom: 96px; padding: 8px 10px; min-width: 0; max-height: 32%; overflow: auto;
+  body.stack #cardUsage, body.stack #cardTeam { top: auto; bottom: 168px; padding: 8px 10px; min-width: 0; max-height: 32%; overflow: auto;
     width: min(380px, calc(50% - 20px)); }
   body.stack #cardUsage { left: 12px; } body.stack #cardTeam { right: 12px; }
   body.stack .card .head b { font-size: 20px; }
   body.stack #cardUsage .donut { width: 30px; height: 30px; }
-  body.stack #caption { width: min(560px, calc(100% - 24px)); }
   body.stack .pop { width: min(290px, calc(100% - 24px)); }
   body.stack .pop.r { right: 12px; } body.stack .pop.l { left: 12px; }
-  body.stack #state { bottom: 58px; }
-  body.stack #hint { bottom: 34px; }
-  body.stack #askCard { bottom: 96px; width: min(580px, calc(100% - 24px)); z-index: 7; }
+  body.stack #askCard { bottom: 168px; width: min(580px, calc(100% - 24px)); z-index: 7; }
   /* 有人在等你：選項面板佔卡片的位置（卡片先收起來，答完就回來；session 狀態看衛星） */
   body.stack.asking #cardUsage, body.stack.asking #cardTeam { opacity: 0; pointer-events: none; }
   @media (max-width: 640px) {
@@ -356,13 +362,13 @@
   <button class="pill sm deskOnly" id="bSize" title="換尺寸：小 → 中 → 大（拖右下角也可以）">尺寸</button>
   <button class="pill sm deskOnly" id="bBoard" title="打開戰情中心">戰情<span class="wide">中心</span></button>
   <select class="pill sm" id="voiceSel" title="播報的聲音（選了會試聽一句）" aria-label="播報的聲音" hidden></select>
-  <button class="pill sm" id="bReset" title="面板位置、大小、球的縮放都回到預設">重排</button>
+  <button class="pill sm" id="bAuto">自動<span class="wide">排版</span></button>
   <button class="pill sm" id="bTheme" title="配色：自動（跟系統）→ 深色 → 淺色" aria-label="配色">◐</button>
   <button class="pill sm" id="voice" aria-label="語音開關"></button>
   <button class="pill sm deskOnly" id="bClose" title="收起桌面版（選單列「桌面球體」可再打開）" aria-label="收起">✕</button>
 </div>
 <div id="state"><span class="zh" id="stZh">待命</span><span class="en" id="stEn">STANDBY</span></div>
-<div id="hint">點球聽現況 · 按住球（或空白鍵）講話 · 滾輪縮放球 · 拖面板移動、拉右下角調大小</div>
+<div id="hint">點球聽現況 · 按住球（或空白鍵）講話 · 滾輪縮放球 · 拖卡片到左／右欄自動排好</div>
 <div id="controls">
   <button data-s="idle">待命</button>
   <button data-s="listening">聆聽</button>
@@ -618,10 +624,13 @@ function resize() {
   // 疊排判斷：球（半徑 2 的那圈）的直徑 ≈ 5.49·h／z 像素；左右兩張卡片＋邊距吃掉之後剩的寬度放不下球 ⇒ 卡片改排到下面
   const side = DESK && w <= 1100 ? 2 * (16 + 270) : 2 * (24 + 310);
   // 11-22 Keng 不喜歡分頁自動疊排（面板改成自己拖）⇒ 只有桌面版小／中（≤640 寬）預設疊排
-  const stack = DESK && w - side < 5.49 * h / camera.position.z * 1.05;
+  // 自動排版開著：由 autoLayout() 決定要不要疊排、球多大；手動時桌面版小／中照舊預設疊排（拖過就記在 layout.stack）
+  if (autoOn) autoLayout();
+  const stack = autoOn ? autoStack : layout && layout.stack != null ? layout.stack : DESK && w - side < 5.49 * h / camera.position.z * 1.05;
   document.body.classList.toggle("stack", stack);
   // 疊排：球拉遠一點、往上移到 40% 高（外環半徑約四分之一高），不被下面的卡片蓋住
   if (stack) { camera.position.z = 20; camera.setViewOffset(w, h, 0, h * 0.1, w, h); }
+  else if (autoOn && autoLift) camera.setViewOffset(w, h, 0, autoLift, w, h);
   else camera.clearViewOffset();
   camZ = camera.position.z;
   camera.position.z = camZ / zoomCur;            // 滾輪縮放（zoomCur 在 frame 裡漸近 zoom）
@@ -630,7 +639,11 @@ function resize() {
 addEventListener("resize", resize); resize();
 canvas.addEventListener("wheel", e => {
   e.preventDefault();
-  zoom = Math.min(2, Math.max(0.45, zoom * Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0015))));      // ctrlKey＝觸控板捏合
+  const f = Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0015));         // ctrlKey＝觸控板捏合
+  if (autoOn) {                       // 自動排版：記下「你要大一點／小一點」的倍數，兩欄跟著球重排
+    layout.zmul = Math.min(2.2, Math.max(0.5, (layout.zmul || 1) * f)); saveLayout(); autoSoon(); return;
+  }
+  zoom = Math.min(2, Math.max(0.45, zoom * f));
   try { localStorage.setItem(ZKEY, String(zoom)); } catch {}
 }, { passive: false });
 
@@ -1024,7 +1037,7 @@ function drawLinks() {
   const u = $("cardUsage").getBoundingClientRect();
   // 額度卡被拖走了就不再跟著它（回 CSS 預設位置），自己被拖過就照自己的
   const moved = id => !!(layout && layout[id] && layout[id].ah);
-  if (!moved("cardSys")) $("cardSys").style.top = !document.body.classList.contains("stack") && u.height && !moved("cardUsage") ? Math.round(u.bottom + 12) + "px" : "";
+  if (!autoOn && !moved("cardSys")) $("cardSys").style.top = !document.body.classList.contains("stack") && u.height && !moved("cardUsage") ? Math.round(u.bottom + 12) + "px" : "";
   $("lkStatic").innerHTML = ["cardUsage", "cardTeam", "cardSys"].map(id => linkPath($(id))).join("");
 }
 addEventListener("resize", () => { drawLinks(); if (popEl.classList.contains("on")) drawPopLink(); });
@@ -1517,7 +1530,7 @@ $("demo").onclick = demo;
 addEventListener("keydown", e => { if (e.code === "Space" && !embedded) { e.preventDefault(); demo(); } });
 
 /* ---------- 11-22 面板拖移／調大小（Keng：每個視窗都要能拖、能調）---------- */
-const PANELS = ["caption", "cardUsage", "cardTeam", "cardSys", "askCard"];
+const PANELS = ["cardUsage", "cardTeam", "cardSys", "askCard"];        // 字幕固定在底部狀態字下面，不拖
 const LKEY = "sphere.layout." + (DESK ? "desk" : "tab");
 var layout = {};
 try { layout = JSON.parse(localStorage.getItem(LKEY) || "{}") || {}; } catch {}
@@ -1552,13 +1565,101 @@ function remember(id) {
   layout[id] = { ...layout[id], ah: anchorOf(r.left, r.width, innerWidth), av: anchorOf(r.top, r.height, innerHeight) };
   delete layout[id].x; delete layout[id].y;
 }
+/* ---------- 11-22 自動排版（Keng）：依視窗大小算球多大、面板擺哪，彼此不重疊 ----------
+   寬的視窗：球在中間，左欄＝額度＋外環、右欄＝戰情；欄寬不夠就把球縮小（最小 0.62 倍）
+   窄／直的視窗：球往上移到 40% 高、卡片排在下面左右兩張（外環併進額度卡）
+   開著時視窗一變、卡片內容一變就重排；拖面板、拉大小、滾輪縮放＝轉成手動（照當下位置記住） */
+var autoOn = layout.auto ?? !PANELS.some(id => layout[id]), autoStack = false;
+const TAN20 = Math.tan(20 * Math.PI / 180), CLEAR = 2.45;     // 卡片離球心至少 2.45 單位（內圈環）
+function natH(el, w) { el.style.width = w + "px"; el.style.height = ""; el.style.maxHeight = "none"; return el.scrollHeight + 2; }
+function put(el, x, y, w, h) {
+  Object.assign(el.style, { left: Math.round(x) + "px", top: Math.round(y) + "px", width: Math.round(w) + "px",
+    height: h ? Math.round(h) + "px" : "", maxHeight: "none", right: "auto", bottom: "auto", transform: "none" });
+}
+let autoBusy = false;
+// 欄位：哪張卡在左欄、哪張在右欄、上下順序（自動排版時拖卡片＝改這個，放開就吸附整理）
+const DEF_COLS = { l: ["cardUsage", "cardSys"], r: ["cardTeam"] };
+let autoLift = 0;
+function autoLayout() {
+  if (autoBusy) return; autoBusy = true;
+  try {
+    const W = innerWidth, H = innerHeight;
+    for (const k of ["left", "top", "right", "bottom", "width", "height", "maxHeight", "transform"]) $("askCard").style[k] = "";
+    const capB = topMin() + 48, floor = H - 150, room = floor - capB;       // 工具列下面 ～ 底部狀態字＋現況那一行的上面
+    const vis = id => id === "cardSys" ? $("cardSys").classList.contains("on") && $("sysRows").innerHTML !== ""
+      : id === "cardTeam" ? $("cardTeam").classList.contains("on") : true;
+    const cols = layout.cols || DEF_COLS, zmul = layout.zmul || 1;
+    const zSide = W < H ? 15 : 10.5, upS = (H / 2) / (zSide * TAN20);              // 1 倍時每單位幾像素
+    const want = Math.min(310, Math.max(250, W * 0.24));
+    // 球的大小：兩欄放得下（寬）、上下塞得進字幕和狀態字之間（高）取小的，再乘上你滾輪調的倍數
+    const z = Math.max(0.45, Math.min(2, Math.min(1.15, (W / 2 - want - 2 * M - 12) / (CLEAR * upS), (room / 2) / (2.7 * upS)) * zmul));
+    const cw = Math.min(330, W / 2 - CLEAR * upS * z - 2 * M - 12);
+    autoStack = cw < 220;
+    document.body.classList.toggle("stack", autoStack);          // 先切版型再量高度（疊排時外環會併進額度卡）
+    if (!autoStack) {
+      zoom = z;
+      // 球心放在可用空間的正中間（11-22 Keng：左右兩欄的總高度要以球心那條水平線上下置中）
+      const cy = (capB + floor) / 2; autoLift = H / 2 - cy;
+      for (const [side, ids0] of [["l", cols.l], ["r", cols.r]]) {
+        const ids = ids0.filter(vis); if (!ids.length) continue;
+        let hs = ids.map(id => natH($(id), cw));
+        const gaps = 12 * (ids.length - 1), sum = hs.reduce((a, b) => a + b, 0);
+        if (sum + gaps > room) { const k = (room - gaps) / sum; hs = hs.map(h => Math.max(80, h * k)); }
+        const tot = hs.reduce((a, b) => a + b, 0) + gaps;
+        let y = Math.max(capB, Math.min(floor - tot, cy - tot / 2));
+        const x = side === "l" ? M + 4 : W - M - 4 - cw;
+        ids.forEach((id, n) => { const el = $(id); put(el, x, y, cw, hs[n] < el.scrollHeight - 2 ? hs[n] : 0); y += hs[n] + 12; });
+      }
+      // 選項面板放在兩欄中間，不蓋到卡片
+      const ax = M + 4 + cw + 12, aw = W - 2 * ax, ask = $("askCard");
+      if (aw >= 340) Object.assign(ask.style, { left: ax + "px", width: aw + "px", transform: "none" });
+    } else {
+      autoLift = 0;
+      const upB = (H / 2) / (20 * TAN20), cy = H * 0.4, cardsTop = Math.max(H * 0.56, capB + 120);
+      zoom = Math.max(0.45, Math.min(2, Math.min(1.3, Math.min(cardsTop - cy - 6, W / 2 - M) / (CLEAR * upB)) * zmul));
+      const w2 = Math.min(380, (W - 3 * M - 8) / 2), ch = Math.max(120, floor - cardsTop);
+      const ids = [...cols.l, ...cols.r].filter(id => id !== "cardSys" && vis(id));       // 疊排時外環併進額度卡
+      ids.slice(0, 2).forEach((id, n) => put($(id), n ? W - M - 4 - w2 : M + 4, cardsTop, w2, Math.min(ch, natH($(id), w2))));
+    }
+  } finally { autoBusy = false; }
+}
+/** 自動排版時拖卡片放開：看放在左半還右半、在誰上面，改欄位後整理（吸附） */
+function dropInto(id, el) {
+  const r = el.getBoundingClientRect(), side = r.left + r.width / 2 < innerWidth / 2 ? "l" : "r";
+  const cols = { l: [...(layout.cols || DEF_COLS).l], r: [...(layout.cols || DEF_COLS).r] };
+  cols.l = cols.l.filter(x => x !== id); cols.r = cols.r.filter(x => x !== id);
+  const cy = r.top + r.height / 2, list = cols[side];
+  let at = list.findIndex(x => { const b = $(x).getBoundingClientRect(); return cy < b.top + b.height / 2; });
+  if (at < 0) at = list.length;
+  list.splice(at, 0, id);
+  layout.cols = cols; saveLayout();
+  for (const p of PANELS) $(p).classList.add("snap");
+  setTimeout(() => PANELS.forEach(p => $(p).classList.remove("snap")), 350);
+  resize(); drawLinks();
+}
+let autoTick = 0;
+const autoSoon = () => { if (!autoOn || autoTick) return; autoTick = requestAnimationFrame(() => { autoTick = 0; resize(); drawLinks(); }); };
+/** 轉手動：每個面板照現在的位置、大小記下來 */
+function freezeAuto() {
+  if (!autoOn) return;
+  autoOn = false;
+  for (const id of PANELS) {
+    const el = $(id); if (!el.style.left) continue;
+    remember(id); if (el.style.width) layout[id].w = Math.round(el.offsetWidth);
+    if (el.style.height) layout[id].h = Math.round(el.offsetHeight);
+  }
+  layout.auto = false; layout.stack = autoStack; saveLayout();
+  try { localStorage.setItem(ZKEY, String(zoom)); } catch {}
+  renderAuto();
+}
+function renderAuto() { $("bAuto").classList.toggle("on", autoOn); $("bAuto").title = autoOn ? "自動排版：開（拖卡片到左／右欄會自動吸附整理；拉右下角調大小＝改手動；點一下關掉）" : "自動排版：關（點一下讓面板和球自動排好）"; }
 let resizing = false;
 for (const id of PANELS) {
-  const el = $(id); el.classList.add("drag"); place(id);
+  const el = $(id); el.classList.add("drag"); if (!autoOn) place(id);
   el.addEventListener("pointerdown", e => {
     if (e.button !== 0 || e.target.closest("button,input,select,textarea,a,.row.link,[data-act],[data-nav]")) return;
     const r = el.getBoundingClientRect();
-    if (e.clientX > r.right - 16 && e.clientY > r.bottom - 16) { resizing = true; return; }      // 右下角＝調大小（交給瀏覽器）
+    if (e.clientX > r.right - 16 && e.clientY > r.bottom - 16) { freezeAuto(); resizing = true; return; }      // 右下角＝調大小（交給瀏覽器）
     if (e.clientX - r.left > el.clientWidth + 1) return;                                              // 捲軸
     e.preventDefault(); e.stopPropagation();
     const dx = e.clientX - r.left, dy = e.clientY - r.top;
@@ -1573,13 +1674,17 @@ for (const id of PANELS) {
     const up = () => {
       el.removeEventListener("pointermove", move); el.removeEventListener("pointerup", up); el.removeEventListener("pointercancel", up);
       el.classList.remove("dragging");
+      if (autoOn) return dropInto(id, el);         // 自動排版：放開就吸附到那一欄、整理好
       remember(id); saveLayout(); drawLinks();
     };
     el.addEventListener("pointermove", move); el.addEventListener("pointerup", up); el.addEventListener("pointercancel", up);
   });
   // 拉右下角調大小：瀏覽器改的是 style.width／height ⇒ 放開時記下來
   // 內容變多／變少（卡片剛拿到資料、選項面板換題）：靠右／靠下的面板要重新擺，才不會被撐出畫面
-  new ResizeObserver(() => { if (layout[id]?.ah && !el.classList.contains("dragging") && !resizing) place(id); drawLinks(); }).observe(el);
+  new ResizeObserver(() => {
+    if (autoOn) { if (!autoBusy) autoSoon(); return; }
+    if (layout[id]?.ah && !el.classList.contains("dragging") && !resizing) place(id); drawLinks();
+  }).observe(el);
 }
 addEventListener("pointerup", () => {
   if (!resizing) return; resizing = false;
@@ -1590,12 +1695,18 @@ addEventListener("pointerup", () => {
   } }
   saveLayout();
 }, true);
-addEventListener("resize", () => { for (const id of PANELS) place(id); drawLinks(); });
-$("bReset").onclick = () => {
-  layout = {}; saveLayout(); zoom = 1; try { localStorage.setItem(ZKEY, "1"); } catch {}
+addEventListener("resize", () => { if (!autoOn) for (const id of PANELS) place(id); drawLinks(); });
+$("bAuto").onclick = () => {
+  if (autoOn) return freezeAuto();
+  layout = { auto: true, cols: layout.cols, zmul: 1 }; saveLayout(); autoOn = true;
   for (const id of PANELS) { const st = $(id).style; for (const k of ["left", "top", "right", "bottom", "width", "height", "maxHeight", "transform"]) st[k] = ""; }
-  drawLinks();
+  renderAuto(); resize(); drawLinks();
 };
+renderAuto();
+if (autoOn) { resize(); drawLinks(); }
+// 卡片第一次拿到資料、「需要你」出現／消失時重排一次（外環卡、選項面板的有無會改變版面）
+let autoSig = "";
+setInterval(() => { const sig = ["cardSys", "cardTeam", "askCard"].map(i => +$(i).classList.contains("on")).join() + $("sysRows").innerHTML.length; if (sig !== autoSig) { autoSig = sig; autoSoon(); } }, 500);
 
 /* ---------- 11-22 配色：自動（跟系統）／深色／淺色 ---------- */
 const THEME_LABEL = { auto: "配色：自動（跟系統）", dark: "配色：深色", light: "配色：淺色" };

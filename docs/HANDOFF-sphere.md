@@ -49,6 +49,11 @@
 - 滾輪（觸控板捏合）縮放球 0.45–2 倍，記在 `sphere.zoom.tab／desk`；工具列「重排」全部回預設
 - 測試程式的 WKWebView 資料在 `~/Library/WebKit/ShoWorkAgent`，正式 App 在 `ai.okle42.showork.agent`，互不影響
 
+## 自動排版（11-22，Keng）
+- 工具列「自動排版」開關（預設開；沒存過版面就是開）。`autoLayout()` 每次依視窗大小與卡片內容高度算：寬＝左右兩欄、以球心水平線上下置中，球心移到工具列與底部狀態字之間的正中（`autoLift`→setViewOffset）；窄＝球上卡片下（`autoStack`）
+- 開著時拖卡片＝改欄位（`layout.cols`，看放在左右半邊、在誰上面），放開吸附整理；滾輪＝`layout.zmul` 倍數；拉右下角調大小＝轉手動（`freezeAuto()` 照當下位置記成錨點）
+- 上方字幕框拿掉：現況／逐詞字幕＋聲波移到底部狀態字下面（`#caption` 固定在底部，不在 PANELS）
+
 ## 字幕跟語音（11-22）
 - 開語音時 `say(..., follow=true)`：不先打字，等原生報「唸到哪」才出字（Mac：逐詞 marker＋合成完算出總長後的播放進度；微軟：播放進度）；`karaVoice('start')` 後 1.2 秒沒同步才退回照速度打字
 
