@@ -29,6 +29,13 @@
 - 省電：桌面版一律 30 張／秒；解析度平常 2 倍、機器熱（paused）降 1 倍
 - 測試：`--board-window` 加 `SHOWORK_TEST_SPHERE_MINI=1`（開在螢幕外）、`SHOWORK_TEST_DESK_SIZE={540,720}`、`SHOWORK_TEST_SPHERE_MINI_SHOT=<png>`、`SHOWORK_TEST_SPHERE_DESK_JS`、`SHOWORK_TEST_DESK_PROBE=1`（自動按一遍＋空白鍵 3 秒數嗶聲）
 
+## 配色（11-22，Keng：黑白灰紅＋Okle42、42 用金色）
+- CSS 色票在 `:root[data-theme=dark|light]`：`--acc` 紅（要注意＋少量點綴）、`--ink` 黑白、`--gray`／`--done` 灰、`--gold` 只給品牌的「42」
+- 三維：`THEME3`（BALL／GRAY／ALERT／BAD／DONE）；淺色主題改 `NormalBlending`（相加混色在白底看不見），`applyTheme()` 換全部材質
+- 工具列 ◐／●／○：自動（跟系統）→ 深 → 淺，存 `localStorage sphere.theme`，分頁和桌面版透過 storage 事件同步
+- 品牌：分頁左上、桌面版標題列「OKLE42 · SHOWORK42」
+- 測試：`window.karaTheme('light')`
+
 ## 坑
 - **tap 在 mainMixer 輸出端**：`outputVolume` 會影響量到的頻譜（測試設 0 會量到全 0，不是壞掉）
 - 頻譜正規化 `(dB + 18) / 56`：用曉臻 mp3 校正，中位數約 0.3

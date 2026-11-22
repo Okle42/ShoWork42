@@ -19,26 +19,36 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>球體助理</title>
 <style>
-  :root {
-    --bg: #05050a;
-    --grid: rgba(255,255,255,.07);
-    --pink: #ff5c93;
-    --pink-dim: rgba(255,92,147,.35);
-    --ink: #f3eef2;
-    --ink-dim: rgba(243,238,242,.55);
-    --panel: rgba(18,16,24,.78);
-    --line: rgba(255,255,255,.14);
-    --cyan: #6fd6ff;
-    --warn: #ffb020;
-    --bad: #ff4d4d;
+  /* 11-22 Keng：配色改成黑、白、灰、紅；品牌 Okle42／ShoWork42 的「42」用金色。深色／淺色兩套（工具列 ◐ 切：自動→深→淺）
+     紅＝要你注意（需要你、卡住、額度、過熱）＋少量點綴；球本體是黑白灰 */
+  :root, :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #0b0b0c; --glow: rgba(255,255,255,.045);
+    --ink: #f2f2f2; --ink-dim: rgba(242,242,242,.56); --ink-faint: rgba(242,242,242,.3);
+    --panel: rgba(20,20,21,.82); --panel-solid: rgba(17,17,18,.96);
+    --line: rgba(255,255,255,.14); --soft: rgba(255,255,255,.05); --seg: rgba(255,255,255,.1);
+    --acc: #ff3b30; --gray: #9a9a9a; --done: #6a6a6a; --gold: #d4af37;
+    --warn: #ff3b30; --bad: #ff3b30;
+    --cross: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='56'%3E%3Cpath d='M28 24.5v7M24.5 28h7' stroke='%23fff' stroke-opacity='.26' stroke-width='1'/%3E%3C/svg%3E");
   }
+  :root[data-theme="light"] {
+    color-scheme: light;
+    --bg: #f3f3f1; --glow: rgba(0,0,0,.035);
+    --ink: #141414; --ink-dim: rgba(20,20,20,.58); --ink-faint: rgba(20,20,20,.32);
+    --panel: rgba(255,255,255,.84); --panel-solid: rgba(255,255,255,.97);
+    --line: rgba(0,0,0,.13); --soft: rgba(0,0,0,.045); --seg: rgba(0,0,0,.1);
+    --acc: #d7261b; --gray: #6e6e6e; --done: #a6a6a6; --gold: #a8801a;
+    --warn: #d7261b; --bad: #d7261b;
+    --cross: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='56'%3E%3Cpath d='M28 24.5v7M24.5 28h7' stroke='%23000' stroke-opacity='.22' stroke-width='1'/%3E%3C/svg%3E");
+  }
+  :root { --acc-dim: color-mix(in srgb, var(--acc) 38%, transparent); --acc-soft: color-mix(in srgb, var(--acc) 10%, transparent); }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; color: var(--ink); overflow: hidden;
-    background: radial-gradient(ellipse 75% 38% at 50% 104%, rgba(70,60,190,.20), transparent 70%), var(--bg);
+    background: radial-gradient(ellipse 75% 38% at 50% 104%, var(--glow), transparent 70%), var(--bg);
     font-family: "SF Pro Display", -apple-system, "PingFang TC", sans-serif; }
   body::before { content: ""; position: fixed; inset: 0; pointer-events: none;
     /* v5：KARA 那種「網格十字點」：只有交叉點一個小 +，不畫整條線 */
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='56'%3E%3Cpath d='M28 24.5v7M24.5 28h7' stroke='%23fff' stroke-opacity='.28' stroke-width='1'/%3E%3C/svg%3E");
+    background-image: var(--cross);
     background-size: 56px 56px; background-position: center;
     -webkit-mask-image: radial-gradient(ellipse at center, #000 40%, transparent 92%);
     mask-image: radial-gradient(ellipse at center, #000 40%, transparent 92%); }
@@ -49,11 +59,11 @@
     width: min(560px, calc(100% - 32px)); background: var(--panel); border: 1px solid var(--line);
     border-radius: 6px; padding: 10px 14px 12px; backdrop-filter: blur(8px); }
   #caption .who { font-size: 10px; letter-spacing: .18em; color: var(--ink-dim); display: flex; gap: 8px; align-items: center; }
-  #caption .who i { width: 6px; height: 6px; border-radius: 50%; background: var(--pink); display: inline-block; transition: background-color 1.2s ease; }
+  #caption .who i { width: 6px; height: 6px; border-radius: 50%; background: var(--acc); display: inline-block; transition: background-color 1.2s ease; }
   body.alert #caption .who i { background: var(--warn); }
   #caption .text { margin-top: 6px; font-size: 15px; letter-spacing: .04em; min-height: 1.4em; }
   #caption .bar { margin-top: 8px; height: 2px; background: var(--line); border-radius: 1px; overflow: hidden; }
-  #caption .bar b { display: block; height: 100%; width: 0; background: var(--pink); transition: width .25s; }
+  #caption .bar b { display: block; height: 100%; width: 0; background: var(--acc); transition: width .25s; }
 
   /* 資訊小卡 */
   .card { position: fixed; background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
@@ -68,7 +78,7 @@
     border-top: 1px solid var(--line); font-variant-numeric: tabular-nums; }
   .row .t { color: var(--ink-dim); font-size: 10px; letter-spacing: .12em; padding-top: 1px; }
   .meter { grid-column: 1 / -1; height: 2px; background: var(--line); margin-top: 3px; }
-  .meter b { display: block; height: 100%; background-color: var(--pink); transition: width .8s ease, background-color 1.2s ease; }
+  .meter b { display: block; height: 100%; background-color: var(--acc); transition: width .8s ease, background-color 1.2s ease; }
   #cardUsage { left: 24px; top: 34%; }
   #cardTeam { right: 24px; top: 42%; }
 
@@ -77,23 +87,23 @@
   #controls { position: fixed; bottom: 16px; left: 0; right: 0; display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; padding: 0 16px; }
   #controls button { background: transparent; color: var(--ink-dim); border: 1px solid var(--line); border-radius: 14px;
     padding: 5px 12px; font: inherit; font-size: 12px; cursor: pointer; }
-  #controls button:hover, #controls button.on { color: var(--ink); border-color: var(--pink-dim); }
+  #controls button:hover, #controls button.on { color: var(--ink); border-color: var(--acc-dim); }
   body.embedded #controls { display: none; }
   #cardTeam { pointer-events: auto; }
   #cardTeam:not(.on) { pointer-events: none; }
   .row.link { cursor: pointer; border-radius: 3px; }
-  .row.link:hover { background: rgba(255,255,255,.05); }
+  .row.link:hover { background: var(--soft); }
   .row.need .t { color: var(--warn); }
   #voice { position: fixed; top: 16px; right: 16px; width: 32px; height: 32px; display: grid; place-items: center;
     background: var(--panel); border: 1px solid var(--line); border-radius: 50%; color: var(--ink-dim); cursor: pointer; padding: 0; }
-  #voice.on { color: var(--pink); border-color: var(--pink-dim); }
+  #voice.on { color: var(--acc); border-color: var(--acc-dim); }
   #voiceSel { appearance: none; -webkit-appearance: none; max-width: 150px; padding-right: 10px; }
-  #voiceSel option, #voiceSel optgroup { background: #13111a; color: var(--ink); }
+  #voiceSel option, #voiceSel optgroup { background: var(--panel-solid); color: var(--ink); }
   #tools #voice { width: 30px; height: 24px; padding: 0; border-radius: 14px; }
   canvas#gl { cursor: pointer; }
   /* v3 #1：需要你的選項面板 */
   #askCard { position: fixed; left: 50%; bottom: 112px; transform: translateX(-50%) translateY(8px);
-    width: min(580px, calc(100% - 32px)); background: var(--panel); border: 1px solid rgba(255,176,32,.45);
+    width: min(580px, calc(100% - 32px)); background: var(--panel); border: 1px solid var(--acc-dim);
     border-radius: 6px; padding: 10px 14px 12px; backdrop-filter: blur(8px);
     opacity: 0; pointer-events: none; transition: opacity .3s, transform .3s; }
   #askCard.on { opacity: 1; pointer-events: auto; transform: translateX(-50%); }
@@ -106,14 +116,14 @@
   #askCard .btns { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; }
   .pill { background: transparent; color: var(--ink); border: 1px solid var(--line); border-radius: 14px;
     padding: 5px 12px; font: inherit; font-size: 12px; cursor: pointer; }
-  .pill:hover { border-color: var(--pink-dim); background: rgba(255,92,147,.08); }
-  .pill.go { border-color: rgba(255,176,32,.6); }
+  .pill:hover { border-color: var(--acc-dim); background: var(--acc-soft); }
+  .pill.go { border-color: var(--acc-dim); }
   .pill.no { color: var(--ink-dim); }
   .pill.sm { padding: 2px 8px; font-size: 11px; }
   #askCard .free { margin-top: 8px; display: flex; gap: 6px; }
-  #askCard .free input { flex: 1; min-width: 0; background: rgba(255,255,255,.04); color: var(--ink); border: 1px solid var(--line);
+  #askCard .free input { flex: 1; min-width: 0; background: var(--soft); color: var(--ink); border: 1px solid var(--line);
     border-radius: 14px; padding: 5px 12px; font: inherit; font-size: 12px; outline: none; }
-  #askCard .free input:focus { border-color: var(--pink-dim); }
+  #askCard .free input:focus { border-color: var(--acc-dim); }
   /* v3 #3：衛星提示 */
   #tip { position: fixed; pointer-events: none; background: var(--panel); border: 1px solid var(--line); border-radius: 4px;
     padding: 4px 8px; font-size: 11px; white-space: nowrap; opacity: 0; transition: opacity .15s; z-index: 5; }
@@ -123,30 +133,36 @@
   /* 右上工具列 */
   #tools { position: fixed; top: 16px; right: 16px; display: flex; gap: 6px; align-items: center; }
   #tools .pill { background: var(--panel); color: var(--ink-dim); }
-  #tools .pill.on { color: var(--pink); border-color: var(--pink-dim); }
+  #tools .pill.on { color: var(--acc); border-color: var(--acc-dim); }
   #voice { position: static; }
-  #hint { position: fixed; bottom: 44px; left: 0; right: 0; text-align: center; font-size: 11px; letter-spacing: .12em; color: rgba(243,238,242,.32); }
+  #hint { position: fixed; bottom: 44px; left: 0; right: 0; text-align: center; font-size: 11px; letter-spacing: .12em; color: var(--ink-faint); }
   body:not(.embedded) #hint { display: none; }
   /* 11-22 球體桌面版（?desk=1）：上方標題列（拖移）＋右下角縮放把手；其他跟分頁一樣 */
   #deskBar, #deskGrip, .deskOnly { display: none; }
   body.desk #deskBar { display: flex; position: fixed; top: 0; left: 0; right: 0; height: 34px; align-items: center; gap: 8px; padding: 0 12px;
-    font: 500 10px ui-monospace, Menlo, monospace; letter-spacing: .24em; color: var(--ink-dim); cursor: grab;
-    border-bottom: 1px solid rgba(255,255,255,.06); background: linear-gradient(rgba(255,255,255,.035), transparent); }
-  #deskBar i { width: 6px; height: 6px; border-radius: 50%; background: var(--pink); box-shadow: 0 0 8px var(--pink); transition: background-color 1.2s; }
+    color: var(--ink-dim); cursor: grab;
+    border-bottom: 1px solid var(--soft); background: linear-gradient(var(--soft), transparent); }
+  /* 品牌：OKLE42 · SHOWORK42，42 用金色 */
+  .brand { font: 600 10px ui-monospace, Menlo, monospace; letter-spacing: .24em; color: var(--ink); white-space: nowrap; }
+  .brand b { color: var(--gold); font-weight: 700; }
+  .brand .dim { color: var(--ink-dim); font-weight: 500; }
+  #brandTab { position: fixed; top: 22px; left: 22px; z-index: 3; }
+  body.desk #brandTab { display: none; }
+  #deskBar i { width: 6px; height: 6px; border-radius: 50%; background: var(--acc); box-shadow: 0 0 8px var(--acc); transition: background-color 1.2s; }
   body.alert #deskBar i { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
   body.desk .deskOnly { display: inline-block; }
   body.desk #bMini { display: none; }
-  body.desk::after { content: ""; position: fixed; inset: 0; border: 1px solid rgba(255,255,255,.12); border-radius: 14px; pointer-events: none; z-index: 20; }
+  body.desk::after { content: ""; position: fixed; inset: 0; border: 1px solid var(--line); border-radius: 14px; pointer-events: none; z-index: 20; }
   body.desk #tools { top: 5px; right: 8px; z-index: 8; gap: 5px; }
   body.desk #tools .pill { white-space: nowrap; }
-  body.desk #askCard { background: rgba(14,12,20,.96); }
+  body.desk #askCard { background: var(--panel-solid); }
   body.desk #cardTeam { max-height: calc(58% - 24px); overflow: auto; }
   body.desk #caption { top: 44px; }
   body.desk .pop { top: 156px; }
-  body.desk #deskGrip { display: block; position: fixed; right: 0; bottom: 0; width: 18px; height: 18px; cursor: nwse-resize; z-index: 21; color: rgba(255,255,255,.35); }
-  body.desk #deskGrip:hover { color: var(--pink); }
+  body.desk #deskGrip { display: block; position: fixed; right: 0; bottom: 0; width: 18px; height: 18px; cursor: nwse-resize; z-index: 21; color: var(--ink-faint); }
+  body.desk #deskGrip:hover { color: var(--acc); }
   /* v4 C：衛星小卡 */
-  #satCard { background: rgba(14,12,20,.95); position: fixed; width: 280px; z-index: 6; pointer-events: auto; }
+  #satCard { background: var(--panel-solid); position: fixed; width: 280px; z-index: 6; pointer-events: auto; }
   #satCard .head b { font-size: 14px; font-weight: 500; }
   #satCard .ln { font-size: 12px; line-height: 1.5; padding: 4px 0; border-top: 1px solid var(--line); color: var(--ink); }
   #satCard .ln .t { color: var(--ink-dim); font-size: 10px; letter-spacing: .12em; margin-right: 6px; }
@@ -154,13 +170,13 @@
   #satCard .btns { display: flex; gap: 6px; margin-top: 8px; }
   #satCard:not(.on) { pointer-events: none; }
   /* v4 E：今日時間軸 */
-  #tlCard { background: rgba(14,12,20,.97); left: 50%; top: 50%; transform: translate(-50%, -48%) scale(.98); width: min(760px, calc(100% - 32px)); max-height: calc(100% - 140px);
+  #tlCard { background: var(--panel-solid); left: 50%; top: 50%; transform: translate(-50%, -48%) scale(.98); width: min(760px, calc(100% - 32px)); max-height: calc(100% - 140px);
     overflow: auto; z-index: 7; pointer-events: auto; }
   #tlCard.on { transform: translate(-50%, -50%); }
   #tlCard:not(.on) { pointer-events: none; }
   .tl { display: grid; grid-template-columns: 110px 1fr; gap: 4px 10px; align-items: center; font-size: 12px; margin-top: 8px; }
   .tl .nm { color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .tl .bar { position: relative; height: 12px; background: rgba(255,255,255,.04); border-radius: 2px; }
+  .tl .bar { position: relative; height: 12px; background: var(--soft); border-radius: 2px; }
   .tl .bar i { position: absolute; top: 0; bottom: 0; border-radius: 2px; }
   .tl .axis { position: relative; height: 14px; font-size: 10px; color: var(--ink-dim); }
   .tl .axis span { position: absolute; transform: translateX(-50%); }
@@ -172,34 +188,34 @@
   #state { bottom: 70px; }
   #state .zh { display: block; font-size: 12px; letter-spacing: .32em; }
   #state .en { display: inline-flex; align-items: center; gap: 10px; margin-top: 5px; font: 500 10px ui-monospace, Menlo, monospace;
-    letter-spacing: .38em; color: var(--pink); transition: color 1.2s; }
+    letter-spacing: .38em; color: var(--acc); transition: color 1.2s; }
   #state .en::before, #state .en::after { content: ""; width: 22px; height: 1px; background: currentColor; opacity: .5; }
   body.alert #state .en { color: var(--warn); }
   body.bad #state .en { color: var(--bad); }
   /* ⑤ 字幕：逐詞同步（唸過的亮、正在唸的粉、還沒唸的暗）＋游標＋聲波 */
   #capText .said { color: var(--ink); }
-  #capText .now { color: var(--pink); text-shadow: 0 0 10px rgba(255,92,147,.55); }
-  #capText .todo { color: rgba(243,238,242,.28); }
-  #capText .cur { display: inline-block; width: .55em; color: var(--pink); animation: blink 1s steps(1) infinite; }
+  #capText .now { color: var(--acc); text-shadow: 0 0 10px var(--acc-dim); }
+  #capText .todo { color: var(--ink-faint); }
+  #capText .cur { display: inline-block; width: .55em; color: var(--acc); animation: blink 1s steps(1) infinite; }
   @keyframes blink { 50% { opacity: 0; } }
   #wave { display: block; width: 100%; height: 26px; margin-top: 6px; }
   #caption .who .q { margin-left: auto; color: var(--ink-dim); letter-spacing: .08em; }
   /* ② 事件卡（從球拉線出來） */
   svg#links { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
-  svg#links path { fill: none; stroke: var(--pink); stroke-width: 1; opacity: .55; }
+  svg#links path { fill: none; stroke: var(--acc); stroke-width: 1; opacity: .55; }
   svg#links path.pop { stroke-width: 1.2; opacity: .9; transition: stroke-dashoffset .45s ease-out; }
-  svg#links circle { fill: var(--pink); }
+  svg#links circle { fill: var(--acc); }
   svg#links .warn { stroke: var(--warn); fill: var(--warn); }
   svg#links .bad { stroke: var(--bad); fill: var(--bad); }
   .pop { position: fixed; top: 96px; width: 290px; z-index: 4; pointer-events: auto; cursor: pointer;
-    background: rgba(16,13,22,.9); border-color: rgba(255,92,147,.45);
+    background: var(--panel-solid); border-color: var(--line);
     clip-path: inset(0 0 100% 0); opacity: 1; transform: none; transition: clip-path .4s cubic-bezier(.2,.8,.2,1) .25s; }
   .pop.on { clip-path: inset(0 0 0 0); }
   .pop:not(.on) { pointer-events: none; visibility: hidden; transition: clip-path .3s, visibility 0s .3s; }
   .pop.r { right: 24px; } .pop.l { left: 24px; }
-  .pop.warn { border-color: rgba(255,176,32,.6); } .pop.bad { border-color: rgba(255,77,77,.6); }
-  .pop::after { content: ""; position: absolute; left: 0; right: 0; height: 1px; top: 0; background: rgba(255,255,255,.5);
-    box-shadow: 0 0 12px rgba(255,92,147,.9); opacity: 0; }
+  .pop.warn, .pop.bad { border-color: var(--acc-dim); }
+  .pop::after { content: ""; position: absolute; left: 0; right: 0; height: 1px; top: 0; background: var(--ink-dim);
+    box-shadow: 0 0 12px var(--acc-dim); opacity: 0; }
   .pop.on::after { animation: scan .7s ease-out .25s; }
   @keyframes scan { 0% { top: 0; opacity: 1; } 100% { top: 100%; opacity: 0; } }
   .pop .head b { font-size: 22px; }
@@ -210,16 +226,16 @@
   .donut { width: 40px; height: 40px; transform: rotate(-90deg); }
   .donut circle { fill: none; stroke-width: 3.2; }
   .donut .tr { stroke: var(--line); }
-  .donut .fg { stroke: var(--pink); stroke-linecap: round; transition: stroke-dasharray .9s ease, stroke 1.2s; }
+  .donut .fg { stroke: var(--acc); stroke-linecap: round; transition: stroke-dasharray .9s ease, stroke 1.2s; }
   #cardUsage .head { align-items: center; }
   #cardUsage .head .big { display: flex; align-items: center; gap: 10px; }
-  .meter.seg { height: 5px; background: repeating-linear-gradient(90deg, rgba(255,255,255,.09) 0 5px, transparent 5px 7px); }
+  .meter.seg { height: 5px; background: repeating-linear-gradient(90deg, var(--seg) 0 5px, transparent 5px 7px); }
   .meter.seg b { -webkit-mask-image: repeating-linear-gradient(90deg, #000 0 5px, transparent 5px 7px); mask-image: repeating-linear-gradient(90deg, #000 0 5px, transparent 5px 7px); }
   .row .rs { display: block; font-size: 10px; color: var(--ink-dim); letter-spacing: .04em; margin-top: 1px; }
   .fc { margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--line); font-size: 11px; line-height: 1.45; color: var(--ink-dim); }
-  .fc.warn { color: var(--warn); } .fc.bad { color: var(--bad); } .fc.ok { color: #7dffb0; }
+  .fc.warn { color: var(--warn); } .fc.bad { color: var(--bad); } .fc.ok { color: var(--ink-dim); }
   .card.flash { animation: cflash 1.6s ease-out; }
-  @keyframes cflash { 0%, 40% { border-color: var(--warn); box-shadow: 0 0 24px rgba(255,176,32,.35); } 100% { border-color: var(--line); box-shadow: none; } }
+  @keyframes cflash { 0%, 40% { border-color: var(--warn); box-shadow: 0 0 24px var(--acc-dim); } 100% { border-color: var(--line); box-shadow: none; } }
   /* ④ 戰情卡 */
   #cardTeam { width: 310px; }
   .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: -2px 0 8px; }
@@ -235,15 +251,15 @@
   .trow .sub .hi { color: var(--warn); }
   .trow .meter { grid-column: 2 / -1; margin-top: 0; }
   .trow.flash { animation: rflash 1.6s ease-out; }
-  @keyframes rflash { 0%, 35% { background: rgba(255,92,147,.16); } 100% { background: transparent; } }
+  @keyframes rflash { 0%, 35% { background: var(--acc-soft); } 100% { background: transparent; } }
   .more { font-size: 10px; color: var(--ink-dim); text-align: right; padding-top: 6px; letter-spacing: .08em; }
   /* ⑥ 警示橫幅：橫過球的整條（像影片的 HEAVY RAIN · 16:00） */
   #banner { position: fixed; left: 50%; width: min(620px, calc(100% - 24px)); top: 50%; transform: translate(-50%, -50%); z-index: 6; pointer-events: none; cursor: pointer;
-    background: linear-gradient(90deg, transparent, rgba(110,18,38,.82) 12%, rgba(110,18,38,.82) 88%, transparent);
-    border-top: 1px solid rgba(255,92,147,.55); border-bottom: 1px solid rgba(255,92,147,.55);
+    background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--acc) 82%, #000) 12%, color-mix(in srgb, var(--acc) 82%, #000) 88%, transparent);
+    border-top: 1px solid var(--acc); border-bottom: 1px solid var(--acc); color: #fff;
     padding: 7px 0 8px; clip-path: inset(0 50% 0 50%); visibility: hidden; transition: clip-path .45s cubic-bezier(.2,.8,.2,1), visibility 0s .45s; }
   #banner.on { clip-path: inset(0 0 0 0); visibility: visible; transition: clip-path .45s cubic-bezier(.2,.8,.2,1); pointer-events: auto; animation: flick .5s steps(2) .45s 2; }
-  #banner.warn { background: linear-gradient(90deg, transparent, rgba(120,62,6,.85) 12%, rgba(120,62,6,.85) 88%, transparent); border-color: rgba(255,176,32,.6); }
+  #banner.warn { background: linear-gradient(90deg, transparent, rgba(16,16,17,.92) 12%, rgba(16,16,17,.92) 88%, transparent); border-color: var(--acc); }
   @keyframes flick { 50% { opacity: .55; } }
   #banner .in { width: calc(100% - 64px); margin: 0 auto; }
   #banner .meta { display: flex; justify-content: space-between; font: 9px ui-monospace, Menlo, monospace; letter-spacing: .22em; color: rgba(255,255,255,.6); }
@@ -322,7 +338,8 @@
 <div class="card pop" id="pop" role="status"></div>
 <div id="banner" role="alert"><div class="in"></div></div>
 
-<div id="deskBar" aria-hidden="true"><i></i><span>球體</span><span class="wide">· SHOWORK42</span></div>
+<div id="deskBar" aria-hidden="true"><i></i><span class="brand">OKLE<b>42</b></span><span class="brand dim wide">· SHOWORK<b>42</b> · 球體</span></div>
+<div id="brandTab" class="brand" aria-hidden="true">OKLE<b>42</b> <span class="dim">· SHOWORK<b>42</b></span></div>
 <svg id="deskGrip" viewBox="0 0 18 18" aria-label="拖曳縮放"><path d="M16 7 7 16M16 11.5 11.5 16" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
 <div id="tools">
   <button class="pill sm" id="bBrief" title="唸一次早報（今天的狀況與額度）">早報</button>
@@ -332,6 +349,7 @@
   <button class="pill sm deskOnly" id="bSize" title="換尺寸：小 → 中 → 大（拖右下角也可以）">尺寸</button>
   <button class="pill sm deskOnly" id="bBoard" title="打開戰情中心">戰情<span class="wide">中心</span></button>
   <select class="pill sm" id="voiceSel" title="播報的聲音（選了會試聽一句）" aria-label="播報的聲音" hidden></select>
+  <button class="pill sm" id="bTheme" title="配色：自動（跟系統）→ 深色 → 淺色" aria-label="配色">◐</button>
   <button class="pill sm" id="voice" aria-label="語音開關"></button>
   <button class="pill sm deskOnly" id="bClose" title="收起桌面版（選單列「桌面球體」可再打開）" aria-label="收起">✕</button>
 </div>
@@ -365,7 +383,20 @@ const STATES = {
 };
 let state = "idle", tgt = { ...STATES.idle }, cur = { ...STATES.idle };
 let speakAmp = 0;               // 說話時的「音量」，驅動球體脹縮
-const PINK = new THREE.Color("#ff5c93"), CYAN = new THREE.Color("#6fd6ff"), ORANGE = new THREE.Color("#ffb020"), RED = new THREE.Color("#ff4d4d");
+// 11-22 黑白灰紅：BALL＝球本體（深色主題淺灰、淺色主題近黑）、GRAY＝待審／聆聽、ALERT／BAD＝紅（需要你／卡住）、DONE＝暗灰
+// 淺色背景上「相加混色」會整顆看不見 ⇒ 淺色主題改一般混色（applyTheme 會把所有材質換掉）
+const THEME3 = {
+  dark:  { ball: "#c9c9c9", gray: "#8f8f8f", alert: "#ff3b30", bad: "#ff3b30", done: "#5c5c5c", blend: THREE.AdditiveBlending },
+  light: { ball: "#1c1c1c", gray: "#7a7a7a", alert: "#d7261b", bad: "#d7261b", done: "#ababab", blend: THREE.NormalBlending },
+};
+const themePref = (() => { try { return localStorage.getItem("sphere.theme") || "auto"; } catch { return "auto"; } })();
+let themeMode = themePref;
+const sysDark = matchMedia("(prefers-color-scheme: dark)");
+const themeName = () => themeMode === "auto" ? (sysDark.matches ? "dark" : "light") : themeMode;
+document.documentElement.dataset.theme = themeName();
+const T0 = THEME3[themeName()];
+const BALL = new THREE.Color(T0.ball), GRAY = new THREE.Color(T0.gray), ALERT = new THREE.Color(T0.alert), BAD = new THREE.Color(T0.bad), DONE = new THREE.Color(T0.done);
+let BLEND = T0.blend;
 // 11-21 使用者：顏色不要瞬間跳 ⇒ 每個會換色的東西都走 Fade：從「現在的顏色」用 1.2 秒緩入緩出漸到新顏色（中途又換也是從當下接著漸）
 const nowS = () => performance.now() / 1000;
 class Fade {
@@ -373,7 +404,7 @@ class Fade {
   set(col) { if (this.to.equals(col)) return; this.from.copy(this.c); this.to.copy(col); this.t0 = nowS(); }
   step() { const k = Math.min(1, (nowS() - this.t0) / this.dur), e = k * k * (3 - 2 * k); return this.c.copy(this.from).lerp(this.to, e); }
 }
-const accentFade = new Fade(PINK, 1.4);
+const accentFade = new Fade(BALL, 1.4);
 let accent = accentFade.c;
 
 /* ---------- three.js 場景 ---------- */
@@ -386,8 +417,8 @@ camera.position.set(0, 0, 9);
 const root = new THREE.Group(); scene.add(root);
 
 const mats = [];
-function lineMat(op) { const m = new THREE.LineBasicMaterial({ color: PINK, transparent: true, opacity: op, blending: THREE.AdditiveBlending, depthWrite: false }); m.userData.base = op; mats.push(m); return m; }
-function meshMat(op) { const m = new THREE.MeshBasicMaterial({ color: PINK, transparent: true, opacity: op, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }); m.userData.base = op; mats.push(m); return m; }
+function lineMat(op) { const m = new THREE.LineBasicMaterial({ color: BALL, transparent: true, opacity: op, blending: BLEND, depthWrite: false }); m.userData.base = op; mats.push(m); return m; }
+function meshMat(op) { const m = new THREE.MeshBasicMaterial({ color: BALL, transparent: true, opacity: op, blending: BLEND, depthWrite: false, side: THREE.DoubleSide }); m.userData.base = op; mats.push(m); return m; }
 
 // 1. 內核：會被「聲音」擾動的線框球
 // 線框只建一次，之後每格直接移動它的頂點（不重建幾何，省 CPU）
@@ -455,8 +486,8 @@ const bits = [];
 }
 
 // 6. v3 #3 session 衛星：每個 session 一顆小光點繞球；顏色＝狀態，需要你的會脈動、點了跳過去
-const SAT_COLOR = { "需要你": ORANGE, "進行中": PINK, "待審": CYAN, "卡住": RED, "完成": new THREE.Color("#7dffb0") };
-const SAT_GRAY = new THREE.Color("#8a8494");
+const SAT_COLOR = { "需要你": ALERT, "進行中": BALL, "待審": GRAY, "卡住": BAD, "完成": DONE };
+const SAT_GRAY = DONE;
 const satGroup = new THREE.Group(); scene.add(satGroup);
 const sats = new Map();             // sessionId → { mesh, hit, halo, c, orbit }
 const satGeo = new THREE.IcosahedronGeometry(0.075, 1), haloGeo = new THREE.RingGeometry(0.11, 0.135, 24), hitGeo = new THREE.SphereGeometry(0.24, 8, 6);
@@ -469,8 +500,8 @@ function syncSats(team) {
     let s = sats.get(c.sessionId);
     if (!s) {
       const h = hash(c.sessionId);
-      const mat = new THREE.MeshBasicMaterial({ color: SAT_GRAY, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false });
-      const hmat = new THREE.MeshBasicMaterial({ color: SAT_GRAY, transparent: true, opacity: 0.0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+      const mat = new THREE.MeshBasicMaterial({ color: SAT_GRAY, transparent: true, opacity: 0.95, blending: BLEND, depthWrite: false });
+      const hmat = new THREE.MeshBasicMaterial({ color: SAT_GRAY, transparent: true, opacity: 0.0, blending: BLEND, depthWrite: false, side: THREE.DoubleSide });
       const mesh = new THREE.Mesh(satGeo, mat), halo = new THREE.Mesh(haloGeo, hmat);
       const hit = new THREE.Mesh(hitGeo, new THREE.MeshBasicMaterial({ visible: false }));
       hit.userData.sid = c.sessionId;
@@ -508,16 +539,16 @@ const outerArcs = [];   // { mesh, track, key }
 function arcMesh(r, w, frac, color, op) {
   const len = Math.max(0.001, Math.min(1, frac)) * Math.PI * 2;
   const m = new THREE.Mesh(new THREE.RingGeometry(r, r + w, 96, 1, Math.PI / 2 - len, len),
-    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: op, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: op, blending: BLEND, depthWrite: false, side: THREE.DoubleSide }));
   m.scale.x = -1;    // 從 12 點鐘順時針長
   return m;
 }
-const heatFade = new Fade(CYAN, 2);
+const heatFade = new Fade(GRAY, 2);
 function syncOuter(runs, heat) {
   const want = [];
-  (runs || []).slice(0, 3).forEach((r, i) => want.push({ key: `run${i}:${Math.round(r.fraction * 100)}`, r: 3.18 + i * 0.12, w: 0.035, f: r.fraction, color: PINK, op: 0.75 }));
+  (runs || []).slice(0, 3).forEach((r, i) => want.push({ key: `run${i}:${Math.round(r.fraction * 100)}`, r: 3.18 + i * 0.12, w: 0.035, f: r.fraction, color: BALL, op: 0.75 }));
   if (heat?.temp != null) {
-    const lv = heat.level, col = lv === "hot" || lv === "critical" ? RED : lv === "warm" ? ORANGE : CYAN;
+    const lv = heat.level, col = lv === "hot" || lv === "critical" ? BAD : lv === "warm" ? BALL : GRAY;
     heatFade.set(col);
     want.push({ heat: true, key: `heat:${heat.temp}`, r: 3.62, w: 0.05, f: Math.min(1, Math.max(0.02, (heat.temp - 35) / 65)), color: col, op: 0.6 });
   }
@@ -534,18 +565,18 @@ function syncOuter(runs, heat) {
 // 8. v5 聲波：球外圈 120 根放射條（面向鏡頭），左右對稱，跟著真的頻譜跳
 const NB = 32, WAVE_N = 120, WAVE_R0 = 1.66;
 const lv = { bands: new Float32Array(NB), sm: new Float32Array(NB), rms: 0, at: -1e9, mic: false };
-const waveMat = new THREE.MeshBasicMaterial({ color: PINK, transparent: true, opacity: 0.12, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+const waveMat = new THREE.MeshBasicMaterial({ color: BALL, transparent: true, opacity: 0.12, blending: BLEND, depthWrite: false, side: THREE.DoubleSide });
 const wave = new THREE.InstancedMesh(new THREE.PlaneGeometry(0.028, 1), waveMat, WAVE_N);
 wave.frustumCulled = false; outer.add(wave);
 const waveDummy = new THREE.Object3D();
 function bandOf(i) { const k = i < WAVE_N / 2 ? i : WAVE_N - 1 - i; return Math.min(NB - 1, Math.floor(k / (WAVE_N / 2) * NB)); }
 // 9. v5 ① 思考／搜尋：沿內環跑的掃描彗星；警示：往外擴散的衝擊波
 const comet = new THREE.Mesh(new THREE.RingGeometry(2.0, 2.045, 64, 1, 0, 0.9),
-  new THREE.MeshBasicMaterial({ color: PINK, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+  new THREE.MeshBasicMaterial({ color: BALL, transparent: true, opacity: 0, blending: BLEND, depthWrite: false, side: THREE.DoubleSide }));
 outer.add(comet);
 const shocks = [0, 1, 2].map(() => {
   const m = new THREE.Mesh(new THREE.RingGeometry(1, 1.018, 128),
-    new THREE.MeshBasicMaterial({ color: ORANGE, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+    new THREE.MeshBasicMaterial({ color: ALERT, transparent: true, opacity: 0, blending: BLEND, depthWrite: false, side: THREE.DoubleSide }));
   m.userData.t = -1; outer.add(m); return m;
 });
 let shockNext = 0;
@@ -657,7 +688,7 @@ function animWave(dt, t, talking, hearing, live) {
     waveDummy.updateMatrix(); wave.setMatrixAt(i, waveDummy.matrix);
   }
   wave.instanceMatrix.needsUpdate = true;
-  waveMat.color.copy(hearing ? CYAN : accent);
+  waveMat.color.copy(hearing ? GRAY : accent);
   waveMat.opacity += ((active ? 0.85 : 0.13) - waveMat.opacity) * Math.min(1, dt * 4);
   drawCapWave(active ? (live ? lv.rms : speakAmp * 0.6) : 0, hearing);
 }
@@ -671,7 +702,7 @@ function animFx(dt, t) {
     const m = shocks.find(x => x.userData.t < 0); if (m) m.userData.t = 0;
     shockNext = t + 1.5;
   }
-  const col = bannerLevel === "bad" ? RED : ORANGE;
+  const col = bannerLevel === "bad" ? BAD : ALERT;
   for (const m of shocks) {
     if (m.userData.t < 0) continue;
     m.userData.t += dt / 1.6;
@@ -680,6 +711,7 @@ function animFx(dt, t) {
     m.scale.setScalar(1.7 + k * 2.4); m.material.opacity = 0.7 * (1 - k) * (1 - k); m.material.color.copy(col);
   }
 }
+const rgb3 = c => `${Math.round(c.r * 255)},${Math.round(c.g * 255)},${Math.round(c.b * 255)}`;
 /* 字幕下的聲波：往左捲的音量歷史，上下對稱 */
 const capWave = document.getElementById("wave"), cw = capWave.getContext("2d");
 const waveHist = new Float32Array(96); let waveIdle = 0;
@@ -691,7 +723,7 @@ function drawCapWave(v, mic) {
   if (capWave.width !== Math.round(W * dpr)) { capWave.width = Math.round(W * dpr); capWave.height = Math.round(H * dpr); }
   cw.setTransform(dpr, 0, 0, dpr, 0, 0); cw.clearRect(0, 0, W, H);
   const n = waveHist.length, step = W / n, bw = Math.max(1, step * 0.55);
-  const c = mic ? "111,214,255" : document.body.classList.contains("alert") ? "255,176,32" : "255,92,147";
+  const c = rgb3(mic ? GRAY : document.body.classList.contains("alert") ? ALERT : BALL);
   for (let i = 0; i < n; i++) {
     const h = Math.max(1, Math.min(1, waveHist[i] * 1.6) * (H - 2));
     cw.fillStyle = `rgba(${c},${0.18 + 0.82 * (i / n)})`;
@@ -716,7 +748,7 @@ function setState(s) {
   state = s; tgt = { ...STATES[s] };
   // 說話時沿用原本的顏色（有人在等你就維持橘），不要每播一句就粉紅↔橘來回閃
   const waiting = s === "speaking" && typeof pending === "function" && embedded && pending().length > 0;
-  accentFade.set(s === "alert" || waiting ? ORANGE : s === "searching" ? PINK.clone().lerp(CYAN, 0.45) : PINK);
+  accentFade.set(s === "alert" || waiting ? ALERT : s === "searching" ? BALL.clone().lerp(GRAY, 0.45) : BALL);
   const en = bannerOn ? "WARNING" : STATES[s].en;
   if ($("stZh").dataset.v !== STATES[s].label) { $("stZh").dataset.v = STATES[s].label; $("stZh").textContent = STATES[s].label.split("").join(" "); }
   if ($("stEn").dataset.v !== en) { $("stEn").dataset.v = en; decode($("stEn"), en.split("").join(" ")); }
@@ -823,7 +855,7 @@ async function pump() {
 /* ---------- 資料：嵌在 ShoWork42 時由 App 推進來；單獨開時讀 /usage ---------- */
 let data = { five_hour: null, seven_day: null, ctx: null, sessions: null, team: [] };
 function pct(v) { return v == null ? "--%" : Math.round(v) + "%"; }
-function meter(id, v) { const b = $(id); b.style.width = (v ?? 0) + "%"; b.style.backgroundColor = v >= 90 ? "var(--bad)" : v >= 70 ? "var(--warn)" : "var(--pink)"; }
+function meter(id, v) { const b = $(id); b.style.width = (v ?? 0) + "%"; b.style.backgroundColor = v >= 90 ? "var(--bad)" : v >= 70 ? "var(--warn)" : "var(--ink)"; }      // 紅只留給「要注意」
 /* v5 ③：數字滾動（從現在的值滾到新值） */
 function roll(el, to, fmt = v => Math.round(v) + "%") {
   if (to == null) { el.textContent = "--%"; el._v = null; return; }
@@ -837,7 +869,7 @@ function roll(el, to, fmt = v => Math.round(v) + "%") {
 }
 const hm = m => m == null ? "" : m >= 1440 ? `${Math.floor(m / 1440)}d${Math.round(m % 1440 / 60)}h` : m >= 60 ? `${Math.floor(m / 60)}h${String(m % 60).padStart(2, "0")}m` : `${m}m`;
 const hmZh = m => m >= 60 ? `${Math.floor(m / 60)} 小時 ${m % 60} 分` : `${Math.round(m)} 分鐘`;
-const lvlCol = v => v >= 90 ? "var(--bad)" : v >= 70 ? "var(--warn)" : "var(--pink)";
+const lvlCol = v => v >= 90 ? "var(--bad)" : v >= 70 ? "var(--warn)" : "var(--ink)";
 /* v5 ③：5 小時額度的燒錢速度（最近 45 分鐘的取樣）→ 照這速度幾點用完 */
 let hist5 = [];
 try { hist5 = JSON.parse(localStorage.getItem("sphere.hist5") || "[]"); } catch {}
@@ -879,14 +911,14 @@ function render() {
   drawLinks();
 }
 /* v5 ④ 戰情卡 */
-const ST_COL = { "需要你": "var(--warn)", "進行中": "var(--pink)", "待審": "var(--cyan)", "卡住": "var(--bad)", "完成": "#7dffb0" };
+const ST_COL = { "需要你": "var(--warn)", "進行中": "var(--ink)", "待審": "var(--gray)", "卡住": "var(--bad)", "完成": "var(--done)" };
 const lastSt = new Map();
 function renderTeam() {
   const team = data.team || [], cnt = {};
   for (const c of team) cnt[c.status] = (cnt[c.status] || 0) + 1;
   $("chips").innerHTML = Object.keys(ST_COL).filter(k => cnt[k]).map(k => `<span><i style="--c:${ST_COL[k]}"></i>${esc(k)} ${cnt[k]}</span>`).join("");
   $("teamRows").innerHTML = team.slice(0, 6).map((c, i) => {
-    const col = ST_COL[c.status] || "#8a8494", changed = lastSt.has(c.sessionId) && lastSt.get(c.sessionId) !== c.status;
+    const col = ST_COL[c.status] || "var(--done)", changed = lastSt.has(c.sessionId) && lastSt.get(c.sessionId) !== c.status;
     const sub = [esc(c.status || ""), c.ctx != null ? `<span class="${c.ctx >= 80 ? "hi" : ""}">記憶 ${c.ctx}%</span>` : "", c.ago != null ? (c.ago < 1 ? "剛剛" : c.ago < 60 ? `${c.ago} 分鐘前` : `${Math.floor(c.ago / 60)} 小時前`) : ""].filter(Boolean).join(" · ");
     return `<div class="row trow${c.sessionId ? " link" : ""}${changed ? " flash" : ""}" data-i="${i}" title="${c.sessionId ? "點一下跳到這個 session" : ""}">
       <span class="dot${c.status === "需要你" || c.status === "進行中" ? " pulse" : ""}" style="--c:${col}"></span>
@@ -926,7 +958,7 @@ function sessionPop(c) {
   const ln = (k, v) => v == null || v === "" ? "" : `<div class="ln"><span class="t">${k}</span>${esc(v)}</div>`;
   return { level: c.status === "需要你" ? "warn" : c.status === "卡住" ? "bad" : "", sid: c.sessionId,
     html: `<div class="k">SESSION · ${esc(c.status || "")}</div><div class="head"><b>${esc(c.name || "")}</b><span style="font-size:12px;color:${ST_COL[c.status] || "var(--ink-dim)"}">${c.progress != null ? c.progress + "%" : ""}</span></div>
-      ${c.progress != null ? `<div class="meter seg" style="margin:0 0 6px"><b style="width:${c.progress}%;background-color:${ST_COL[c.status] || "var(--pink)"}"></b></div>` : ""}
+      ${c.progress != null ? `<div class="meter seg" style="margin:0 0 6px"><b style="width:${c.progress}%;background-color:${ST_COL[c.status] || "var(--acc)"}"></b></div>` : ""}
       ${ln("在做", c.doing)}${ln(c.status === "需要你" ? "問題" : "摘要", clip(c.status === "需要你" ? (c.ask || "") : (c.summary || ""), 90))}${ln("記憶", c.ctx != null ? c.ctx + "%" : null)}` };
 }
 function usagePop(which) {
@@ -988,7 +1020,7 @@ function renderSys() {
   const h = data.heat;
   if (h?.temp != null) {
     const lv = { ok: "正常", warm: "偏熱", hot: "很熱", critical: "過熱" }[h.level] || h.level;
-    const col = h.level === "hot" || h.level === "critical" ? "var(--bad)" : h.level === "warm" ? "var(--warn)" : "var(--cyan)";
+    const col = h.level === "hot" || h.level === "critical" ? "var(--bad)" : h.level === "warm" ? "var(--ink)" : "var(--gray)";
     rows.push(`<div class="row"><span class="t">TEMP</span><span>機器溫度 · ${esc(lv)}${data.paused ? " · 動畫降速" : ""}</span><span>${Math.round(h.temp)}°C</span><div class="meter"><b style="width:${Math.min(100, Math.max(2, (h.temp - 35) / 65 * 100))}%;background:${col}"></b></div></div>`);
   }
   $("sysRows").innerHTML = rows.join("");
@@ -1346,7 +1378,7 @@ $("satCard").addEventListener("click", e => {
 window.karaBounce = () => { bounceAt = performance.now(); };
 
 /* ---------- v4 E：今日時間軸 ---------- */
-const TL_COLOR = { "需要你": "var(--warn)", "進行中": "var(--pink)", "待審": "var(--cyan)", "卡住": "var(--bad)", "完成": "#7dffb0", "待辦": "#8a8494" };
+const TL_COLOR = { "需要你": "var(--warn)", "進行中": "var(--ink)", "待審": "var(--gray)", "卡住": "var(--bad)", "完成": "var(--done)", "待辦": "var(--soft)" };
 $("bTl").onclick = () => { if ($("tlCard").classList.contains("on")) return show("tlCard", false); post({ action: "timeline" }); };
 window.karaTimeline = (d) => {
   const lanes = d.lanes || [], now = d.now || 0;
@@ -1355,7 +1387,7 @@ window.karaTimeline = (d) => {
   const x = m => ((m - from) / span * 100).toFixed(2) + "%";
   const ticks = []; for (let h = Math.ceil(from / 60); h * 60 <= now; h += span > 600 ? 2 : 1) ticks.push(`<span style="left:${x(h * 60)}">${h}:00</span>`);
   const rows = lanes.map(l => `<div class="nm" title="${esc(l.name)}">${esc(l.name)}</div><div class="bar">${l.segs.map(s =>
-    `<i style="left:${x(s.s)};width:${Math.max(0.3, (s.e - s.s) / span * 100).toFixed(2)}%;background:${TL_COLOR[s.status] || "#8a8494"}" title="${esc(s.status)} ${fmt(s.s)}–${fmt(s.e)}"></i>`).join("")}</div>`).join("");
+    `<i style="left:${x(s.s)};width:${Math.max(0.3, (s.e - s.s) / span * 100).toFixed(2)}%;background:${TL_COLOR[s.status] || "var(--done)"}" title="${esc(s.status)} ${fmt(s.s)}–${fmt(s.e)}"></i>`).join("")}</div>`).join("");
   $("tlCard").innerHTML = `<div class="k">今日時間軸 · 每個 session 的狀態</div>
     <div class="head"><span>${lanes.length ? `${lanes.length} 個 session` : "今天還沒有紀錄（從這版裝好後開始記）"}</span><button class="pill sm no" data-x>關閉</button></div>
     ${lanes.length ? `<div class="tl">${rows}<div></div><div class="axis">${ticks.join("")}</div></div>` : ""}
@@ -1406,7 +1438,37 @@ document.querySelectorAll("#controls button[data-s]").forEach(b => b.onclick = (
 $("demo").onclick = demo;
 addEventListener("keydown", e => { if (e.code === "Space" && !embedded) { e.preventDefault(); demo(); } });
 
-setState("idle"); render(); renderVoice(); show("cardUsage", true);
+/* ---------- 11-22 配色：自動（跟系統）／深色／淺色 ---------- */
+const THEME_LABEL = { auto: "配色：自動（跟系統）", dark: "配色：深色", light: "配色：淺色" };
+function applyTheme() {
+  const name = themeName(), t = THEME3[name];
+  document.documentElement.dataset.theme = name;
+  BALL.set(t.ball); GRAY.set(t.gray); ALERT.set(t.alert); BAD.set(t.bad); DONE.set(t.done);
+  BLEND = t.blend;
+  scene.traverse(o => { const ms = Array.isArray(o.material) ? o.material : o.material ? [o.material] : [];
+    for (const m of ms) if (m.blending !== BLEND && m.visible !== false) { m.blending = BLEND; m.needsUpdate = true; } });
+  // 漸變中的顏色直接跳到新主題（不然會從舊主題的顏色慢慢漸過來）
+  for (const f of [accentFade, heatFade]) { f.from.copy(f.to); f.t0 = -1e9; }
+  setState(state);
+  accentFade.c.copy(accentFade.to); accentFade.from.copy(accentFade.to); accentFade.t0 = -1e9;
+  for (const sat of sats.values()) { const col = SAT_COLOR[sat.c?.status] || SAT_GRAY; sat.fade.to.copy(col); sat.fade.from.copy(col); sat.fade.c.copy(col); sat.fade.t0 = -1e9; }
+  syncOuter(data.runs, data.heat); heatFade.c.copy(heatFade.to); heatFade.from.copy(heatFade.to);
+  for (const a of outerArcs) if (!a.mesh.userData.heat) { a.mesh.material.color.copy(BALL); a.track.material.color.copy(BALL); }
+  waveHist.fill(0); waveIdle = 0;
+  $("bTheme").title = THEME_LABEL[themeMode] + "（點一下換）";
+  $("bTheme").textContent = themeMode === "auto" ? "◐" : themeMode === "dark" ? "●" : "○";
+}
+$("bTheme").onclick = () => {
+  themeMode = { auto: "dark", dark: "light", light: "auto" }[themeMode];
+  try { localStorage.setItem("sphere.theme", themeMode); } catch {}
+  applyTheme();
+};
+sysDark.addEventListener("change", () => { if (themeMode === "auto") applyTheme(); });
+// 另一顆球（分頁／桌面版）換了配色：同一個 localStorage，跟著換
+addEventListener("storage", e => { if (e.key === "sphere.theme" && e.newValue && e.newValue !== themeMode) { themeMode = e.newValue; applyTheme(); } });
+window.karaTheme = m => { themeMode = m; applyTheme(); };      // 測試用
+
+setState("idle"); render(); renderVoice(); show("cardUsage", true); applyTheme();
 if (new URLSearchParams(location.search).has("demo")) setTimeout(demo, 600);
 post({ action: "ready" });
 </script>
