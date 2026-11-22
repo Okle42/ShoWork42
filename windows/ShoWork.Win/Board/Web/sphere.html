@@ -45,7 +45,7 @@
   :root { --cw: 310px; }
   :root { --acc-dim: color-mix(in srgb, var(--acc) 38%, transparent); --acc-soft: color-mix(in srgb, var(--acc) 10%, transparent); }
   * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; color: var(--ink); overflow: hidden;
+  html, body { margin: 0; height: 100%; color: var(--ink); overflow: hidden; transition: background-color 2s ease, color 2s ease;
     background: radial-gradient(ellipse 75% 38% at 50% 104%, var(--glow), transparent 70%), var(--bg);
     font-family: "SF Pro Display", -apple-system, "PingFang TC", sans-serif; }
   body::before { content: ""; position: fixed; inset: 0; pointer-events: none;
@@ -439,7 +439,28 @@ const THEME3 = {
 const themePref = (() => { try { return localStorage.getItem("sphere.theme") || "auto"; } catch { return "auto"; } })();
 let themeMode = themePref;
 const sysDark = matchMedia("(prefers-color-scheme: dark)");
-const themeName = () => themeMode === "auto" ? (sysDark.matches ? "dark" : "light") : themeMode;
+// 11-22 Keng：第四種「日出日落」——日出到日落淺色、日落後深色。本機算（NOAA 簡化公式、台北座標），不連網、不要定位權限
+const SUN_AT = { lat: 25.03, lon: 121.56 };
+function sunTimes(day = new Date(), { lat, lon } = SUN_AT) {
+  const r = Math.PI / 180, N = Math.floor((Date.UTC(day.getFullYear(), day.getMonth(), day.getDate()) - Date.UTC(day.getFullYear(), 0, 0)) / 864e5);
+  const lngHour = lon / 15, mod = (v, m) => ((v % m) + m) % m;
+  const calc = rise => {
+    const t = N + ((rise ? 6 : 18) - lngHour) / 24, M = 0.9856 * t - 3.289;
+    const L = mod(M + 1.916 * Math.sin(M * r) + 0.020 * Math.sin(2 * M * r) + 282.634, 360);
+    let RA = mod(Math.atan(0.91764 * Math.tan(L * r)) / r, 360);
+    RA = (RA + Math.floor(L / 90) * 90 - Math.floor(RA / 90) * 90) / 15;
+    const sinDec = 0.39782 * Math.sin(L * r), cosDec = Math.cos(Math.asin(sinDec));
+    const cosH = (Math.cos(90.833 * r) - sinDec * Math.sin(lat * r)) / (cosDec * Math.cos(lat * r));
+    const H = (rise ? 360 - Math.acos(cosH) / r : Math.acos(cosH) / r) / 15;
+    const UT = mod(H + RA - 0.06571 * t - 6.622 - lngHour, 24);
+    const local = mod(UT - day.getTimezoneOffset() / 60, 24);          // 換成當地鐘點，掛在「當地的今天」
+    return new Date(new Date(day.getFullYear(), day.getMonth(), day.getDate()).getTime() + local * 3600e3);
+  };
+  const rise = calc(true), set = calc(false);
+  return { rise, set };
+}
+const sunIsUp = (now = new Date()) => { const { rise, set } = sunTimes(now); return now >= rise && now < set; };
+const themeName = () => themeMode === "auto" ? (sysDark.matches ? "dark" : "light") : themeMode === "sun" ? (sunIsUp() ? "light" : "dark") : themeMode;
 document.documentElement.dataset.theme = themeName();
 const T0 = THEME3[themeName()];
 const BALL = new THREE.Color(T0.ball), GRAY = new THREE.Color(T0.gray), ALERT = new THREE.Color(T0.alert), BAD = new THREE.Color(T0.bad), DONE = new THREE.Color(T0.done);
@@ -2070,7 +2091,8 @@ addEventListener("pointerdown", e => { if (!e.target.closest("#panelMenu,#bPanel
 applyPanels(); fitTools();
 
 /* ---------- 11-22 配色：自動（跟系統）／深色／淺色 ---------- */
-const THEME_LABEL = { auto: "配色：自動（跟系統）", dark: "配色：深色", light: "配色：淺色" };
+const THEME_LABEL = { auto: "配色：自動（跟系統）", dark: "配色：深色", light: "配色：淺色", sun: "配色：日出日落" };
+const hhmm = d => `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
 function applyTheme() {
   const name = themeName(), t = THEME3[name];
   document.documentElement.dataset.theme = name;
@@ -2088,14 +2110,18 @@ function applyTheme() {
   waveHist.fill(0); waveIdle = 0;
   for (const g of [g5, g7, gHeat, ...gDisks]) paintRamp(g);       // 量表漸層跟著主題換（深色的「黑」、淺色的「白」不同）
   $("bTheme").title = THEME_LABEL[themeMode] + "（點一下換）";
-  $("bTheme").textContent = themeMode === "auto" ? "◐" : themeMode === "dark" ? "●" : "○";
+  $("bTheme").textContent = themeMode === "auto" ? "◐" : themeMode === "dark" ? "●" : themeMode === "sun" ? "☀" : "○";
+  if (themeMode === "sun") { const { rise, set } = sunTimes(); $("bTheme").title = `配色：日出日落（今天 ${hhmm(rise)} 變淺、${hhmm(set)} 變深；點一下換）`; }
 }
 $("bTheme").onclick = () => {
-  themeMode = { auto: "dark", dark: "light", light: "auto" }[themeMode];
+  themeMode = { auto: "dark", dark: "light", light: "sun", sun: "auto" }[themeMode] || "auto";
   try { localStorage.setItem("sphere.theme", themeMode); } catch {}
   applyTheme();
 };
 sysDark.addEventListener("change", () => { if (themeMode === "auto") applyTheme(); });
+// 日出日落模式：每分鐘看一次，到點就換（白轉黑、黑轉白有 2 秒漸變）
+setInterval(() => { if (themeMode === "sun" && document.documentElement.dataset.theme !== themeName()) applyTheme(); }, 60000);
+window.karaSun = (iso) => { const d = iso ? new Date(iso) : new Date(); const { rise, set } = sunTimes(d); return { rise: hhmm(rise), set: hhmm(set), up: sunIsUp(d) }; };     // 測試
 // 另一顆球（分頁／桌面版）換了配色：同一個 localStorage，跟著換
 addEventListener("storage", e => { if (e.key === "sphere.theme" && e.newValue && e.newValue !== themeMode) { themeMode = e.newValue; applyTheme(); } });
 window.karaTheme = m => { themeMode = m; applyTheme(); };      // 測試用
