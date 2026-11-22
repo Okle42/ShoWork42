@@ -23,3 +23,8 @@ python3 scripts/flow_audit.py --compare A.json B.json   # 兩台並排比
 - session 名 → S1、S2…；專案名 → 代號（P+雜湊）；程式名 → 類別（Claude／瀏覽器／通訊／同步／開發／系統／其他）
 - `--names` 只讓本機那份保留專案名，送出去的一律去隱私
 - 回報網址（Discord webhook）存在 `~/.claude/flow-audit/config.json`（權限 600），**不可以寫進 repo**（這個 repo 是公開的）
+
+## 自動彙整（管理者跑，scripts/flow_audit_digest.py）
+- 讀 #自檢回報 裡每台最新一份 report.json（只有去隱私數字），出總表：每台關鍵數字、比中位數高 1.5 倍標 ↑
+- 「統一優化」＝一半以上台數都有的問題，給大家一起改的規則；其餘列「個別提醒」
+- `python3 scripts/flow_audit_digest.py [--post] [--days 14]`；要機器人權杖（~/.discord42/bot_token，不進 repo）＋機器人已開 Message Content Intent
