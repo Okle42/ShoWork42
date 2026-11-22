@@ -89,6 +89,19 @@
 - **未完成／下一步**：①把 webhook 網址交給學弟（機爵）——Keng 還沒決定用機器人私訊或自己傳；②學弟跑 `--set-webhook` → `--label 學弟 --send`，拿兩份 JSON 用 `--compare` 對照；③若要自動彙整多台報告：機器人需開 Message Content intent 才讀得到附件
 - 機器人讀不到別人訊息內容（沒開 Message Content intent），驗證送出要用 `--send` 的回傳（wait=true 會列附件）
 
+## 終端機主題（11-22 晚）
+- Ghostty 設定：~/Library/Application Support/com.mitchellh.ghostty/config.ghostty（原檔空的，備份 .bak-20261122）；主題檔 ~/.config/ghostty/themes/Okle42-Dark／Okle42-Light
+  （舊位置 App Support/…/themes 還有一份重複副本，刪除被閘門擋 BS5HQ，等放行；不影響使用）
+- 毛玻璃：background-opacity 0.72＋background-blur macos-glass-regular＋background-opacity-cells；**要 Ghostty 整個重開才生效**（會關掉所有 session，Keng 自己挑時機）
+- 連動：球體配色鈕 → `GhosttyTheme.apply`（SphereWebScene.swift）改 config 的 theme 行＋點 Reload Configuration；
+  只有 Claude Code 主題（**~/.claude/settings.json** 的 theme，不是 ~/.claude.json）是 light／auto、且主題改之前開的 session 都關了，才會切淺色（不然深色介面配淺底看不清楚）
+- ~/.claude/settings.json：theme dark→auto；pluginConfigs prismantis options replyStyle／promptStyle／codeStyle=framed（備份 settings.json.bak-20261122-theme）
+
+## 下一件（未開工，Keng 11-22 21:20 指示）：把 prismantis 外掛內化成我們自己的樣式，之後停用 prismantis
+- Keng 選：放進 **ShoWork42 repo**
+- prismantis 0.46.0：~/.claude/plugins/cache/prismantis/prismantis/0.46.0，MIT（Nahum Litvin），約 8,100 行 TS／TSX，hooks.json → register.tsx；主題在 hooks/theme.ts、繪製在 render.tsx
+- 步驟：①複製到 ShoWork42 新資料夾（例如 mods/okle42-render/），保留 LICENSE 與出處註記、改外掛名 ②主題換黑白灰紅、回覆框透明（framed／無底色）、跟 Claude Code auto 主題深淺 ③用 plugin-authoring skill 了解 mod 安裝／本機 marketplace，裝上並在新 session 驗證畫得正常 ④確認可用後才在 settings.json 停用 prismantis@prismantis（先換上再拆，避免中間沒樣式）⑤推 main
+
 ## 字幕跟語音（11-22）
 - 開語音時 `say(..., follow=true)`：不先打字，等原生報「唸到哪」才出字（Mac：逐詞 marker＋合成完算出總長後的播放進度；微軟：播放進度）；`karaVoice('start')` 後 1.2 秒沒同步才退回照速度打字
 
