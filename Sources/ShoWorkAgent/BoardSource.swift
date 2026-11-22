@@ -35,6 +35,7 @@ final class BoardReader: @unchecked Sendable {
         var sessions: [SessionRecord] = []
         var transcripts: [String: TranscriptInfo] = [:]
         var glows: [Int32: WorkState] = [:]
+        var inputs: [Int32: Date] = [:]          // 11-23：各 session 終端機最後一次有人輸入的時間（tty 存取時間）
         var teams: [TeamConfig] = []
         var inbox: [TeamMessage] = []
         var reports: [String: SelfReport] = [:]
@@ -142,6 +143,7 @@ final class BoardReader: @unchecked Sendable {
             tailParse = tailParse.filter { alive.contains($0.key) }
         }
         s.glows = Self.glows()
+        s.inputs = Self.ttyInputs(s.sessions.map(\.pid))
         let tdir = BoardPaths.claude + "/teams"
         for team in (try? fm.contentsOfDirectory(atPath: tdir)) ?? [] {
             guard let d = fm.contents(atPath: "\(tdir)/\(team)/config.json"), let c = TeamConfig.decode(d) else { continue }
@@ -255,6 +257,21 @@ final class BoardReader: @unchecked Sendable {
             .map { a in info.asyncAgents.first { $0.id == a.id } ?? a }
         transcriptCache[r.sessionId] = (m, size, info)
         return info
+    }
+
+    /// 11-23 Keng「我正在用的視窗被說卡住」：拿來看／操作背景工作的終端機，自己的對話紀錄不會動，但人一直在打字。
+    /// 一次 ps 拿到每個 pid 的終端機，再看 /dev/ttysNNN 的存取時間（＝最後一次讀到輸入，跟 `w` 的 IDLE 同源）
+    static func ttyInputs(_ pids: [Int32]) -> [Int32: Date] {
+        guard !pids.isEmpty else { return [:] }
+        let r = Tools.run("/bin/ps", ["-o", "pid=,tty=", "-p", pids.map(String.init).joined(separator: ",")], timeout: 5)
+        var out: [Int32: Date] = [:]
+        for line in r.out.split(separator: "\n") {
+            let f = line.split(separator: " ", omittingEmptySubsequences: true)
+            guard f.count == 2, let pid = Int32(f[0]), f[1].hasPrefix("ttys") else { continue }
+            var st = stat()
+            if stat("/dev/" + f[1], &st) == 0 { out[pid] = Date(timeIntervalSince1970: TimeInterval(st.st_atimespec.tv_sec)) }
+        }
+        return out
     }
 
     /// ShoWork 自己的光暈狀態（Engine 每次 render 都會存 state.json）
@@ -483,7 +500,7 @@ final class BoardModel: ObservableObject {
     private func apply(_ s: BoardReader.Snapshot) {
         record(s)
         let fm = FileManager.default
-        var cards = Board.build(sessions: s.sessions, transcripts: s.transcripts, glows: s.glows, teams: s.teams,
+        var cards = Board.build(sessions: s.sessions, transcripts: s.transcripts, glows: s.glows, inputs: s.inputs, teams: s.teams,
                                 inbox: s.inbox, reports: s.reports, reviews: s.reviews, decisions: s.decisions,
                                 contexts: s.contexts, nicknames: s.nicknames,
                                 owned: SessionHost.shared.boardLiveIds(), asks: s.asks,

@@ -190,5 +190,8 @@ struct ActivityTests {
         busy.statusUpdatedAt = now.addingTimeInterval(-20 * 60).timeIntervalSince1970 * 1000
         let old = Board.build(sessions: [busy], transcripts: ["s1": plain], glows: [:], teams: [], inbox: [], now: now, home: "/h", isRepo: { _ in false })
         #expect(old[0].column == .stuck)
+        // 終端機剛有人打字（拿來看背景工作的視窗）也不算卡住
+        let typing = Board.build(sessions: [busy], transcripts: ["s1": plain], glows: [:], inputs: [1: now.addingTimeInterval(-30)], teams: [], inbox: [], now: now, home: "/h", isRepo: { _ in false })
+        #expect(typing[0].column == .active)
     }
 }

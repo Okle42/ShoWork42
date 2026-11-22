@@ -443,7 +443,7 @@ public enum Board {
 
     /// 組出整個看板：每個 session 一張卡，再加上排隊中的訊息各一張待辦卡
     public static func build(sessions: [SessionRecord], transcripts: [String: TranscriptInfo],
-                             glows: [Int32: WorkState], teams: [TeamConfig], inbox: [TeamMessage],
+                             glows: [Int32: WorkState], inputs: [Int32: Date] = [:], teams: [TeamConfig], inbox: [TeamMessage],
                              reports: [String: SelfReport] = [:], reviews: [String: Review] = [:], decisions: [String: Decision] = [:],
                              contexts: [String: ContextUse] = [:], nicknames: [String: Nickname] = [:],
                              owned: Set<String> = [],
@@ -465,7 +465,8 @@ public enum Board {
             // 11-22 Keng：剛送出訊息那一刻被標「卡住」——狀態一變忙，對話紀錄還沒寫新東西，最後動靜停在上一輪（超過 10 分鐘就誤判）
             // ⇒ 「變成忙」的時間（statusUpdatedAt）也算一次動靜
             let busySince = s.statusUpdatedAt.map { Date(timeIntervalSince1970: $0 / 1000) }
-            let seen = [t.lastActivity, busySince].compactMap { $0 }.max()
+            // 11-23 Keng：拿來看背景工作的終端機（agent view）自己的紀錄不動、人卻一直在打字 ⇒ 終端機最後一次輸入也算動靜
+            let seen = [t.lastActivity, busySince, inputs[s.pid]].compactMap { $0 }.max()
             var base = column(status: s.status, glow: glows[s.pid], lastActivity: seen, now: now)
             // 10-20 審查：在等子 agent／workflow 回來時主 session 本來就不寫東西，不算卡住（實測主控 session 開完 workflow 被誤判卡住）
             if base.0 == .stuck && t.isDelegating { base = (.active, "交辦中，等子 agent 回來") }
