@@ -577,10 +577,19 @@ function syncSats(team) {
   }
   for (const [id, s] of sats) if (!keep.has(id)) { satGroup.remove(s.pivot); s.mesh.material.dispose(); s.halo.material.dispose(); sats.delete(id); }
 }
+// 11-22 Keng：點衛星要追著跑 ⇒ 滑鼠移到衛星軌道附近就減速到 15%，停在某顆衛星上就整個停住；移開再慢慢回到原速
+let satSlow = 1, pointerAt = null;
 function animSats(dt, t) {
+  let want = 1;
+  if (hovered) want = 0;
+  else if (pointerAt && performance.now() - pointerAt.t < 4000) {
+    const { cx, cy, r } = sphereScreen(), d = Math.hypot(pointerAt.x - cx, pointerAt.y - cy) / r;      // r＝半徑 2 單位的那圈
+    if (d > 0.8 && d < 1.8) want = 0.15;          // 衛星軌道半徑 2.5–3.1 單位 ≈ 1.25–1.55 r，前後留餘裕
+  }
+  satSlow += (want - satSlow) * Math.min(1, dt * (want < satSlow ? 8 : 2));      // 減速快、恢復慢
   for (const s of sats.values()) {
     const st = s.c?.status, speed = st === "進行中" ? 0.55 : st === "需要你" ? 0.25 : 0.12;
-    s.orbit.a += dt * speed;
+    s.orbit.a += dt * speed * satSlow;
     const x = Math.cos(s.orbit.a) * s.orbit.r, z = Math.sin(s.orbit.a) * s.orbit.r;
     for (const m of [s.mesh, s.halo, s.hit]) m.position.set(x, 0, z);
     const col = s.fade.step(); s.mesh.material.color.copy(col); s.halo.material.color.copy(col);
@@ -1159,8 +1168,8 @@ function drawLinks() {
    （滑鼠在哪一列就指哪顆；沒有就指最需要注意的：需要你 > 卡住 > 進行中）、事件卡→講到的那個東西 */
 const linkRect = {};
 let rowSid = null, popTarget = null, popFresh = false;
-$("lkStatic").innerHTML = ["cardUsage", "cardTeam", "cardSys"].map(id => `<path id="lp_${id}"/><circle id="lc_${id}" r="2.6"/><circle id="lr_${id}" r="6" style="fill:none;stroke-width:1"/><text id="lt_${id}"></text>`).join("");
-$("lkPop").innerHTML = `<path id="lp_pop" class="pop"/><circle id="lc_pop" class="pop" r="2.6"/><circle id="lr_pop" class="pop" r="6" style="fill:none;stroke-width:1"/><text id="lt_pop"></text>`;
+$("lkStatic").innerHTML = ["cardUsage", "cardTeam", "cardSys"].map(id => `<path id="lp_${id}"/><circle id="lb_${id}" r="0" style="fill:var(--bg);stroke:none;opacity:.85"/><circle id="lr_${id}" r="6" style="fill:none;stroke:var(--acc);stroke-width:1.2"/><circle id="lc_${id}" r="3"/><text id="lt_${id}"></text>`).join("");
+$("lkPop").innerHTML = `<path id="lp_pop" class="pop"/><circle id="lb_pop" r="0" style="fill:var(--bg);stroke:none;opacity:.85"/><circle id="lr_pop" class="pop" r="6" style="fill:none;stroke:var(--acc);stroke-width:1.2"/><circle id="lc_pop" class="pop" r="3"/><text id="lt_pop"></text>`;
 /** 尖端的標籤：指到的東西是什麼、多少 */
 function labelOf(key) {
   const name = sid => (data.team || []).find(c => c.sessionId === sid)?.name || "";
@@ -1188,13 +1197,14 @@ function targetOf(key) {
 }
 function setLink(id, rect, pt, cls) {
   const p = $("lp_" + id), c = $("lc_" + id), r = $("lr_" + id);
-  const tx = $("lt_" + id);
+  const tx = $("lt_" + id), bg = $("lb_" + id);
+  if (pt) { bg.setAttribute("cx", pt.x.toFixed(1)); bg.setAttribute("cy", pt.y.toFixed(1)); bg.setAttribute("r", 7); } else bg.setAttribute("r", 0);
   if (!pt || (!rect && id === "pop")) { p.setAttribute("d", ""); c.setAttribute("r", 0); r.setAttribute("r", 0); tx.textContent = ""; return; }
   // 11-22 Keng：卡片關掉時尖端的數值（5H 33%、溫度、名字）還是要在，只是不拉線
   if (!rect) {
     p.setAttribute("d", "");
     for (const e of [c, r]) { e.setAttribute("cx", pt.x.toFixed(1)); e.setAttribute("cy", pt.y.toFixed(1)); }
-    c.setAttribute("r", 2.6); r.setAttribute("r", 6);
+    c.setAttribute("r", 3); r.setAttribute("r", 6.5);
     if (cls != null) for (const e of [p, c, r, tx]) e.setAttribute("class", cls);
     const lbl = labelOf(id), away = pt.x >= sphereScreen().cx ? 1 : -1;
     if (tx.textContent !== lbl) tx.textContent = lbl;
@@ -1225,6 +1235,7 @@ function linkFrame() {
     setLink("cardUsage", null, targetOf("cardUsage"), data.five_hour >= 70 ? "warn" : "");
     setLink("cardSys", null, targetOf("cardSys"), data.heat && (data.heat.level === "hot" || data.heat.level === "critical") ? "bad" : "");
     setLink("cardTeam", null, null); setLink("pop", null, null);
+    satMarks();
     return;
   }
   gaugeSide(g5, linkRect.cardUsage); gaugeSide(g7, linkRect.cardUsage); gaugeSide(gHeat, linkRect.cardSys || linkRect.cardUsage);
@@ -1239,6 +1250,24 @@ function linkFrame() {
     path.style.transition = "none"; path.style.strokeDasharray = L * 3; path.style.strokeDashoffset = L;
     requestAnimationFrame(() => { path.style.transition = ""; path.style.strokeDashoffset = 0; });
   }
+}
+/* 11-22 Keng 喜歡的「紅心、黑圈、紅框」準星：套在需要你／卡住的衛星上，滑鼠移到哪顆也套上（不拉線） */
+const markG = document.createElementNS("http://www.w3.org/2000/svg", "g"); $("links").appendChild(markG);
+const markPool = [];
+function satMarks() {
+  const want = [];
+  for (const s of sats.values()) if (s.c && (s.c.status === "需要你" || s.c.status === "卡住" || s === hovered)) want.push(s);
+  while (markPool.length < want.length) {
+    const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    g.innerHTML = `<circle r="7" style="fill:var(--bg);opacity:.85"/><circle r="6.5" style="fill:none;stroke:var(--acc);stroke-width:1.2"/><circle r="3" style="fill:var(--acc)"/>`;
+    markG.appendChild(g); markPool.push(g);
+  }
+  const v = new THREE.Vector3();
+  markPool.forEach((g, i) => {
+    const s = want[i]; const p = s && toScreen(s.mesh.getWorldPosition(v));
+    if (!p) { g.style.display = "none"; return; }
+    g.style.display = ""; g.setAttribute("transform", `translate(${p.x.toFixed(1)},${p.y.toFixed(1)})`);
+  });
 }
 function ballEdge(rect) { const { cx, cy, r } = sphereScreen(), x = rect.left + rect.width / 2, y = rect.top + rect.height / 2, a = Math.atan2(y - cy, x - cx); return { x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r }; }
 $("lt_cardUsage").addEventListener("click", () => openPanelFor("cardUsage"));
@@ -1553,7 +1582,9 @@ function openPanelFor(id) {
   const el = $(id); el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash");
 }
 let hovered = null;
+canvas.addEventListener("pointerleave", () => { pointerAt = null; });
 canvas.addEventListener("pointermove", e => {
+  pointerAt = { x: e.clientX, y: e.clientY, t: performance.now() };
   const s = satAt(e);
   if (hovered && hovered !== s) hovered.hover = false;
   hovered = s; if (s) s.hover = true;
