@@ -794,7 +794,8 @@ function gaugeTip(g) {
 //    ①形狀＝真頻譜推出去的波形，三條各吃低／中／高頻；粒子在帶上依高斯分布有寬度，綢帶翻面處變窄變亮
 //    ②粒子沿軌道一直流動（各條方向、速度不同），沒聲音時剩稀疏慢流的星塵＋呼吸
 //    ③每顆粒子固定「落後幾格」：新的貼著波形、舊的在外側淡掉 ⇒ 殘影變成拖尾的塵
-//    ④被聲音推出去的地方，約 18% 粒子變火花往外噴、邊飛邊淡；亮處深色主題往白、淺色往黑
+//    ④被聲音推出去的地方，約 18% 粒子變火花往外噴、邊飛邊淡
+//    ⑥顏色（11-22 Keng）：跟量表同一組 白→灰→黑→紅 漸層（rampColor），越大聲／推越遠越往紅走；火花飛出去一路走到紅；聆聽時維持灰
 //    ⑤一條一個 draw call（Points＋頂點色帶透明度＋圓形柔邊貼圖），三條共 3 個
 const NB = 32, RIB_N = 3, RIB_S = 12, RIB_P = 160, RIB_H = RIB_S * 2, RIB_R = 1.74, RIB_PN = 1800;   // 2400 顆時每格 JS 5.4ms，省電降到 1800
 const lv = { bands: new Float32Array(NB), sm: new Float32Array(NB), rms: 0, at: -1e9, mic: false };
@@ -805,6 +806,14 @@ const dotTex = (() => {
   g.addColorStop(0, "rgba(255,255,255,1)"); g.addColorStop(0.35, "rgba(255,255,255,0.85)"); g.addColorStop(1, "rgba(255,255,255,0)");
   x.fillStyle = g; x.fillRect(0, 0, 32, 32); return new THREE.CanvasTexture(c);
 })();
+// 漸層查表：每顆粒子每格都要上色，不能每次呼叫 rampColor（它每次新建 4 個顏色）⇒ 主題換了才重算 64 格
+const RAMP_LUT = new Float32Array(64 * 3); let rampLutFor = "";
+function rampLut() {
+  const name = themeName(); if (name === rampLutFor) return RAMP_LUT;
+  const c = new THREE.Color();
+  for (let i = 0; i < 64; i++) { rampColor(i / 63, c); RAMP_LUT[i * 3] = c.r; RAMP_LUT[i * 3 + 1] = c.g; RAMP_LUT[i * 3 + 2] = c.b; }
+  rampLutFor = name; return RAMP_LUT;
+}
 const ribbons = [];
 for (let r = 0; r < RIB_N; r++) {
   const g = new THREE.BufferGeometry();
@@ -999,6 +1008,7 @@ function animWave(dt, t, talking, hearing, live) {
     }
     const pos = rb.pts.geometry.attributes.position.array, col = rb.pts.geometry.attributes.color.array, TAU = Math.PI * 2;
     const flow = 0.35 + ribLevel * 1.4;                                  // 講話時流得快
+    const lut = rampLut();
     for (let n = 0, o = 0, oc = 0; n < RIB_PN; n++) {
       const th = ((rb.th0[n] + t * rb.spd[n] * flow) % TAU + TAU) % TAU;
       const fi = th / TAU * RIB_P, i0 = Math.floor(fi) % RIB_P, i1 = (i0 + 1) % RIB_P, fr = fi - Math.floor(fi);
@@ -1007,14 +1017,16 @@ function animWave(dt, t, talking, hearing, live) {
       const tw = Math.sin(th * 2 + t * 0.8 + rb.ph), wid = 0.35 + Math.abs(tw);
       const hot = Math.min(1, Math.max(0, d) * 2.4);
       let rr = RIB_R + d * (1 - age * 0.35) + age * 0.05 + u * 0.045 * wid, a = Math.pow(1 - age, 1.2) * (0.22 + 0.78 * ribLevel) * (0.45 + 0.55 * hot);
-      if (rb.spark[n]) {                                                   // 火花：有聲音才噴，沿半徑往外飛、越飛越淡
+      let f = Math.min(1, hot * 0.95 + age * 0.15);                       // 漸層位置：安靜＝白、越大聲越往灰→黑→紅
+      if (rb.spark[n]) {                                                   // 火花：有聲音才噴，沿半徑往外飛、越飛越淡、一路變紅
         const k = (rb.sph[n] + t * 0.9) % 1;
-        rr += hot * k * 0.42; a *= hot * (1 - k);
+        rr += hot * k * 0.42; a *= hot * (1 - k); f = Math.min(1, hot * 0.7 + k * 0.45);
       }
       const z = u * 0.085 * wid * (1 + d * 3);
       pos[o++] = Math.cos(th) * rr; pos[o++] = Math.sin(th) * rr; pos[o++] = z;
-      col[oc++] = ribBase.r + (ribHi.r - ribBase.r) * hot; col[oc++] = ribBase.g + (ribHi.g - ribBase.g) * hot;
-      col[oc++] = ribBase.b + (ribHi.b - ribBase.b) * hot; col[oc++] = a * (1 - Math.abs(u) * 0.45);
+      if (hearing) { col[oc++] = ribBase.r; col[oc++] = ribBase.g; col[oc++] = ribBase.b; }
+      else { const li = Math.round(f * 63) * 3; col[oc++] = lut[li]; col[oc++] = lut[li + 1]; col[oc++] = lut[li + 2]; }
+      col[oc++] = a * (1 - Math.abs(u) * 0.45);
     }
     rb.pts.geometry.attributes.position.needsUpdate = true; rb.pts.geometry.attributes.color.needsUpdate = true;
   }
