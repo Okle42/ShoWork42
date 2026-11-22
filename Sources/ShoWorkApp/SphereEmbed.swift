@@ -6,9 +6,12 @@ public struct AgentOptions {
     public var regularApp: Bool                        // true＝一般 App（Dock 圖示、選單列）；ShoWorkAgent 是 false
     public var onLaunch: (@MainActor () -> Void)?      // 引擎起來之後呼叫（Orbit42 在這裡開主視窗）
     public var waitForAccessibility: Bool               // false＝沒有輔助使用權限也照樣跑（Orbit42：問一次就繼續）
-    public init(regularApp: Bool = false, waitForAccessibility: Bool = true, onLaunch: (@MainActor () -> Void)? = nil) {
-        self.regularApp = regularApp; self.waitForAccessibility = waitForAccessibility; self.onLaunch = onLaunch
+    public var testOnly: Bool                           // true＝只開視窗（螢幕外測試用；不開引擎、不碰正在跑的 ShoWorkAgent）
+    public init(regularApp: Bool = false, waitForAccessibility: Bool = true, testOnly: Bool = false, onLaunch: (@MainActor () -> Void)? = nil) {
+        self.regularApp = regularApp; self.waitForAccessibility = waitForAccessibility; self.testOnly = testOnly; self.onLaunch = onLaunch
     }
+    /// 測試模式（螢幕外、不准開到使用者螢幕、不准真的動手）
+    @MainActor public static var isTest: Bool { BoardWindow.testMode }
 }
 
 /// 球體嵌進別的 App（Orbit42）用的接口：完整的球體畫面（播報、空白鍵講話、量表、自檢、cool42…全部同一份），

@@ -314,6 +314,18 @@ if argv.count == 4, argv[1] == "--work-e2e" {
     NSApplication.shared.run()
 }
 
+// Orbit42 測試：只開 Orbit42 視窗（螢幕外、不開 socket、不跟正在跑的 ShoWorkAgent 搶），同 --board-window
+if options.testOnly {
+    MainActor.assumeIsolated {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        BoardWindow.testMode = true
+        EditMenu.install()
+        options.onLaunch?()
+    }
+    NSApplication.shared.run()
+    return
+}
+
 // Test: ShoWorkAgent --board-window  → 只開戰情中心視窗（不開 socket、不發光、不需要輔助使用權限）
 if argv.count == 2, argv[1] == "--board-window" {
     MainActor.assumeIsolated {

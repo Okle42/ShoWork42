@@ -214,8 +214,9 @@
   svg#links path { fill: none; stroke: var(--acc); stroke-width: 1; opacity: .55; }
   svg#links path.pop { stroke-width: 1.2; opacity: .9; transition: stroke-dashoffset .45s ease-out; }
   svg#links circle { fill: var(--acc); }
-  svg#links text { pointer-events: auto; cursor: pointer; fill: var(--ink); stroke: none; font: 400 10.5px ui-monospace, Menlo, monospace; letter-spacing: .08em; paint-order: stroke; }
-  svg#links text.warn, svg#links text.bad, svg#links tspan.warn { fill: var(--acc); stroke: none; }      /* 只變色、不描邊（描邊會看起來像粗體） */
+  /* 11-23：字外面一圈「背景色」光暈（paint-order: stroke，字不會變粗），壓在虛線環上也看得清楚 */
+  svg#links text { pointer-events: auto; cursor: pointer; fill: var(--ink); stroke: var(--bg); stroke-width: 3px; stroke-linejoin: round; font: 400 10.5px ui-monospace, Menlo, monospace; letter-spacing: .08em; paint-order: stroke; }
+  svg#links text.warn, svg#links text.bad, svg#links tspan.warn { fill: var(--acc); stroke: var(--bg); }      /* 只變色（光暈維持背景色；不然會被 .warn 的紅描邊蓋成粗體） */
   svg#links .warn { stroke: var(--warn); fill: var(--warn); }
   svg#links .bad { stroke: var(--bad); fill: var(--bad); }
   .pop { position: fixed; top: 96px; width: var(--cw); z-index: 4; pointer-events: auto; cursor: pointer;
@@ -1408,11 +1409,12 @@ function avoidCards() {
   for (const id of ["cardUsage", "g7", "cardSys", "disk0", "disk1", "disk2", "disk3"]) {
     const t = $("lt_" + id), c = $("lc_" + id); if (!t?.textContent || !c) continue;
     if (!hit(t.getBBox())) continue;
-    const px = +c.getAttribute("cx"), right = t.getAttribute("text-anchor") !== "end";
-    t.setAttribute("text-anchor", right ? "end" : "start"); t.setAttribute("x", (px + (right ? -10 : 10)).toFixed(1));
-    if (!hit(t.getBBox())) continue;
-    const y0 = +t.getAttribute("y");
-    for (const dy of [-16, 16, -32, 32, -48, 48, 64, 80]) { t.setAttribute("y", (y0 + dy).toFixed(1)); if (!hit(t.getBBox())) break; }
+    // 先上下（保持置中），都撞到再往左右挪（靠點那一邊對齊）；全撞就留在點正上方
+    const px = +c.getAttribute("cx"), py = +c.getAttribute("cy"), w = t.getBBox().width;
+    const tries = [[0, 22], [0, -29], [0, 38], [0, -45], [-(w / 2 + 12), 4], [w / 2 + 12, 4], [-(w / 2 + 12), -13], [w / 2 + 12, -13]];
+    let ok = false;
+    for (const [dx, dy] of tries) { t.setAttribute("x", (px + dx).toFixed(1)); t.setAttribute("y", (py + dy).toFixed(1)); if (!hit(t.getBBox())) { ok = true; break; } }
+    if (!ok) { t.setAttribute("x", px.toFixed(1)); t.setAttribute("y", (py - 13).toFixed(1)); }
   }
 }
 /* 11-22 Keng：標籤的名稱一律黑（深色主題白），只有超過門檻時「數字」變紅（SD128 黑、87% 紅） */
@@ -1435,9 +1437,9 @@ function setLink(id, rect, pt, cls) {
     for (const e of [c, r]) { e.setAttribute("cx", pt.x.toFixed(1)); e.setAttribute("cy", pt.y.toFixed(1)); }
     c.setAttribute("r", 3); r.setAttribute("r", 6.5);
     if (cls != null) for (const e of [p, c, r]) e.setAttribute("class", cls);
-    const lbl = labelOf(id), away = pt.x >= sphereScreen().cx ? 1 : -1;
-    setLabel(tx, lbl, cls);
-    tx.setAttribute("x", (pt.x + away * 10).toFixed(1)); tx.setAttribute("y", (pt.y - 8).toFixed(1)); tx.setAttribute("text-anchor", away > 0 ? "start" : "end");
+    // 11-23 Keng：所有尖端標籤一律「文字置中、在紅點正上方」
+    setLabel(tx, labelOf(id), cls);
+    tx.setAttribute("x", pt.x.toFixed(1)); tx.setAttribute("y", (pt.y - 13).toFixed(1)); tx.setAttribute("text-anchor", "middle");
     return;
   }
   const cl = (v, a, z) => Math.max(a, Math.min(z, v));
@@ -1462,25 +1464,17 @@ function linkFrame() {
   if (NO_LINES) {
     // 11-22：右半邊給硬碟了 ⇒ 額度、溫度環固定在左半邊（不再跟著卡片翻邊）
     setLink("cardUsage", null, targetOf("cardUsage"), data.five_hour >= 70 ? "warn" : "");
-    // 11-22 Keng：7 天的 % 也要標（之前只有 5H）；兩個尖端靠太近就把 7D 往下錯開一行
-    setLink("g7", null, targetOf("g7"), data.seven_day >= 80 ? "warn" : "");
-    { const a = $("lt_cardUsage"), b = $("lt_g7");
-      if (a.textContent && b.textContent) { const ya = +a.getAttribute("y"), yb = +b.getAttribute("y"), xa = +a.getAttribute("x"), xb = +b.getAttribute("x");
-        if (Math.abs(ya - yb) < 14 && Math.abs(xa - xb) < 70) b.setAttribute("y", (ya + (yb >= ya ? 14 : -14)).toFixed(1)); } }
+    setLink("g7", null, targetOf("g7"), data.seven_day >= 80 ? "warn" : "");      // 11-22 Keng：7 天的 % 也要標
     setLink("cardSys", null, targetOf("cardSys"), data.heat && (data.heat.level === "hot" || data.heat.level === "critical") ? "bad" : "");
     setLink("cardTeam", null, null); setLink("pop", null, null);
     gDisks.forEach((g, i) => setLink("disk" + i, null, targetOf("disk" + i), (data.disks || [])[i]?.used >= 85 ? "warn" : ""));
-    // 兩顆硬碟用量差不多時尖端靠在一起、標籤會疊 ⇒ 由上往下排，太近就往下錯開一行
-    // 標籤一律放在最外圈硬碟環的外側（同一個角度），再由上往下排、太近就錯開一行
-    const tl = [];
-    gDisks.forEach((g, i) => {
-      const t = $("lt_disk" + i); if (!t.textContent || g.target == null) return;
-      const a = g.ang(Math.max(0.004, Math.min(1, g.cur))), P = toScreen(_tip.set(Math.cos(a) * (LAYER(5) + 0.18), Math.sin(a) * (LAYER(5) + 0.18), 0).applyMatrix4(outer.matrixWorld));
-      if (P) tl.push({ t, x: P.x + 6, y: P.y + 4 });
-    });
-    tl.sort((a, b) => a.y - b.y);
-    for (let i = 1; i < tl.length; i++) if (tl[i].y - tl[i - 1].y < 14) tl[i].y = tl[i - 1].y + 14;
-    for (const l of tl) { l.t.setAttribute("x", l.x.toFixed(1)); l.t.setAttribute("y", l.y.toFixed(1)); l.t.setAttribute("text-anchor", "start"); }
+    // 11-23 Keng：標籤都在自己紅點的正上方置中；兩個標籤疊到時，後面那個再往上錯開一行
+    const tl = ["cardUsage", "g7", "cardSys", "disk0", "disk1", "disk2", "disk3"].map(id => $("lt_" + id)).filter(t => t && t.textContent);
+    for (let i = 0; i < tl.length; i++) for (let j = 0; j < i; j++) {
+      const a = tl[j].getBBox(), b = tl[i].getBBox();
+      if (a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height)
+        tl[i].setAttribute("y", (+tl[i].getAttribute("y") - (b.y + b.height - a.y) - 2).toFixed(1));
+    }
     avoidCards();
     satMarks();
     return;
