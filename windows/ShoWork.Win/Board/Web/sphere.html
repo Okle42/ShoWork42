@@ -253,6 +253,18 @@
   .chips span { font-size: 10px; letter-spacing: .06em; color: var(--ink-dim); display: inline-flex; align-items: center; gap: 4px; }
   .chips i, .trow .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--c); display: inline-block; }
   .row.trow { grid-template-columns: 12px 1fr auto; align-items: center; }
+  /* 11-22 Keng：進行中那一列要一眼看出在跑 ⇒ 紅色雷達掃描波從左掃到右（亮邊＋拖尾），名字前的點同步發出脈衝圈 */
+  .row.trow.live { position: relative; overflow: hidden; isolation: isolate; }
+  .row.trow.live::before { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+    background: linear-gradient(90deg, transparent 0%, color-mix(in srgb, var(--acc) 6%, transparent) 55%, color-mix(in srgb, var(--acc) 26%, transparent) 92%, var(--acc) 96%, transparent 97%);
+    background-size: 45% 100%; background-repeat: no-repeat; animation: radar 2.4s linear infinite; }
+  .row.trow.live::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 1px; pointer-events: none;
+    background: linear-gradient(90deg, transparent, var(--acc), transparent); background-size: 45% 100%; background-repeat: no-repeat; animation: radar 2.4s linear infinite; }
+  @keyframes radar { from { background-position: -60% 0; } to { background-position: 160% 0; } }
+  .row.trow.live .dot { position: relative; }
+  .row.trow.live .dot::after { content: ""; position: absolute; inset: -2px; border-radius: 50%; border: 1px solid var(--acc); animation: ping 2.4s ease-out infinite; }
+  @keyframes ping { 0% { transform: scale(.6); opacity: .9; } 70%, 100% { transform: scale(3); opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { .row.trow.live::before, .row.trow.live::after, .row.trow.live .dot::after { animation: none; } }
   .trow .dot { box-shadow: 0 0 6px var(--c); }
   .trow .dot.pulse { animation: dpulse 1.2s ease-in-out infinite; }
   @keyframes dpulse { 50% { transform: scale(1.7); opacity: .55; } }
@@ -1179,7 +1191,7 @@ function renderTeam() {
   $("teamRows").innerHTML = team.slice(0, 6).map((c, i) => {
     const col = ST_COL[c.status] || "var(--done)", changed = lastSt.has(c.sessionId) && lastSt.get(c.sessionId) !== c.status;
     const sub = [esc(c.status || ""), c.ctx != null ? `<span class="${c.ctx >= 80 ? "hi" : ""}">記憶 ${c.ctx}%</span>` : "", c.ago != null ? (c.ago < 1 ? "剛剛" : c.ago < 60 ? `${c.ago} 分鐘前` : `${Math.floor(c.ago / 60)} 小時前`) : ""].filter(Boolean).join(" · ");
-    return `<div class="row trow${c.sessionId ? " link" : ""}${changed ? " flash" : ""}" data-i="${i}" title="${c.sessionId ? "點一下跳到這個 session" : ""}">
+    return `<div class="row trow${c.status === "進行中" ? " live" : ""}${c.sessionId ? " link" : ""}${changed ? " flash" : ""}" data-i="${i}" title="${c.sessionId ? "點一下跳到這個 session" : ""}">
       <span class="dot${c.status === "需要你" || c.status === "進行中" ? " pulse" : ""}" style="--c:${col}"></span>
       <span class="nm">${esc(c.name || "")}${c.doing ? `<small> · ${esc(c.doing)}</small>` : ""}</span><span>${c.progress != null ? c.progress + "%" : ""}</span>
       ${c.progress != null ? `<div class="meter"><b style="width:${c.progress}%;background-color:${col}"></b></div>` : ""}
