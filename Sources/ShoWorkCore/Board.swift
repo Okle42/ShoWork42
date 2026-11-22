@@ -473,7 +473,7 @@ public enum Board {
             let names = team?.teammates.map(\.name) ?? []
             let msgs = team == nil ? [] : inbox.filter { m in names.contains(m.from) || names.contains(m.to ?? "") }
             out.append(BoardCard(id: s.sessionId, column: col, reason: why, project: project,
-                                 title: Nicknames.title(nicknames[s.sessionId], project: project, fallback: t.title ?? t.lastPrompt.map { String($0.prefix(40)) } ?? "還沒交代工作"),       // 11-22：不再退回英文名
+                                 title: Nicknames.title(nicknames[s.sessionId], project: project, fallback: Nicknames.stripName(t.title) ?? t.lastPrompt.map { String($0.prefix(40)) } ?? "還沒交代工作"),       // 11-22：不再退回英文名
                                  detail: t.lastAssistantText.map { String(plain($0).prefix(240)) },
                                  lastActivity: t.lastActivity, pid: s.pid, sessionId: s.sessionId,
                                  teammates: names, messages: Array(msgs.suffix(5)),

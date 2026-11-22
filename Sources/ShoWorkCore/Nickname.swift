@@ -68,6 +68,13 @@ public enum Nicknames {
         if project == "（家目錄）" || project.isEmpty { return nil }
         return project.hasPrefix("_wt-") ? String(project.dropFirst(4)) : project      // worktree 資料夾 _wt-ShoWork42-sphere → ShoWork42-sphere
     }
+    /// 對話標題拿掉英文名：「Dora」→ nil、「Bella-點衛星」→「點衛星」（舊版 hook 把英文名寫進標題）
+    public static func stripName(_ title: String?) -> String? {
+        guard let t = title?.trimmingCharacters(in: .whitespaces), !t.isEmpty else { return nil }
+        let parts = t.split(separator: "-", maxSplits: 1).map(String.init)
+        guard let n = inherited(Data(#"{"type":"custom-title","customTitle":"\#(parts[0].replacingOccurrences(of: "\"", with: ""))"}"#.utf8)), n == parts[0] else { return t }
+        return parts.count > 1 && !parts[1].isEmpty ? parts[1] : nil
+    }
     /// 卡片標題：「職稱／專案 · 任務」；沒有職稱又在家目錄就只有任務；還沒自報過任務就接原本的標題
     public static func title(_ n: Nickname?, project: String = "（家目錄）", fallback: String) -> String {
         let task = n?.doing ?? fallback

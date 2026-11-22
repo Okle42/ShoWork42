@@ -130,3 +130,13 @@ struct DisplayName2Tests {
         #expect(Nicknames.label(nil, project: "_wt-ShoWork42-sphere") == "ShoWork42-sphere")
     }
 }
+
+@Suite("StripName")
+struct StripNameTests {
+    @Test func strip() {
+        #expect(Nicknames.stripName("Dora") == nil)
+        #expect(Nicknames.stripName("Bella-點衛星開戰情卡") == "點衛星開戰情卡")
+        #expect(Nicknames.stripName("修 PDF 比例") == "修 PDF 比例")
+        #expect(Nicknames.stripName("clear-conversation") == "clear-conversation")
+    }
+}
