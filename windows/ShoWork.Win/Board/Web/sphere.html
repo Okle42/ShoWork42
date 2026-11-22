@@ -1187,7 +1187,18 @@ function targetOf(key) {
 function setLink(id, rect, pt, cls) {
   const p = $("lp_" + id), c = $("lc_" + id), r = $("lr_" + id);
   const tx = $("lt_" + id);
-  if (!rect || !pt) { p.setAttribute("d", ""); c.setAttribute("r", 0); r.setAttribute("r", 0); tx.textContent = ""; return; }
+  if (!pt || (!rect && id === "pop")) { p.setAttribute("d", ""); c.setAttribute("r", 0); r.setAttribute("r", 0); tx.textContent = ""; return; }
+  // 11-22 Keng：卡片關掉時尖端的數值（5H 33%、溫度、名字）還是要在，只是不拉線
+  if (!rect) {
+    p.setAttribute("d", "");
+    for (const e of [c, r]) { e.setAttribute("cx", pt.x.toFixed(1)); e.setAttribute("cy", pt.y.toFixed(1)); }
+    c.setAttribute("r", 2.6); r.setAttribute("r", 6);
+    if (cls != null) for (const e of [p, c, r, tx]) e.setAttribute("class", cls);
+    const lbl = labelOf(id), away = pt.x >= sphereScreen().cx ? 1 : -1;
+    if (tx.textContent !== lbl) tx.textContent = lbl;
+    tx.setAttribute("x", (pt.x + away * 10).toFixed(1)); tx.setAttribute("y", (pt.y - 8).toFixed(1)); tx.setAttribute("text-anchor", away > 0 ? "start" : "end");
+    return;
+  }
   const cl = (v, a, z) => Math.max(a, Math.min(z, v));
   // 卡片在目標左／右＝從側邊水平出來 26px 再直接接到目標；目標在卡片正上／下＝從上／下緣出來
   const side = pt.x < rect.left || pt.x > rect.right;
