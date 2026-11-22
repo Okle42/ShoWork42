@@ -1215,7 +1215,16 @@ function setLink(id, rect, pt, cls) {
   tx.setAttribute("x", (pt.x + away * 10).toFixed(1)); tx.setAttribute("y", (pt.y - 8).toFixed(1));
   tx.setAttribute("text-anchor", away > 0 ? "start" : "end");
 }
+// 11-22 Keng：紅色指向線不需要了（額度、溫度、戰情、事件卡都拿掉）；資料環尖端的點和數值（5H 33%、溫度）保留，戰情不再指衛星
+const NO_LINES = true;
 function linkFrame() {
+  if (NO_LINES) {
+    gaugeSide(g5, linkRect.cardUsage); gaugeSide(g7, linkRect.cardUsage); gaugeSide(gHeat, linkRect.cardSys || linkRect.cardUsage);
+    setLink("cardUsage", null, targetOf("cardUsage"), data.five_hour >= 70 ? "warn" : "");
+    setLink("cardSys", null, targetOf("cardSys"), data.heat && (data.heat.level === "hot" || data.heat.level === "critical") ? "bad" : "");
+    setLink("cardTeam", null, null); setLink("pop", null, null);
+    return;
+  }
   gaugeSide(g5, linkRect.cardUsage); gaugeSide(g7, linkRect.cardUsage); gaugeSide(gHeat, linkRect.cardSys || linkRect.cardUsage);
   for (const id of ["cardUsage", "cardTeam", "cardSys"]) {
     const lvl = id === "cardUsage" ? (data.five_hour >= 70 ? "warn" : "") : id === "cardSys" ? (data.heat && (data.heat.level === "hot" || data.heat.level === "critical") ? "bad" : "") : "";
