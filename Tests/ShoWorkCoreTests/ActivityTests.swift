@@ -179,4 +179,16 @@ struct ActivityTests {
         let stuck = Board.build(sessions: [busy], transcripts: ["s1": plain], glows: [:], teams: [], inbox: [], now: now, home: "/h", isRepo: { _ in false })
         #expect(stuck[0].column == .stuck && stuck[0].blockedReason == .testRun)
     }
+
+    @Test("11-22 Keng：剛送出訊息（狀態剛變忙、對話紀錄停在半小時前）不算卡住；變忙也超過 10 分鐘才算")
+    func justPromptedNotStuck() {
+        var plain = parse([use("a", "Bash", #"{"command":"ls"}"#)]); plain.lastActivity = now.addingTimeInterval(-30 * 60)
+        var busy = SessionRecord(pid: 1, sessionId: "s1", cwd: "/r", status: "busy")
+        busy.statusUpdatedAt = now.addingTimeInterval(-5).timeIntervalSince1970 * 1000
+        let fresh = Board.build(sessions: [busy], transcripts: ["s1": plain], glows: [:], teams: [], inbox: [], now: now, home: "/h", isRepo: { _ in false })
+        #expect(fresh[0].column == .active)
+        busy.statusUpdatedAt = now.addingTimeInterval(-20 * 60).timeIntervalSince1970 * 1000
+        let old = Board.build(sessions: [busy], transcripts: ["s1": plain], glows: [:], teams: [], inbox: [], now: now, home: "/h", isRepo: { _ in false })
+        #expect(old[0].column == .stuck)
+    }
 }

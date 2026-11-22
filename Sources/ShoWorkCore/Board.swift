@@ -460,7 +460,11 @@ public enum Board {
             && !(s.kind == "bg" && (s.name == nil || s.name == String(s.sessionId.prefix(8))) && transcripts[s.sessionId]?.lastActivity == nil && !owned.contains(s.sessionId)) {
             if owned.contains(s.sessionId) { s.kind = "board" }
             let t = transcripts[s.sessionId] ?? TranscriptInfo()
-            var base = column(status: s.status, glow: glows[s.pid], lastActivity: t.lastActivity, now: now)
+            // 11-22 Keng：剛送出訊息那一刻被標「卡住」——狀態一變忙，對話紀錄還沒寫新東西，最後動靜停在上一輪（超過 10 分鐘就誤判）
+            // ⇒ 「變成忙」的時間（statusUpdatedAt）也算一次動靜
+            let busySince = s.statusUpdatedAt.map { Date(timeIntervalSince1970: $0 / 1000) }
+            let seen = [t.lastActivity, busySince].compactMap { $0 }.max()
+            var base = column(status: s.status, glow: glows[s.pid], lastActivity: seen, now: now)
             // 10-20 審查：在等子 agent／workflow 回來時主 session 本來就不寫東西，不算卡住（實測主控 session 開完 workflow 被誤判卡住）
             if base.0 == .stuck && t.isDelegating { base = (.active, "交辦中，等子 agent 回來") }
             let report = CardRules.fresh(reports[s.sessionId], t.lastPromptAt)
