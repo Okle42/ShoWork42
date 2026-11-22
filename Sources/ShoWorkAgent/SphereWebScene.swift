@@ -348,6 +348,9 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
             if let d = c.report?.doing, c.label != nil { t["doing"] = d }   // 沒職稱／專案時名字就是任務，不重複
             if let a = c.name { t["address"] = a }                            // 英文名：只給語音「Hana 在幹嘛」這種問法對得上
             if let s = c.report?.summary { t["summary"] = s }
+            // 11-23 Keng「語音播報內容要正確」：卡住要講真正的原因（看板判斷的一行白話），開工卡的 summary 是「打算做什麼」不是結果
+            t["reason"] = c.reason
+            if c.report?.isStart == true { t["reportKind"] = "start" }
             if let x = c.ctx { t["ctx"] = x.percent.rounded() }          // v5：戰情卡每列的記憶量
             if let t0 = c.lastActivity { t["ago"] = max(0, Int(now.timeIntervalSince(t0) / 60)) }
             if let a = c.asks.first {

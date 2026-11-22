@@ -1227,7 +1227,8 @@ async function speak(text, mute = false) {
 /* ---------- 播報佇列：狀態一變就說，一次說一句 ---------- */
 const queue = []; let talkingNow = false;
 // v5：一句話可以帶 { pop: 事件卡, banner: 警示橫幅 }，唸的同時彈出來
-function announce(text, extra = {}) { if (queue.length < 6) queue.push({ text, ...extra }); else if (extra.banner) showBanner(extra.banner); pump(); }
+function announce(text, extra = {}) { if (window.__said) window.__said.push(text);    // 測試：window.__said = [] 就記下每句播報
+  if (queue.length < 6) queue.push({ text, ...extra }); else if (extra.banner) showBanner(extra.banner); pump(); }
 async function pump() {
   if (talkingNow || demoRunning || listening) return;
   talkingNow = true;
@@ -1361,13 +1362,13 @@ function drawLinks() {
    （滑鼠在哪一列就指哪顆；沒有就指最需要注意的：需要你 > 卡住 > 進行中）、事件卡→講到的那個東西 */
 const linkRect = {};
 let rowSid = null, popTarget = null, popFresh = false;
-$("lkStatic").innerHTML = ["cardUsage", "cardTeam", "cardSys", "disk0", "disk1", "disk2", "disk3"].map(id => `<path id="lp_${id}"/><circle id="lb_${id}" r="0" style="fill:var(--bg);stroke:none;opacity:.85"/><circle id="lr_${id}" r="6" style="fill:none;stroke:var(--acc);stroke-width:1.2"/><circle id="lc_${id}" r="3"/><text id="lt_${id}"></text>`).join("");
+$("lkStatic").innerHTML = ["cardUsage", "g7", "cardTeam", "cardSys", "disk0", "disk1", "disk2", "disk3"].map(id => `<path id="lp_${id}"/><circle id="lb_${id}" r="0" style="fill:var(--bg);stroke:none;opacity:.85"/><circle id="lr_${id}" r="6" style="fill:none;stroke:var(--acc);stroke-width:1.2"/><circle id="lc_${id}" r="3"/><text id="lt_${id}"></text>`).join("");
 $("lkPop").innerHTML = `<path id="lp_pop" class="pop"/><circle id="lb_pop" r="0" style="fill:var(--bg);stroke:none;opacity:.85"/><circle id="lr_pop" class="pop" r="6" style="fill:none;stroke:var(--acc);stroke-width:1.2"/><circle id="lc_pop" class="pop" r="3"/><text id="lt_pop"></text>`;
 /** 尖端的標籤：指到的東西是什麼、多少 */
 function labelOf(key) {
   const name = sid => (data.team || []).find(c => c.sessionId === sid)?.name || "";
   if (key === "5h" || key === "cardUsage") return data.five_hour == null ? "" : `5H ${Math.round(data.five_hour)}%`;
-  if (key === "7d") return data.seven_day == null ? "" : `7D ${Math.round(data.seven_day)}%`;
+  if (key === "7d" || key === "g7") return data.seven_day == null ? "" : `7D ${Math.round(data.seven_day)}%`;
   if (key === "heat" || key === "cardSys") return data.heat?.temp == null ? "" : `${Math.round(data.heat.temp)}°C`;
   if (key === "cardTeam") return name(teamFocus());
   if (/^disk\d$/.test(key)) { const d = (data.disks || [])[+key[4]]; return d ? `${d.name} ${Math.round(d.used)}%` : ""; }
@@ -1384,7 +1385,7 @@ function teamFocus() {
 }
 function targetOf(key) {
   if (key === "5h" || key === "cardUsage") return toScreen(gaugeTip(g5));
-  if (key === "7d") return toScreen(gaugeTip(g7));
+  if (key === "7d" || key === "g7") return toScreen(gaugeTip(g7));
   if (key === "heat" || key === "cardSys") return toScreen(gaugeTip(gHeat));
   if (key === "cardTeam") return satPoint(teamFocus());
   if (/^disk\d$/.test(key)) return toScreen(gaugeTip(gDisks[+key[4]]));
@@ -1395,7 +1396,7 @@ function avoidCards() {
   const cards = ["cardUsage", "cardTeam", "cardSys"].map(id => linkRect[id]).filter(Boolean);
   if (!cards.length) return;
   const hit = b => cards.some(r => b.x < r.right && b.x + b.width > r.left && b.y < r.bottom && b.y + b.height > r.top);
-  for (const id of ["cardUsage", "cardSys", "disk0", "disk1", "disk2", "disk3"]) {
+  for (const id of ["cardUsage", "g7", "cardSys", "disk0", "disk1", "disk2", "disk3"]) {
     const t = $("lt_" + id), c = $("lc_" + id); if (!t?.textContent || !c) continue;
     if (!hit(t.getBBox())) continue;
     const px = +c.getAttribute("cx"), right = t.getAttribute("text-anchor") !== "end";
@@ -1452,6 +1453,11 @@ function linkFrame() {
   if (NO_LINES) {
     // 11-22：右半邊給硬碟了 ⇒ 額度、溫度環固定在左半邊（不再跟著卡片翻邊）
     setLink("cardUsage", null, targetOf("cardUsage"), data.five_hour >= 70 ? "warn" : "");
+    // 11-22 Keng：7 天的 % 也要標（之前只有 5H）；兩個尖端靠太近就把 7D 往下錯開一行
+    setLink("g7", null, targetOf("g7"), data.seven_day >= 80 ? "warn" : "");
+    { const a = $("lt_cardUsage"), b = $("lt_g7");
+      if (a.textContent && b.textContent) { const ya = +a.getAttribute("y"), yb = +b.getAttribute("y"), xa = +a.getAttribute("x"), xb = +b.getAttribute("x");
+        if (Math.abs(ya - yb) < 14 && Math.abs(xa - xb) < 70) b.setAttribute("y", (ya + (yb >= ya ? 14 : -14)).toFixed(1)); } }
     setLink("cardSys", null, targetOf("cardSys"), data.heat && (data.heat.level === "hot" || data.heat.level === "critical") ? "bad" : "");
     setLink("cardTeam", null, null); setLink("pop", null, null);
     gDisks.forEach((g, i) => setLink("disk" + i, null, targetOf("disk" + i), (data.disks || [])[i]?.used >= 85 ? "warn" : ""));
@@ -1503,6 +1509,7 @@ function satMarks() {
 }
 function ballEdge(rect) { const { cx, cy, r } = sphereScreen(), x = rect.left + rect.width / 2, y = rect.top + rect.height / 2, a = Math.atan2(y - cy, x - cx); return { x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r }; }
 $("lt_cardUsage").addEventListener("click", () => openPanelFor("cardUsage"));
+$("lt_g7").addEventListener("click", () => openPanelFor("cardUsage"));
 $("lt_cardSys").addEventListener("click", () => openPanelFor("cardSys"));
 for (let i = 0; i < 4; i++) $("lt_disk" + i).addEventListener("click", () => openPanelFor("cardSys"));
 $("teamRows").addEventListener("mouseover", e => { const row = e.target.closest(".row"); const c = row && (data.team || [])[+row.dataset.i]; rowSid = c?.sessionId || null; });
@@ -1661,12 +1668,24 @@ function diff(team) {
       if (is === was && (is !== "需要你" || p?.ask === c.ask)) continue;
       const who = c.name || "有個 session";
       const pop = sessionPop(c);
+      // 11-23 Keng 模擬「訊息送出 → 完成」逐句校正：
+      //   結果（summary）只用這一輪的「回報卡」——開工卡的 summary 是打算做什麼，不能當成做完的內容唸
+      //   卡住講看板的真正原因（reason）：沒動靜幾分鐘／AI 自報等什麼，不再拿上一句摘要充數
+      //   你看過（待審→完成）、你回答完（需要你→完成）不播：那是你自己的動作，不用再告訴你
+      const result = c.reportKind === "start" ? "" : (c.summary || "");
+      const r = String(c.reason || "");
       if (is === "需要你") announce(c.ask ? `${who} 在等你回答：${clip(c.ask, 40)}` : `${who} 在等你回答。`,
         { auto: true, pop, banner: { level: "warn", icon: "user", tag: "需要你 · ACTION", source: who, title: `${who} 在等你`, sub: clip(c.ask || "", 60), sid: c.sessionId } });
-      else if (is === "待審" && was) announce(c.summary ? `${who} 做完了，等你看：${clip(c.summary, 40)}` : `${who} 做完了，等你看。`, { auto: true, pop });
-      else if (is === "完成" && was && was !== "完成") announce(`${who} 完成了。`, { auto: true, pop });
-      else if (is === "卡住" && was !== "卡住") announce(`${who} 卡住了${c.summary ? "：" + clip(c.summary, 30) : "。"}`,
-        { auto: true, pop, banner: { level: "bad", icon: "warn", tag: "卡住 · BLOCKED", source: who, title: `${who} 卡住了`, sub: clip(c.summary || "", 60), sid: c.sessionId } });
+      else if (is === "待審" && was) announce(result ? `${who} 做完了，等你看：${clip(result, 40)}` : `${who} 這一輪做完了，等你看。`, { auto: true, pop });
+      else if (is === "完成" && (was === "進行中" || was === "卡住")) announce(result ? `${who} 完成了：${clip(result, 40)}` : `${who} 完成了。`, { auto: true, pop });
+      else if (is === "卡住" && was !== "卡住") {
+        const quiet = r.match(/^(\d+) 分鐘沒有新動靜/);
+        const why = r.replace(/^AI 自報卡住：/, "").trim();
+        const line = quiet ? `${who} 已經 ${quiet[1]} 分鐘沒有新動靜，可能卡住了。`
+          : r.startsWith("在等外部") ? `${who} 在等外部的事${result ? "：" + clip(result, 30) : "。"}`
+          : `${who} 卡住了${why ? "：" + clip(why, 30) : "。"}`;
+        announce(line, { auto: true, pop, banner: { level: "bad", icon: "warn", tag: "卡住 · BLOCKED", source: who, title: quiet ? `${who} ${quiet[1]} 分鐘沒動靜` : `${who} 卡住了`, sub: clip(quiet ? "可能在跑長指令，或真的卡住了" : why || result, 60), sid: c.sessionId } });
+      }
     }
   }
   prev = now;
