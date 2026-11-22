@@ -521,6 +521,12 @@ enum SphereAudit {
         let jobs = Set(recs.compactMap(\.jobId)), me = getpid()
         var lines: [String] = [], shells = 0, spares = 0
         for r in recs where r.pid != me {
+            // 11-23 教訓：Bella 把 Keng 正在用的終端機當空殼關掉（狀態 idle、看板寫卡住，其實他正在那個視窗裡用）。
+            // ⇒ 任何要關的程序，先看它的終端機最近 30 分鐘有沒有人打字（tty 的存取時間＝最後一次讀輸入）；有就不動
+            if let idle = ttyIdle(r.pid), idle < 30 * 60 {
+                lines.append("略過 \(r.name ?? String(r.sessionId.prefix(8)))：它的終端機 \(Int(idle / 60)) 分鐘前還有人在打字")
+                continue
+            }
             if let pj = r.parkedJobId, jobs.contains(pj) {
                 let ok = kill(r.pid, SIGTERM) == 0
                 if ok { shells += 1 }
@@ -542,6 +548,20 @@ enum SphereAudit {
         return "已處理：關掉 \(shells) 個停放空殼、停掉 \(spares) 個預備程序（對話都還在）。正在重跑自檢。"
     }
     nonisolated private static var dir_: URL { dir }
+
+    /// 這個程序的終端機多久沒人輸入（秒）；沒有終端機（背景）回 nil。看 /dev/ttysNNN 的存取時間，跟 `w` 的 IDLE 同一個來源
+    nonisolated static func ttyIdle(_ pid: Int32) -> TimeInterval? {
+        let p = Process(), pipe = Pipe()
+        p.executableURL = URL(fileURLWithPath: "/bin/ps"); p.arguments = ["-o", "tty=", "-p", String(pid)]
+        p.standardOutput = pipe; p.standardError = FileHandle.nullDevice
+        guard (try? p.run()) != nil else { return nil }
+        p.waitUntilExit()
+        let tty = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard tty.hasPrefix("ttys") else { return nil }
+        var st = stat()
+        guard stat("/dev/" + tty, &st) == 0 else { return nil }
+        return Date().timeIntervalSince1970 - TimeInterval(st.st_atimespec.tv_sec)
+    }
 
     /// 背景跑一次；已經在跑就回 false。done 在主執行緒呼叫（ok＝結束代碼 0）
     @discardableResult
