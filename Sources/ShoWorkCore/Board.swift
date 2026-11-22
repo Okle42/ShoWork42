@@ -42,6 +42,11 @@ public struct SessionRecord: Codable, Sendable, Equatable {
     public var updatedAt: Double?          // ms
     public var statusUpdatedAt: Double?    // ms
     public var messagingSocketPath: String?  // 跨 session 訊息的收件 socket（Claude Code 內建 SendMessage 用的）
+    public var startedAt: Double?          // ms：這個程序開起來的時間（11-22 BgJanitor：pid 可能被重用，用 pid＋startedAt 當身分）
+    public var jobId: String?              // 背景 session 的 job id（`claude stop <id>` 用）
+    public var parkedJobId: String?        // 終端機把對話「停放」到背景後，指向接手的背景 job（11-22：Bella → Fiona）
+    public var formerNames: [FormerName]?  // 改過名／換過 session id 的紀錄（/clear 之後 session id 會換）
+    public struct FormerName: Codable, Sendable, Equatable { public var name: String?; public var until: Double?; public var sessionId: String? }
 
     public init(pid: Int32, sessionId: String, cwd: String, name: String? = nil, status: String? = nil,
                 kind: String? = nil, updatedAt: Double? = nil, statusUpdatedAt: Double? = nil) {
@@ -440,7 +445,14 @@ public enum Board {
                              now: Date, home: String, isRepo: (String) -> Bool) -> [BoardCard] {
         var out: [BoardCard] = []
         // `sdk-cli`（claude -p）不上看板；例外是戰情中心自己持有的 session（11-08 SessionHost：卡片 kind 標成 "board"）
-        for var s in sessions.sorted(by: { ($0.updatedAt ?? 0) > ($1.updatedAt ?? 0) }) where s.entrypoint != "sdk-cli" || owned.contains(s.sessionId) {
+        // 11-22 Keng：「為什麼 Bella 跟 Fiona 是同一個視窗」——終端機把對話停放到背景（parkedJobId）後，
+        // 終端機本身只剩空殼、視窗裡顯示的是背景那個 ⇒ 背景那個還活著時，空殼不另外算一張卡（避免同一件事算兩次）
+        let liveJobs = Set(sessions.compactMap(\.jobId))
+        for var s in sessions.sorted(by: { ($0.updatedAt ?? 0) > ($1.updatedAt ?? 0) }) where (s.entrypoint != "sdk-cli" || owned.contains(s.sessionId))
+            && !(s.parkedJobId.map { liveJobs.contains($0) } ?? false)
+            // 11-22 Keng「為什麼會有空的背景 session」：Claude 背景常駐程式會先備好一個「預備程序」（daemon.log：bg spawned <id> (spare)），
+            // 下次轉背景時秒接手。它也寫 sessions/<pid>.json（kind bg）但沒有 jobId、沒有對話紀錄 ⇒ 不是你開的工作，不上看板
+            && !(s.kind == "bg" && s.jobId == nil && transcripts[s.sessionId]?.lastActivity == nil && !owned.contains(s.sessionId)) {
             if owned.contains(s.sessionId) { s.kind = "board" }
             let t = transcripts[s.sessionId] ?? TranscriptInfo()
             var base = column(status: s.status, glow: glows[s.pid], lastActivity: t.lastActivity, now: now)
