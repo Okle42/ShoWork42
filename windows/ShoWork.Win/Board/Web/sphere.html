@@ -10,7 +10,7 @@
        ① 狀態：中英雙標籤＋解碼動畫、思考掃描彗星、警示衝擊波 ② 事件卡從球拉線彈出（講到誰就彈誰）
        ③ 額度儀表：數字滾動、分段刻度、重置倒數、照目前速度預估幾點用完 ④ 戰情卡：狀態色點、進度細條、記憶量、狀態一變就閃
        ⑤ 字幕跟「唸到哪」逐詞同步（Mac 系統語音用 marker、微軟語音照播放進度）＋字幕下的聲波 ⑥ 警示橫幅（需要你／卡住／額度／過熱）
-       聲波：原生端 window.karaLevels({b:[32 段頻譜], r:音量, p:已播秒, d:總秒, mic})，球外圈 120 根放射條跟著真的聲音跳；
+       聲波：原生端 window.karaLevels({b:[32 段頻譜], r:音量, p:已播秒, d:總秒, mic})，球外三條聲波絲帶（低／中／高頻各一條，細線殘影）跟著真的聲音飄；
        沒收到（Windows SAPI、測試）就用假的波形頂著。
      球體桌面版（11-22 Keng 選定最終型態，T1122091602）：?desk=1＝SphereMini.swift 的浮動面板，功能跟分頁完全一樣（舊的 ?mini=1 精簡小球拿掉了）。
        上方 34px 是標題列（原生端拖移；按鈕位置用 deskChrome 回報）、右下角拖曳縮放、工具列多「尺寸／戰情中心／收起」。
@@ -508,27 +508,43 @@ const corePos0 = coreGeo.attributes.position.array.slice();
 const core = new THREE.LineSegments(coreGeo, lineMat(0.10));
 root.add(core);
 
-// 2. 三角面殼：每個面縮小成一片小三角形（影片裡的三角鏤空）
+// 2. 三角面殼：每個面縮小成一片「圓角」小三角形（11-22 Keng：KARA 的三角是導圓角，尖角太硬）
+//    每個角用二次貝茲曲線（控制點＝原本的尖角）取 6 點；約四分之一的面填亮一點（KARA 有亮有暗、不是一片均勻）
+//    （11-22 Keng 不要六角形外殼：原本的六角網格外殼已拿掉）
 const shell = new THREE.Group(); root.add(shell);
 {
   const ico = new THREE.IcosahedronGeometry(1.55, 1).toNonIndexed();
   const p = ico.attributes.position;
-  const tri = [], v = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()], c = new THREE.Vector3();
+  const v = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()], c = new THREE.Vector3();
+  const q = [0, 1, 2].map(() => new THREE.Vector3()), s0 = new THREE.Vector3(), e0 = new THREE.Vector3(), pt = new THREE.Vector3();
+  const edge = [], fillLo = [], fillHi = [], CR = 0.34, CS = 6;
+  let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;     // 固定亂數：每次開都同一批亮面
   for (let i = 0; i < p.count; i += 3) {
     for (let k = 0; k < 3; k++) v[k].fromBufferAttribute(p, i + k);
     c.copy(v[0]).add(v[1]).add(v[2]).divideScalar(3);
-    for (let k = 0; k < 3; k++) { const q = v[k].clone().lerp(c, 0.42); tri.push(q.x, q.y, q.z); }
+    for (let k = 0; k < 3; k++) q[k].copy(v[k]).lerp(c, 0.42);
+    const loop = [];
+    for (let k = 0; k < 3; k++) {
+      const P = q[k], A = q[(k + 2) % 3], B = q[(k + 1) % 3];
+      s0.copy(A).sub(P).multiplyScalar(CR).add(P); e0.copy(B).sub(P).multiplyScalar(CR).add(P);
+      for (let m = 0; m < CS; m++) {
+        const u = m / (CS - 1), a = (1 - u) * (1 - u), b = 2 * u * (1 - u), d = u * u;
+        pt.set(s0.x * a + P.x * b + e0.x * d, s0.y * a + P.y * b + e0.y * d, s0.z * a + P.z * b + e0.z * d);
+        loop.push(pt.x, pt.y, pt.z);
+      }
+    }
+    const n = loop.length / 3, fill = rnd() < 0.24 ? fillHi : fillLo;
+    for (let m = 0; m < n; m++) {
+      const m2 = (m + 1) % n;
+      edge.push(loop[m * 3], loop[m * 3 + 1], loop[m * 3 + 2], loop[m2 * 3], loop[m2 * 3 + 1], loop[m2 * 3 + 2]);
+      fill.push(c.x, c.y, c.z, loop[m * 3], loop[m * 3 + 1], loop[m * 3 + 2], loop[m2 * 3], loop[m2 * 3 + 1], loop[m2 * 3 + 2]);
+    }
   }
-  const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute(tri, 3));
-  shell.add(new THREE.Mesh(g, meshMat(0.08)));
-  shell.add(new THREE.LineSegments(new THREE.EdgesGeometry(g), lineMat(0.45)));
-}
-
-// 3. 六角網格外殼（淡）
-{
-  const g = new THREE.IcosahedronGeometry(1.85, 1);
-  const hex = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.DodecahedronGeometry(1.85, 1)), lineMat(0.12));
-  root.add(hex); hex.userData.spin = -0.4; root.userData.hex = hex;
+  const geo = a => { const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute(a, 3)); return g; };
+  // 填色＝從面中心 c 出發的三角扇（往中心縮不會動到中心點）
+  shell.add(new THREE.Mesh(geo(fillLo), meshMat(0.05)));
+  shell.add(new THREE.Mesh(geo(fillHi), meshMat(0.2)));
+  shell.add(new THREE.LineSegments(geo(edge), lineMat(0.5)));
 }
 
 /** 幾個有索引的幾何併成一個（只要位置；RingGeometry 用） */
@@ -773,14 +789,28 @@ function gaugeTip(g) {
   return _tip.set(Math.cos(a) * rr * g.flip, Math.sin(a) * rr, 0).applyMatrix4(outer.matrixWorld);
 }
 
-// 8. v5 聲波：球外圈 120 根放射條（面向鏡頭），左右對稱，跟著真的頻譜跳
-const NB = 32, WAVE_N = 120, WAVE_R0 = 1.66;
+// 8. 聲波絲帶（11-22 Keng 對照 KARA 錄影：它的聲波是一束束髮絲細線繞球飄、有殘影，比放射條好看很多）
+//    做得比它好的地方：①真的頻譜驅動（KARA 是假動畫）——三條絲帶各吃一段頻率：低／中／高
+//    ②每條絲帶 RIB_S 根細線＝同一條波形的「過去幾格」⇒ 自然的殘影拖尾，越舊越淡、越往外
+//    ③細線之間沿著角度扭轉（像綢帶翻面），被聲音推出去的地方變亮變白（漸層），沒聲音時只剩淡淡呼吸
+//    ④整束一個 draw call（頂點色帶透明度），三條共 3 個
+const NB = 32, RIB_N = 3, RIB_S = 12, RIB_P = 160, RIB_H = RIB_S * 2, RIB_R = 1.74;
 const lv = { bands: new Float32Array(NB), sm: new Float32Array(NB), rms: 0, at: -1e9, mic: false };
-const waveMat = new THREE.MeshBasicMaterial({ color: BALL, transparent: true, opacity: 0.12, blending: BLEND, depthWrite: false, side: THREE.DoubleSide });
-const wave = new THREE.InstancedMesh(new THREE.PlaneGeometry(0.028, 1), waveMat, WAVE_N);
-wave.frustumCulled = false; outer.add(wave);
-const waveDummy = new THREE.Object3D();
-function bandOf(i) { const k = i < WAVE_N / 2 ? i : WAVE_N - 1 - i; return Math.min(NB - 1, Math.floor(k / (WAVE_N / 2) * NB)); }
+const ribGroup = new THREE.Group(); root.add(ribGroup);
+const ribbons = [];
+for (let r = 0; r < RIB_N; r++) {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(RIB_S * RIB_P * 2 * 3), 3));
+  g.setAttribute("color", new THREE.BufferAttribute(new Float32Array(RIB_S * RIB_P * 2 * 4), 4));
+  const m = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 1, blending: BLEND, depthWrite: false });
+  const line = new THREE.LineSegments(g, m); line.frustumCulled = false;
+  const pv = new THREE.Group(); pv.add(line); ribGroup.add(pv);
+  // 三條軌道面：一條接近正面、兩條斜的，像 KARA 繞球的綢帶
+  pv.rotation.set([0.25, 1.15, -0.95][r], [0, 0.6, -0.5][r], [0, 0.4, 1.9][r]);
+  ribbons.push({ line, pv, hist: Array.from({ length: RIB_H }, () => new Float32Array(RIB_P)), head: 0,
+    lo: [0, 6, 14][r], hi: [10, 20, 31][r], ph: r * 2.1, w: [0.07, -0.05, 0.04][r] });
+}
+const ribHi = new THREE.Color(), ribBase = new THREE.Color();
 // 9. v5 ① 思考／搜尋：沿內環跑的掃描彗星；警示：往外擴散的衝擊波
 const comet = new THREE.Mesh(new THREE.RingGeometry(2.0, 2.045, 64, 1, 0, 0.9),
   new THREE.MeshBasicMaterial({ color: BALL, transparent: true, opacity: 0, blending: BLEND, depthWrite: false, side: THREE.DoubleSide }));
@@ -880,7 +910,6 @@ function frame(now) {
   core.rotation.y += dt * cur.spin * 0.6; core.rotation.x += dt * cur.spin * 0.2;
   shell.rotation.y -= dt * cur.spin * 0.35; shell.rotation.z += dt * cur.spin * 0.1;
   shell.scale.setScalar(breathe);
-  root.userData.hex.rotation.y += dt * root.userData.hex.userData.spin * cur.spin;
   for (const r of rings) {
     r.rotateZ(dt * r.userData.speed * (0.4 + cur.spin) * satSlow);
     const pv = r.userData.pivot;
@@ -926,6 +955,8 @@ window.karaPerf = () => { const sec = (performance.now() - perf.t0) / 1000, r = 
   perf.n = 0; perf.ms = 0; perf.t0 = performance.now(); return o; };
 
 /* v5 聲波：目標值＝真的頻譜（有送）或假的（沒送但在講）；上升快、下降慢，看起來像音響的表 */
+const _white = new THREE.Color(1, 1, 1), _black = new THREE.Color(0.05, 0.05, 0.06);
+let ribLevel = 0;
 function animWave(dt, t, talking, hearing, live) {
   const active = talking || hearing;
   for (let i = 0; i < NB; i++) {
@@ -934,17 +965,43 @@ function animWave(dt, t, talking, hearing, live) {
     else if (active) g = speakAmp * (0.3 + 0.7 * Math.abs(Math.sin(t * 7.1 + i * 0.9) * Math.sin(t * 3.3 + i * 0.37))) * (1 - i / NB * 0.55);
     lv.sm[i] += (g - lv.sm[i]) * Math.min(1, dt * (g > lv.sm[i] ? 26 : 7));
   }
-  for (let i = 0; i < WAVE_N; i++) {
-    const a = i / WAVE_N * Math.PI * 2 + Math.PI / 2, len = 0.035 + lv.sm[bandOf(i)] * 0.8;
-    const r = WAVE_R0 + len / 2;
-    waveDummy.position.set(Math.cos(a) * r, Math.sin(a) * r, 0);
-    waveDummy.rotation.set(0, 0, a - Math.PI / 2);
-    waveDummy.scale.set(1, len, 1);
-    waveDummy.updateMatrix(); wave.setMatrixAt(i, waveDummy.matrix);
+  ribLevel += ((active ? 1 : 0) - ribLevel) * Math.min(1, dt * 4);
+  ribBase.copy(hearing ? GRAY : accent);
+  // 亮處：深色主題往白、淺色主題往黑（白底上變白會看不見）
+  ribHi.copy(ribBase).lerp(BLEND === THREE.AdditiveBlending ? _white : _black, 0.55);
+  for (const rb of ribbons) {
+    rb.pv.rotateZ(dt * rb.w * (0.6 + cur.spin));
+    // 新的一格波形寫進歷史環：角度 → 這條絲帶的頻段（左右對稱，頻段之間線性內插，再疊一個慢慢轉的起伏）
+    rb.head = (rb.head + 1) % RIB_H;
+    const H = rb.hist[rb.head], span = rb.hi - rb.lo;
+    for (let i = 0; i < RIB_P; i++) {
+      const th = i / RIB_P * Math.PI * 2, k = 1 - Math.abs(1 - 2 * (((th + rb.ph + t * 0.35) / (Math.PI * 2)) % 1));
+      const f = rb.lo + k * span, f0 = Math.floor(f), b = lv.sm[f0] + (lv.sm[Math.min(NB - 1, f0 + 1)] - lv.sm[f0]) * (f - f0);
+      H[i] = 0.018 * Math.sin(th * 3 + t * 0.9 + rb.ph) + b * 0.95 * (0.55 + 0.45 * Math.sin(th * 2 - t * 1.7 + rb.ph));
+    }
+    const pos = rb.line.geometry.attributes.position.array, col = rb.line.geometry.attributes.color.array;
+    let o = 0, oc = 0;
+    for (let s = 0; s < RIB_S; s++) {
+      const Hs = rb.hist[(rb.head - s * 2 + RIB_H * 4) % RIB_H];
+      const age = s / RIB_S, aS = Math.pow(1 - age, 1.4) * (0.1 + 0.9 * ribLevel) * (s ? 0.75 : 1);
+      const zOff = (s - RIB_S / 2) * 0.03;
+      let px = 0, py = 0, pz = 0, pa = 0, pr = 0, pg = 0, pb = 0;
+      for (let i = 0; i <= RIB_P; i++) {
+        const ii = i % RIB_P, th = ii / RIB_P * Math.PI * 2, d = Hs[ii];
+        const tw = Math.sin(th * 2 + t * 0.8 + rb.ph);                 // 綢帶翻面：細線之間的間距沿角度變寬變窄
+        const rr = RIB_R + d * (1 - age * 0.35) + s * 0.016 * (0.3 + Math.abs(tw));
+        const x = Math.cos(th) * rr, y = Math.sin(th) * rr, z = zOff * (0.4 + 1.2 * Math.abs(tw)) * (1 + d * 3);
+        const hot = Math.min(1, Math.max(0, d) * 2.4), a = aS * (0.28 + 0.72 * hot);
+        const cr = ribBase.r + (ribHi.r - ribBase.r) * hot, cg = ribBase.g + (ribHi.g - ribBase.g) * hot, cb = ribBase.b + (ribHi.b - ribBase.b) * hot;
+        if (i) {
+          pos[o++] = px; pos[o++] = py; pos[o++] = pz; pos[o++] = x; pos[o++] = y; pos[o++] = z;
+          col[oc++] = pr; col[oc++] = pg; col[oc++] = pb; col[oc++] = pa; col[oc++] = cr; col[oc++] = cg; col[oc++] = cb; col[oc++] = a;
+        }
+        px = x; py = y; pz = z; pa = a; pr = cr; pg = cg; pb = cb;
+      }
+    }
+    rb.line.geometry.attributes.position.needsUpdate = true; rb.line.geometry.attributes.color.needsUpdate = true;
   }
-  wave.instanceMatrix.needsUpdate = true;
-  waveMat.color.copy(hearing ? GRAY : accent);
-  waveMat.opacity += ((active ? 0.85 : 0.13) - waveMat.opacity) * Math.min(1, dt * 4);
   drawCapWave(active ? (live ? lv.rms : speakAmp * 0.6) : 0, hearing);
 }
 function animFx(dt, t) {
@@ -982,12 +1039,28 @@ function drawCapWave(v, mic) {
   if (!W) return;
   if (capWave.width !== Math.round(W * dpr)) { capWave.width = Math.round(W * dpr); capWave.height = Math.round(H * dpr); }
   cw.setTransform(dpr, 0, 0, dpr, 0, 0); cw.clearRect(0, 0, W, H);
-  const n = waveHist.length, step = W / n, bw = Math.max(1, step * 0.55);
+  // 11-22 對照 KARA：方塊條改成平滑的上下對稱包絡（漸層填色）＋三根細線（同一段聲音、相位錯開＝殘影），兩端淡出
+  const n = waveHist.length, step = W / (n - 1), mid = H / 2;
   const c = rgb3(mic ? GRAY : document.body.classList.contains("alert") ? ALERT : BALL);
-  for (let i = 0; i < n; i++) {
-    const h = Math.max(1, Math.min(1, waveHist[i] * 1.6) * (H - 2));
-    cw.fillStyle = `rgba(${c},${0.18 + 0.82 * (i / n)})`;
-    cw.fillRect(i * step, (H - h) / 2, bw, h);
+  const amp = i => Math.min(1, waveHist[i] * 1.6) * (mid - 1);
+  const edge = cw.createLinearGradient(0, 0, W, 0);
+  edge.addColorStop(0, `rgba(${c},0)`); edge.addColorStop(0.25, `rgba(${c},0.22)`); edge.addColorStop(0.92, `rgba(${c},0.38)`); edge.addColorStop(1, `rgba(${c},0)`);
+  cw.beginPath(); cw.moveTo(0, mid);
+  for (let i = 1; i < n; i++) { const x0 = (i - 1) * step, x1 = i * step; cw.quadraticCurveTo(x0, mid - amp(i - 1), (x0 + x1) / 2, mid - (amp(i - 1) + amp(i)) / 2); }
+  for (let i = n - 1; i > 0; i--) { const x0 = i * step, x1 = (i - 1) * step; cw.quadraticCurveTo(x0, mid + amp(i), (x0 + x1) / 2, mid + (amp(i) + amp(i - 1)) / 2); }
+  cw.closePath(); cw.fillStyle = edge; cw.fill();
+  const now = performance.now() / 1000;
+  for (let k = 0; k < 3; k++) {
+    const line = cw.createLinearGradient(0, 0, W, 0);
+    const a = [0.9, 0.45, 0.25][k];
+    line.addColorStop(0, `rgba(${c},0)`); line.addColorStop(0.3, `rgba(${c},${a * 0.6})`); line.addColorStop(0.95, `rgba(${c},${a})`); line.addColorStop(1, `rgba(${c},0)`);
+    cw.strokeStyle = line; cw.lineWidth = k ? 0.6 : 1;
+    cw.beginPath();
+    for (let i = 0; i < n; i++) {
+      const y = mid + amp(Math.max(0, i - k * 2)) * Math.sin(i * 0.55 - now * 9 + k * 2.1) * 0.95;
+      i ? cw.lineTo(i * step, y) : cw.moveTo(0, y);
+    }
+    cw.stroke();
   }
 }
 window.karaLevels = (o) => {

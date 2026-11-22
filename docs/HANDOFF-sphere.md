@@ -1,7 +1,7 @@
 # 球體助理（戰情中心第四個分頁）交接
 
 最後更新：2026-11-22 下午（Bella，球體外圍量表、命名、背景 session 清理）
-分支：`bella/sphere-tab`，worktree：`~/github-repos/_wt-ShoWork42-sphere`。**沒有 push**（push 要 Keng／隊長轉述核可）。
+分支：`bella/sphere-tab`，worktree：`~/github-repos/_wt-ShoWork42-sphere`。已推 main（11-22 晚 Keng 指示「推 main」）。
 本機已安裝：c4b5401（`board/installed.json`）。
 
 ## 檔案
@@ -17,7 +17,7 @@
 4. 戰情卡：狀態色點、進度條、記憶量（payload team 多 `ctx`、`ago`）、狀態變就閃
 5. 字幕逐詞同步：系統語音用 `write(toBufferCallback:toMarkerCallback:)` 的 marker（`byteSampleOffset / mBytesPerFrame` = 取樣位置）；微軟語音照播放進度比例
 6. 警示橫幅：需要你（橘）、卡住／額度 ≥90%／過熱（紅）
-- 聲波：`window.karaLevels({b:[32], r, p, d, mic})` 每 1/30 秒；球外圈 120 根放射條＋字幕下波形；沒收到（Windows）就用假波形
+- 聲波：`window.karaLevels({b:[32], r, p, d, mic})` 每 1/30 秒；（11-22 晚改）球外三條聲波絲帶＋字幕下平滑包絡；沒收到（Windows）就用假波形
 - 背景：交叉點小十字（Keng 指定，不要整條網格線）
 
 ## 球體桌面版（11-22，T1122091602，Keng 選定的最終型態）
@@ -97,12 +97,15 @@
   只有 Claude Code 主題（**~/.claude/settings.json** 的 theme，不是 ~/.claude.json）是 light／auto、且主題改之前開的 session 都關了，才會切淺色（不然深色介面配淺底看不清楚）
 - ~/.claude/settings.json：theme dark→auto；pluginConfigs prismantis options replyStyle／promptStyle／codeStyle=framed（備份 settings.json.bak-20261122-theme）
 
-## 再下一件（未開工，Keng 11-22 21:25 指示）：重看 KARA 錄影，研究聲波細節做得比它好
-- 錄影：/Users/hairllypoter/Desktop/螢幕錄影 2026-11-22 清晨7.20.21.mov（ffmpeg 抽說話段的影格放大看）
-- Keng 重點：①它的三角形是**圓角**（導圓角）——我們球殼的小三角是尖角，要改圓角 ②它的六角形外殼 Keng **不想要**（可拿掉我們的 hex 外殼或不要學它）
-  ③**聲波細節**它做得比我們好很多：逐格比對它的波形（粗細、間距、漸層、起落速度、是否雙向／殘影、跟字幕的關係），列差異表後做得比它好
-- 我們的聲波：sphere.html `animWave()`（球外 120 根放射條，`WAVE_N`、`lv.bands`）＋字幕下 `drawCapWave()`；原生頻譜 SphereAudio.swift（32 段、30 次／秒）
-- 做完：螢幕外截圖（說話中 karaSay）對照錄影影格，推 main
+## KARA 對照改版（11-22 晚，完成）
+- 錄影抽格：610×756、45 秒；KARA 的聲波不是放射條，是一束束髮絲細線繞球飄的綢帶（有殘影、會鼓起來）；三角是圓角描邊、部分填亮；外層有六角殼
+- 球殼三角改圓角：每角二次貝茲 6 點（`CR=0.34`），約 24% 的面填亮（固定亂數）；**六角外殼拿掉**（Keng 不要）
+- 聲波：120 根放射條拿掉，換成 `ribbons`（`RIB_N=3` 條 × `RIB_S=12` 根細線 × `RIB_P=160` 點，頂點色帶透明度，一條一個 draw call）
+  - 比 KARA 好的地方：真頻譜驅動、三條各吃低／中／高頻（`lo/hi`）、細線＝波形歷史（`hist` 環，每根落後 2 格）＝殘影、沿角度扭轉像綢帶翻面、被推出去的地方變亮（深色往白、淺色往黑）
+  - 沒聲音時剩淡淡呼吸（`ribLevel`）；聆聽時灰色
+- 字幕下波形：方塊條改平滑上下對稱包絡（漸層填色）＋三根相位錯開細線、兩端淡出
+- 驗證：螢幕外桌面版 540×720、1000×700、淺色主題各截一張（假頻譜＋karaSay），絲帶與圓角都看得到；**Keng 還沒實機看**
+- 測試指令：`SHOWORK_WEB_DIR=$PWD/windows/ShoWork.Win/Board/Web SHOWORK_TEST_SPHERE_MINI=1 SHOWORK_TEST_DESK_SIZE='{1000,700}' SHOWORK_TEST_SPHERE_MINI_SHOT=<png> SHOWORK_TEST_SPHERE_DESK_JS='<假頻譜 setInterval＋karaSay>' perl -e 'alarm 24; exec @ARGV' .build/debug/ShoWorkAgent --board-window`（本機沒有 timeout 指令，用 perl alarm）
 
 ## 下一件（未開工，Keng 11-22 21:20 指示）：把 prismantis 外掛內化成我們自己的樣式，之後停用 prismantis
 - Keng 選：放進 **ShoWork42 repo**
