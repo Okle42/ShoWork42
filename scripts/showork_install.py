@@ -211,6 +211,8 @@ def install_agent_app(ident):
     # bench/（量尺、示範輸入，含 mac-input.json）不進 app：?demo=1 只在原始碼旁邊跑
     shutil.copytree(os.path.join(ROOT, "windows/ShoWork.Win/Board/Web"), os.path.join(tmp, "Contents/Resources/Web"),
                     ignore=shutil.ignore_patterns("bench", ".DS_Store", "*.md"))
+    # 11-22 球體自檢原子環：Mac 端開工／收工跑 flow_audit.py（只用標準庫、只讀）
+    shutil.copy2(os.path.join(ROOT, "scripts/flow_audit.py"), os.path.join(tmp, "Contents/Resources/flow_audit.py"))
     subprocess.run(["codesign", "-f", "-s", ident, "--identifier", AGENT_ID, tmp], check=True, stderr=subprocess.DEVNULL)
     old = None
     if os.path.exists(AGENT_APP):

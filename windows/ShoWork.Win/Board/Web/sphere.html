@@ -131,7 +131,7 @@
     padding: 4px 8px; font-size: 11px; white-space: nowrap; opacity: 0; transition: opacity .15s; z-index: 5; }
   #tip.on { opacity: 1; }
   /* v3 #6：外環說明 */
-  #cardSys { left: 24px; top: calc(34% + 205px); }
+  #cardSys { left: 24px; top: calc(34% + 205px); overflow: auto; }      /* 自檢區塊讓內容變長：排版把高度夾小時可以捲 */
   /* 右上工具列 */
   #tools { position: fixed; top: 16px; right: 16px; display: flex; gap: 6px; align-items: center; }
   #tools .pill { background: var(--panel); color: var(--ink-dim); white-space: nowrap; }
@@ -242,6 +242,12 @@
   #cardUsage .head .big { display: flex; align-items: center; gap: 10px; }
   .meter.seg { height: 5px; background: repeating-linear-gradient(90deg, var(--seg) 0 5px, transparent 5px 7px); }
   .meter.seg b { -webkit-mask-image: repeating-linear-gradient(90deg, #000 0 5px, transparent 5px 7px); mask-image: repeating-linear-gradient(90deg, #000 0 5px, transparent 5px 7px); }
+  .row .abtn { grid-column: 1 / -1; display: flex; gap: 6px; justify-content: flex-end; }
+  .row.arow { padding-top: 2px; }
+  .row .abtn .pill { padding: 1px 7px; font-size: 10px; }
+  .row .aks { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 10px; margin-top: 3px; }
+  .row.atip { font-size: 11px; color: var(--ink-dim); padding: 2px 0; }
+  .row.atip span:last-child { grid-column: 2 / -1; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
   .row .rs { display: block; font-size: 10px; color: var(--ink-dim); letter-spacing: .04em; margin-top: 1px; }
   .fc { margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--line); font-size: 11px; line-height: 1.45; color: var(--ink-dim); }
   .fc.warn { color: var(--warn); } .fc.bad { color: var(--bad); } .fc.ok { color: var(--ink-dim); }
@@ -561,11 +567,12 @@ function mergeGeo(list) {
 }
 // 4. 環形 HUD：分段的圓弧，各自傾斜、各自轉
 const rings = [];
-function arcRing(r, w, segs, tilt, speed, op) {
+function arcRing(r, w, segs, tilt, speed, op, custom) {
   const grp = new THREE.Group();
   // 效能（11-22）：原本每一段弧各一個物件（四圈共 53 個 draw call）⇒ 依亮度分兩組各併成一個（每圈 2 個）
   let a = 0;
   const groups = [[], []];
+  if (custom) { custom(grp); segs = 0; }        // 有資料的環（自檢環）：段落自己畫
   for (let i = 0; i < segs; i++) {
     const len = (Math.PI * 2 / segs) * (0.35 + Math.random() * 0.55);
     groups[Math.random() < 0.5 ? 0 : 1].push(new THREE.RingGeometry(r, r + w, 48, 1, a, len));
@@ -588,7 +595,20 @@ function arcRing(r, w, segs, tilt, speed, op) {
   grp.userData.pivot = pivot; rings.push(grp);
   return grp;
 }
-arcRing(2.15, 0.07, 9, [1.25, 0.15, 0], 0.30, 0.55);
+// 11-22 Keng：最內側的斜環＝自檢環（scripts/flow_audit.py 流量架構自檢的「哪裡浪費、該優化」；不是用量——用量是左邊的 5H／7D 半圓表）
+//   7 段等長：快取／開場／閒置／空殼／子agent／常駐／網路；每段顏色＝健康度，走量表同一組 白→灰→黑→紅
+//   開工（早報）／收工各跑一次；點環 → 外環卡的自檢區塊
+const AUDIT_KEYS = ["快取", "開場", "閒置", "空殼", "子agent", "常駐", "網路"];
+const auditRing = { mesh: null, n: AUDIT_KEYS.length, per: 0, f: new Float32Array(AUDIT_KEYS.length).fill(-1) };
+arcRing(2.15, 0.07, 9, [1.25, 0.15, 0], 0.30, 0.55, grp => {
+  const n = auditRing.n, gap = 0.07, step = Math.PI * 2 / n, gs = [];
+  for (let i = 0; i < n; i++) gs.push(new THREE.RingGeometry(2.15, 2.22, 24, 1, i * step + gap / 2, step - gap));
+  const g = mergeGeo(gs);
+  auditRing.per = g.attributes.position.count / n;
+  g.setAttribute("color", new THREE.BufferAttribute(new Float32Array(g.attributes.position.count * 3).fill(0.5), 3));
+  const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.8, blending: BLEND, depthWrite: false, side: THREE.DoubleSide }));
+  auditRing.mesh = m; grp.add(m);
+});
 arcRing(2.45, 0.04, 14, [1.05, -0.35, 0.2], -0.22, 0.45);
 arcRing(2.85, 0.12, 6, [1.35, 0.45, -0.1], 0.14, 0.40);
 arcRing(1.95, 0.02, 24, [0, 0, 0], -0.5, 0.35);
@@ -1545,6 +1565,55 @@ function hideBanner() {
   document.body.classList.remove("bad"); setState(state);
 }
 $("banner").addEventListener("click", () => { if (bannerSid) post({ action: "focus", sessionId: bannerSid }); hideBanner(); });
+/* 自檢環：每一項 0＝健康 → 1＝該優化（門檻跟 flow_audit.py advice() 一致：到門檻≈0.85＝紅） */
+function auditScores(a) {
+  const t = a.today || {}, st = a.standing || {}, ss = a.sessions || [], net = (a.net || [])[0];
+  const cl = x => Math.max(0, Math.min(1, x));
+  const cat = (s, p) => String(s.cat || "").startsWith(p);
+  const bigIdle = ss.filter(s => s.ctx >= 150000 && s.idle_min >= 60 && !cat(s, "預備") && !cat(s, "停放")).length;
+  const shells = ss.filter(s => cat(s, "預備") || cat(s, "停放")).length;
+  const share = t.cost ? (t.sub_cost || 0) / t.cost : 0;
+  return [
+    t.cache_hit == null ? 0 : cl((0.95 - t.cache_hit) / 0.15 * 0.85),     // 80% 以下＝紅
+    cl(((t.opener_median || 0) - 25000) / 15000 * 0.85),                  // 開場 40k＝紅
+    bigIdle ? cl(0.6 + bigIdle * 0.15) : 0,                                // 有大記憶量閒置就偏黑、越多越紅
+    shells ? cl(0.4 + shells * 0.15) : 0,
+    cl((share - 0.15) / 0.25 * 0.85),                                      // 子 agent 佔 40%＝紅
+    Math.max(cl(((st.memory_index || 0) - 3000) / 3000 * 0.85), cl(((st.mcp_servers || 0) - 4) / 4 * 0.85)),   // 記憶索引 6k／MCP 8 個＝紅
+    net ? cl(((net.in_Bps || 0) + (net.out_Bps || 0) - 500000) / 1500000 * 0.85) : 0,   // 2 MB/s＝紅
+  ];
+}
+function paintAudit() {
+  const m = auditRing.mesh; if (!m) return;
+  const col = m.geometry.attributes.color, c = new THREE.Color();
+  for (let i = 0; i < auditRing.n; i++) {
+    const f = auditRing.f[i];
+    if (f < 0) c.copy(GRAY).multiplyScalar(0.6); else rampColor(f, c);      // 還沒跑過：暗灰
+    for (let v = 0; v < auditRing.per; v++) col.setXYZ(i * auditRing.per + v, c.r, c.g, c.b);
+  }
+  col.needsUpdate = true;
+}
+let auditSeen = "";
+function syncAudit() {
+  const a = data.audit;
+  const key = a ? a.at + "|" + themeName() : themeName();
+  if (key === auditSeen) return; auditSeen = key;
+  if (a) auditScores(a).forEach((v, i) => auditRing.f[i] = v);
+  paintAudit();
+}
+function auditRows() {
+  const a = data.audit, rows = [];
+  const busy = data.auditBusy;
+  const btns = `<span class="abtn"><button class="pill sm" data-audit="run"${busy ? " disabled" : ""}>${busy ? "自檢中⋯" : "重跑"}</button><button class="pill sm" data-audit="send"${busy || !a ? " disabled" : ""}>送 #自檢回報</button></span>`;
+  if (!a) { rows.push(`<div class="row"><span class="t">AUDIT</span><span>還沒跑過自檢（開工／收工會自動跑）</span><span></span>${btns}</div>`); return rows; }
+  const f = auditScores(a), bad = f.filter(x => x >= 0.6).length;
+  const chips = AUDIT_KEYS.map((k, i) => `<span class="ak" style="color:${f[i] >= 0.85 ? "var(--bad)" : f[i] >= 0.6 ? "var(--ink)" : "var(--ink-dim)"}">${f[i] >= 0.6 ? "●" : "○"} ${k}</span>`).join("");
+  rows.push(`<div class="row"><span class="t">AUDIT</span><span>流量自檢 · ${esc(String(a.at).slice(5))}</span><span${bad ? ' style="color:var(--bad)"' : ""}>${bad ? bad + " 項待優化" : "健康"}</span><div class="aks">${chips}</div></div>`);
+  for (const tip of (a.advice || []).filter(x => !/額度已用/.test(x)).slice(0, 3))      // 額度那條不放（左邊半圓表已經有）
+    rows.push(`<div class="row atip" title="${esc(tip)}"><span class="t">·</span><span>${esc(tip)}</span></div>`);
+  rows.push(`<div class="row arow">${btns}</div>`);
+  return rows;
+}
 function renderSys() {
   const rows = [];
   for (const r of data.runs || []) rows.push(`<div class="row"><span class="t">RUN</span><span>${esc(clip((r.name ? r.name + " · " : "") + (r.label || "背景工作"), 22))}${r.eta ? " · 剩 " + esc(r.eta) : ""}</span><span>${Math.round(r.fraction * 100)}%</span><div class="meter"><b style="width:${Math.round(r.fraction * 100)}%"></b></div></div>`);
@@ -1558,10 +1627,16 @@ function renderSys() {
     const col = d.used >= 95 ? "var(--bad)" : d.used >= 85 ? "var(--warn)" : "var(--ink)";
     rows.push(`<div class="row"><span class="t">DISK</span><span>${esc(d.name)} · 剩 ${d.freeGB} GB</span><span>${Math.round(d.used)}%</span><div class="meter seg"><b style="width:${d.used}%;background-color:${col}"></b></div></div>`);
   }
+  rows.push(...auditRows());
+  syncAudit();
   $("sysRows").innerHTML = rows.join("");
   $("sysWrap").innerHTML = rows.join("");          // 疊排時外環卡併進額度卡
   show("cardSys", rows.length > 0);
 }
+for (const id of ["sysRows", "sysWrap"]) $(id).addEventListener("click", e => {
+  const b = e.target.closest("[data-audit]"); if (!b || b.disabled) return;
+  e.stopPropagation(); post({ action: "audit", send: b.dataset.audit === "send" });
+});
 $("teamRows").onclick = e => {
   const row = e.target.closest(".row"); if (!row) return;
   const c = (data.team || [])[+row.dataset.i];
@@ -1689,11 +1764,13 @@ function brief() {
   if (!data.team) return;
   const h = new Date().getHours(), day = new Date().toDateString();
   const once = (k, fn) => { let d = null; try { d = localStorage.getItem(k); } catch {} if (d === day) return; try { localStorage.setItem(k, day); } catch {} setTimeout(() => announce(fn(), { auto: true }), 1500); };
-  if (h >= 5 && h < 11) once("sphere.brief", briefText);
-  else if (h >= 19) once("sphere.wrap", wrapText);
+  // 11-22 Keng：自檢環開工／收工各跑一次（跟早報、收工總結同一個時機；分頁和桌面版共用 localStorage，只跑一次）
+  const auditOnce = k => { let d = null; try { d = localStorage.getItem(k); } catch {} if (d === day) return; try { localStorage.setItem(k, day); } catch {} post({ action: "audit" }); };
+  if (h >= 5 && h < 11) { once("sphere.brief", briefText); auditOnce("sphere.audit.am"); }
+  else if (h >= 19) { once("sphere.wrap", wrapText); auditOnce("sphere.audit.pm"); }
 }
-$("bBrief").onclick = () => announce(briefText());
-$("bWrap").onclick = () => announce(wrapText());
+$("bBrief").onclick = () => { announce(briefText()); post({ action: "audit" }); };
+$("bWrap").onclick = () => { announce(wrapText()); post({ action: "audit" }); };
 $("bMini").onclick = () => post({ action: "mini" });
 $("voiceSel").onchange = e => {
   if (!voiceOn) { voiceOn = true; try { localStorage.setItem("sphere.voice", "1"); } catch {} renderVoice(); }   // 選聲音＝想聽：順手打開語音
@@ -1804,8 +1881,8 @@ function satAt(e) {
 function gaugeAt(e) {
   mouse.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
   ray.setFromCamera(mouse, camera);
-  const hit = ray.intersectObjects([g5.hit, g7.hit, gHeat.hit, ...gDisks.map(g => g.hit)].filter(m => m.visible), false)[0];
-  return !hit ? null : hit.object === g5.hit || hit.object === g7.hit ? "cardUsage" : "cardSys";      // 溫度、硬碟 → 外環卡
+  const hit = ray.intersectObjects([g5.hit, g7.hit, gHeat.hit, ...gDisks.map(g => g.hit), auditRing.mesh].filter(m => m?.visible), false)[0];
+  return !hit ? null : hit.object === g5.hit || hit.object === g7.hit ? "cardUsage" : "cardSys";      // 溫度、硬碟、自檢環 → 外環卡
 }
 /** 打開那個小視窗（已經開著就閃一下讓你看到在哪） */
 function openPanelFor(id) {
@@ -2250,6 +2327,7 @@ function applyTheme() {
   for (const a of outerArcs) if (!a.mesh.userData.heat) { a.mesh.material.color.copy(BALL); a.track.material.color.copy(BALL); }
   waveHist.fill(0); waveIdle = 0;
   for (const g of [g5, g7, gHeat, ...gDisks]) paintRamp(g);       // 量表漸層跟著主題換（深色的「黑」、淺色的「白」不同）
+  auditSeen = ""; syncAudit();                                    // 自檢環同一組漸層
   $("bTheme").title = THEME_LABEL[themeMode] + "（點一下換）";
   $("bTheme").textContent = themeMode === "auto" ? "◐" : themeMode === "dark" ? "●" : themeMode === "sun" ? "☀" : "○";
   if (themeMode === "sun") { const { rise, set } = sunTimes(); $("bTheme").title = `配色：日出日落（今天 ${hhmm(rise)} 變淺、${hhmm(set)} 變深；點一下換）`; }

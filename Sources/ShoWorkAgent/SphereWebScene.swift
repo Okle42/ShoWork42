@@ -128,6 +128,14 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
             js("window.karaSessionInfo", Self.info(c))
         case "timeline":        // v4 E：今日時間軸
             js("window.karaTimeline", SphereWatch.todayTimeline())
+        case "audit":           // 11-22 Keng：自檢原子環——開工（早報）／收工各跑一次，自檢卡也能手動重跑／送出
+            let send = m["send"] as? Bool ?? false
+            if send && blocked { return say("測試模式不送出。") }
+            if !SphereAudit.run(send: send, done: { [weak self] ok in
+                self?.sent = nil; self?.push()
+                if send { self?.say(ok ? "自檢已送到 Discord #自檢回報。" : "自檢送出失敗（看 ~/.claude/flow-audit/sphere/last.log）。") }
+            }) { say("自檢正在跑，等它跑完。") }
+            sent = nil; push()
         default: break
         }
     }
@@ -291,6 +299,8 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
         var o = Self.payload(model.cards, model.rateLimits, runs: model.runs, heat: heat)
         o["paused"] = HeatGate.shared.paused
         o["disks"] = SphereDisks.read()          // 11-22 Keng：球右半邊的硬碟空間刻度環
+        if let a = SphereAudit.latest() { o["audit"] = a }       // 11-22 Keng：自檢原子環（流量架構自檢的優化建議，不是用量）
+        o["auditBusy"] = SphereAudit.busy
         // v4 A：隊長最後一句（網頁判斷是不是回覆剛交辦的事）
         if let l = model.captainThread.last(where: { $0.role == .captain }) {
             o["captain"] = ["id": l.id, "text": String(l.text.prefix(400)), "at": l.at.map { ISO8601DateFormatter().string(from: $0) } ?? ""]
@@ -403,6 +413,60 @@ enum GhosttyTheme {
             p.standardOutput = FileHandle.nullDevice; p.standardError = FileHandle.nullDevice
             try? p.run(); p.waitUntilExit()
         }
+    }
+}
+
+/// 11-22 Keng：自檢原子環的資料＝scripts/flow_audit.py（流量架構自檢）的最新報告。
+/// 跑：python3 flow_audit.py --names --out ~/.claude/flow-audit/sphere（本機那份保留專案名，只給自己看；--send 送出的一律去隱私）。
+/// 腳本找法：App 包 Resources/flow_audit.py（安裝時複製）→ 原始碼旁的 scripts/。讀檔有快取（看修改時間）。
+@MainActor
+enum SphereAudit {
+    nonisolated static let dir = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".claude/flow-audit/sphere")
+    private(set) static var busy = false
+    private static var cache: (path: String, mtime: Date, value: [String: Any])?
+
+    nonisolated static var script: URL? {
+        var c: [URL] = []
+        if let r = Bundle.main.resourceURL { c.append(r.appendingPathComponent("flow_audit.py")) }
+        c.append(URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("scripts/flow_audit.py"))
+        return c.first { FileManager.default.fileExists(atPath: $0.path) }
+    }
+
+    static func latest() -> [String: Any]? {
+        let fm = FileManager.default
+        guard let names = try? fm.contentsOfDirectory(atPath: dir.path) else { return nil }
+        guard let newest = names.filter({ $0.hasPrefix("flow-audit-") && $0.hasSuffix(".json") }).sorted().last else { return nil }
+        let path = dir.appendingPathComponent(newest).path
+        let mtime = (try? fm.attributesOfItem(atPath: path)[.modificationDate] as? Date) ?? Date.distantPast
+        if let c = cache, c.path == path, c.mtime == mtime { return c.value }
+        guard let d = fm.contents(atPath: path), let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { return nil }
+        let cl = j["claude"] as? [String: Any] ?? [:]
+        // 只送球體用得到的（不送 by_project 明細）
+        let v: [String: Any] = ["at": j["at"] ?? "", "today": cl["today"] ?? [:], "standing": cl["standing"] ?? [:],
+                                "sessions": cl["sessions"] ?? [], "net": (j["network"] as? [String: Any])?["top"] ?? [], "advice": j["advice"] ?? []]
+        cache = (path, mtime, v)
+        return v
+    }
+
+    /// 背景跑一次；已經在跑就回 false。done 在主執行緒呼叫（ok＝結束代碼 0）
+    @discardableResult
+    static func run(send: Bool, done: @escaping @MainActor @Sendable (Bool) -> Void) -> Bool {
+        guard !busy, let script else { return false }
+        busy = true
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        p.arguments = ["-I", script.path, "--label", "Keng", "--names", "--out", dir.path] + (send ? ["--send"] : [])
+        let log = dir.appendingPathComponent("last.log")
+        FileManager.default.createFile(atPath: log.path, contents: nil)
+        if let h = try? FileHandle(forWritingTo: log) { p.standardOutput = h; p.standardError = h }
+        p.terminationHandler = { pr in
+            let ok = pr.terminationStatus == 0
+            Task { @MainActor in busy = false; done(ok) }
+        }
+        do { try p.run() } catch { busy = false; return false }
+        return true
     }
 }
 

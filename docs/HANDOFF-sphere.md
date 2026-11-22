@@ -123,6 +123,17 @@
 - 上面「KARA 對照改版」講的線條絲帶已被這版取代
 - 配色（Keng 追加）：粒子走量表同一組 白→灰→黑→紅 漸層（`rampLut()` 64 格查表，主題換才重算）；漸層位置＝音量推出去的程度＋落後格數，火花一路飛到紅；聆聽時灰色。實測每格 JS 3.2ms
 
+## 自檢原子環（11-22 晚，Keng：要的是「流量檢查優化報告」，不是用量——用量已有左邊 5H／7D 半圓表）
+- 最內側斜環（arcRing 2.15，加 `custom` 參數）改成自檢環：7 段等長 `AUDIT_KEYS` 快取／開場／閒置／空殼／子agent／常駐／網路；
+  `auditScores()` 0＝健康→1＝該優化（門檻對齊 flow_audit.py advice()，到門檻≈0.85＝紅），顏色走 `rampColor`；沒跑過＝暗灰
+- 外環卡多「AUDIT」區塊：時間、N 項待優化、7 項圓點、前 3 條建議（單行、滑過看全文）、按鈕「重跑」「送 #自檢回報」；額度那條建議不放；#cardSys 改可捲
+- 點自檢環 → 外環卡（gaugeAt 加 auditRing.mesh）
+- 何時跑（Keng 選「開工／收工各跑一次」）：早報時段（5–11 點）、收工時段（19 點後）每天各一次（localStorage sphere.audit.am／pm）；按「早報」「收工」鈕也會跑
+- 原生端 `SphereAudit`（SphereWebScene.swift）：背景跑 `python3 -I flow_audit.py --label Keng --names --out ~/.claude/flow-audit/sphere [--send]`（約 20 秒，含網路取樣 10 秒），輸出寫 last.log；payload `audit`（at、today、standing、sessions、net、advice）＋`auditBusy`
+- 安裝腳本把 scripts/flow_audit.py 複製進 App 包 Resources；送出（--send）一律去隱私
+- 「處理」鈕（直接關空殼等）**沒做**：Keng 沒回答要不要讓它直接動手，目前只顯示建議
+- 驗證：螢幕外桌面版 1000×860 深／淺色截圖，環 7 段有上色、卡片區塊正常；重跑／送出按鈕沒實按過
+
 ## 字幕跟語音（11-22）
 - 開語音時 `say(..., follow=true)`：不先打字，等原生報「唸到哪」才出字（Mac：逐詞 marker＋合成完算出總長後的播放進度；微軟：播放進度）；`karaVoice('start')` 後 1.2 秒沒同步才退回照速度打字
 
