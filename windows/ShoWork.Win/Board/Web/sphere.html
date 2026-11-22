@@ -215,7 +215,7 @@
   svg#links path.pop { stroke-width: 1.2; opacity: .9; transition: stroke-dashoffset .45s ease-out; }
   svg#links circle { fill: var(--acc); }
   svg#links text { pointer-events: auto; cursor: pointer; fill: var(--ink); stroke: none; font: 600 10px ui-monospace, Menlo, monospace; letter-spacing: .08em; paint-order: stroke; }
-  svg#links text.warn, svg#links text.bad { fill: var(--acc); }
+  svg#links text.warn, svg#links text.bad, svg#links tspan.warn { fill: var(--acc); }
   svg#links .warn { stroke: var(--warn); fill: var(--warn); }
   svg#links .bad { stroke: var(--bad); fill: var(--bad); }
   .pop { position: fixed; top: 96px; width: var(--cw); z-index: 4; pointer-events: auto; cursor: pointer;
@@ -1257,19 +1257,28 @@ function targetOf(key) {
   if (/^disk\d$/.test(key)) return toScreen(gaugeTip(gDisks[+key[4]]));
   return key ? satPoint(key) : null;
 }
+/* 11-22 Keng：標籤的名稱一律黑（深色主題白），只有超過門檻時「數字」變紅（SD128 黑、87% 紅） */
+function setLabel(tx, lbl, cls) {
+  const hot = /\b(warn|bad)\b/.test(cls || ""), key = lbl + "|" + hot;
+  if (tx.dataset.k === key) return;
+  tx.dataset.k = key; tx.removeAttribute("class");
+  const m = lbl.match(/^(.*?)\s*(\d+(?:%|°C))$/);
+  if (!m) { tx.textContent = lbl; return; }
+  tx.innerHTML = (m[1] ? `<tspan>${esc(m[1])} </tspan>` : "") + `<tspan${hot ? ' class="warn"' : ""}>${esc(m[2])}</tspan>`;
+}
 function setLink(id, rect, pt, cls) {
   const p = $("lp_" + id), c = $("lc_" + id), r = $("lr_" + id);
   const tx = $("lt_" + id), bg = $("lb_" + id);
   if (pt) { bg.setAttribute("cx", pt.x.toFixed(1)); bg.setAttribute("cy", pt.y.toFixed(1)); bg.setAttribute("r", 7); } else bg.setAttribute("r", 0);
-  if (!pt || (!rect && id === "pop")) { p.setAttribute("d", ""); c.setAttribute("r", 0); r.setAttribute("r", 0); tx.textContent = ""; return; }
+  if (!pt || (!rect && id === "pop")) { p.setAttribute("d", ""); c.setAttribute("r", 0); r.setAttribute("r", 0); tx.textContent = ""; delete tx.dataset.k; return; }
   // 11-22 Keng：卡片關掉時尖端的數值（5H 33%、溫度、名字）還是要在，只是不拉線
   if (!rect) {
     p.setAttribute("d", "");
     for (const e of [c, r]) { e.setAttribute("cx", pt.x.toFixed(1)); e.setAttribute("cy", pt.y.toFixed(1)); }
     c.setAttribute("r", 3); r.setAttribute("r", 6.5);
-    if (cls != null) for (const e of [p, c, r, tx]) e.setAttribute("class", cls);
+    if (cls != null) for (const e of [p, c, r]) e.setAttribute("class", cls);
     const lbl = labelOf(id), away = pt.x >= sphereScreen().cx ? 1 : -1;
-    if (tx.textContent !== lbl) tx.textContent = lbl;
+    setLabel(tx, lbl, cls);
     tx.setAttribute("x", (pt.x + away * 10).toFixed(1)); tx.setAttribute("y", (pt.y - 8).toFixed(1)); tx.setAttribute("text-anchor", away > 0 ? "start" : "end");
     return;
   }
@@ -1282,10 +1291,10 @@ function setLink(id, rect, pt, cls) {
   p.setAttribute("d", `M${ex.toFixed(1)},${ey.toFixed(1)} L${kx.toFixed(1)},${ky.toFixed(1)} L${pt.x.toFixed(1)},${pt.y.toFixed(1)}`);
   c.setAttribute("cx", pt.x.toFixed(1)); c.setAttribute("cy", pt.y.toFixed(1)); c.setAttribute("r", 2.6);
   r.setAttribute("cx", pt.x.toFixed(1)); r.setAttribute("cy", pt.y.toFixed(1)); r.setAttribute("r", 6);
-  if (cls != null) for (const e of [p, c, r, tx]) e.setAttribute("class", cls);
+  if (cls != null) for (const e of [p, c, r]) e.setAttribute("class", cls);
   // 標籤放在尖端「離卡片遠的那一側」，不壓到線
   const lbl = labelOf(id === "pop" ? popTarget : id), away = pt.x >= kx ? 1 : -1;
-  if (tx.textContent !== lbl) tx.textContent = lbl;
+  setLabel(tx, lbl, cls);
   tx.setAttribute("x", (pt.x + away * 10).toFixed(1)); tx.setAttribute("y", (pt.y - 8).toFixed(1));
   tx.setAttribute("text-anchor", away > 0 ? "start" : "end");
 }
