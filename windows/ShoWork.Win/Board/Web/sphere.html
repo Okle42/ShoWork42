@@ -626,7 +626,7 @@ function arcMesh(r, w, frac, color, op) {
 const heatFade = new Fade(GRAY, 2);
 function syncOuter(runs, heat) {
   const want = [];
-  (runs || []).slice(0, 3).forEach((r, i) => want.push({ key: `run${i}:${Math.round(r.fraction * 100)}`, r: 3.74 + i * 0.08, w: 0.035, f: r.fraction, color: BALL, op: 0.75 }));
+  (runs || []).slice(0, 3).forEach((r, i) => want.push({ key: `run${i}:${Math.round(r.fraction * 100)}`, r: LAYER(7) + 0.06 + i * 0.08, w: 0.035, f: r.fraction, color: BALL, op: 0.75 }));
   // 溫度改由下面的「溫度環」（gHeat）畫：會走過去、依溫度變色、過熱警報
   if (want.map(w => w.key).join("|") === outerArcs.map(a => a.key).join("|")) return;
   for (const a of outerArcs) { outer.remove(a.mesh, a.track); a.mesh.geometry.dispose(); a.track.geometry.dispose(); }
@@ -672,10 +672,12 @@ function gaugeSide(g, rect) {
   const { cx } = sphereScreen(), f = rect.left + rect.width / 2 > cx ? -1 : 1;
   if (f !== g.flip) { g.flip = f; for (const m of [g.track, g.fill, g.tk, g.hit]) m.scale.x = f; }
 }
-const g5 = gauge(2.98, 0.07, 72, [0.7, 0.9]), g7 = gauge(3.09, 0.035, 72, [0.8, 0.95]);
-const gHeat = gauge(3.62, 0.055, 65, [(70 - 35) / 65, (85 - 35) / 65]);       // 一格＝1°C
+// 11-22 Keng：外圍量表全部同心、每個一層（半徑都不同）：由內到外 5H → 7D → 溫度 → 硬碟 1…4，層距 0.1
+const LAYER = r => 2.96 + r * 0.1;
+const g5 = gauge(LAYER(0), 0.055, 72, [0.7, 0.9]), g7 = gauge(LAYER(1), 0.055, 72, [0.8, 0.95]);
+const gHeat = gauge(LAYER(2), 0.055, 65, [(70 - 35) / 65, (85 - 35) / 65]);       // 一格＝1°C
 // 硬碟環（右半邊，固定不翻）：最多 4 顆，一格 1%，85% 門檻刻線、超過變紅
-const gDisks = [2.98, 3.08, 3.18, 3.28].map(r => gauge(r, 0.05, 100, [0.85, 0.95], dAng));
+const gDisks = [3, 4, 5, 6].map(k => gauge(LAYER(k), 0.055, 100, [0.85, 0.95], dAng));
 const heatDot = new THREE.Mesh(new THREE.CircleGeometry(0.05, 12), gmat(0)); outer.add(heatDot);
 const _tmpC = new THREE.Color();
 function heatCol(t) {             // 灰（≤55）→ 白（75）→ 紅（≥90）
@@ -1258,7 +1260,7 @@ function linkFrame() {
     const tl = [];
     gDisks.forEach((g, i) => {
       const t = $("lt_disk" + i); if (!t.textContent || g.target == null) return;
-      const a = g.ang(Math.max(0.004, Math.min(1, g.cur))), P = toScreen(_tip.set(Math.cos(a) * 3.48, Math.sin(a) * 3.48, 0).applyMatrix4(outer.matrixWorld));
+      const a = g.ang(Math.max(0.004, Math.min(1, g.cur))), P = toScreen(_tip.set(Math.cos(a) * (LAYER(6) + 0.18), Math.sin(a) * (LAYER(6) + 0.18), 0).applyMatrix4(outer.matrixWorld));
       if (P) tl.push({ t, x: P.x + 6, y: P.y + 4 });
     });
     tl.sort((a, b) => a.y - b.y);
