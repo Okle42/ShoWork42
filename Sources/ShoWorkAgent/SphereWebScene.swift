@@ -367,7 +367,12 @@ enum GhosttyTheme {
     static let config = NSHomeDirectory() + "/Library/Application Support/com.mitchellh.ghostty/config.ghostty"
     private static var last: String?
     static func apply(mode: String, now: String, blocked: Bool) {
-        let line = mode == "auto" ? "theme = light:Okle42-Light,dark:Okle42-Dark" : "theme = Okle42-\(now == "light" ? "Light" : "Dark")"
+        // 11-22 Keng 截圖：終端機切淺色後 Claude Code 的介面（框、表格、灰字）還是深色版 ⇒ 淺底上看不清楚。
+        // 所以只有 Claude Code 自己也設成淺色主題（~/.claude.json theme 以 light 開頭）時才讓終端機跟著變淺；否則一律深色
+        let ccLight = ((try? JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: NSHomeDirectory() + "/.claude.json")))) as? [String: Any])?["theme"]
+            .flatMap { $0 as? String }?.hasPrefix("light") == true
+        let line = !ccLight ? "theme = Okle42-Dark"
+            : mode == "auto" ? "theme = light:Okle42-Light,dark:Okle42-Dark" : "theme = Okle42-\(now == "light" ? "Light" : "Dark")"
         guard line != last, !blocked else { return }
         last = line
         guard FileManager.default.fileExists(atPath: NSHomeDirectory() + "/.config/ghostty/themes/Okle42-Dark"),
