@@ -142,6 +142,7 @@ final class SphereAudio {
         ticker?.invalidate(); ticker = nil
         synth.stopSpeaking(at: .immediate)
         player.stop()
+        engine.stop()            // 效能（11-22）：沒在唸就關掉音訊引擎（不然 tap 一直對靜音做 FFT、音訊硬體也不休息）
         started = false; format = nil; scheduled = 0; synthDone = false; markers = []; duration = nil
         if was { onEvent?("end") }
     }
@@ -177,6 +178,7 @@ final class SphereAudio {
             markers = []
             ticker?.invalidate(); ticker = nil
             player.stop()
+            engine.stop()
             started = false; format = nil
             onLevels?(.init(repeating: 0, count: SphereSpectrum.bandCount), 0, Double(pos) / f.sampleRate, duration)
             onEvent?("end")

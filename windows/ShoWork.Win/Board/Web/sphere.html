@@ -25,7 +25,7 @@
     color-scheme: dark;
     --bg: #0b0b0c; --glow: rgba(255,255,255,.045);
     --ink: #f2f2f2; --ink-dim: rgba(242,242,242,.56); --ink-faint: rgba(242,242,242,.3);
-    --panel: rgba(20,20,21,.82); --panel-solid: rgba(17,17,18,.96);
+    --panel: rgba(20,20,21,.9); --panel-solid: rgba(17,17,18,.96);
     --line: rgba(255,255,255,.14); --soft: rgba(255,255,255,.05); --seg: rgba(255,255,255,.1);
     --acc: #ff3b30; --gray: #9a9a9a; --done: #6a6a6a; --gold: #d4af37;
     --warn: #ff3b30; --bad: #ff3b30;
@@ -35,7 +35,7 @@
     color-scheme: light;
     --bg: #f3f3f1; --glow: rgba(0,0,0,.035);
     --ink: #141414; --ink-dim: rgba(20,20,20,.58); --ink-faint: rgba(20,20,20,.32);
-    --panel: rgba(255,255,255,.84); --panel-solid: rgba(255,255,255,.97);
+    --panel: rgba(255,255,255,.92); --panel-solid: rgba(255,255,255,.97);
     --line: rgba(0,0,0,.13); --soft: rgba(0,0,0,.045); --seg: rgba(0,0,0,.1);
     --acc: #d7261b; --gray: #6e6e6e; --done: #a6a6a6; --gold: #a8801a;
     --warn: #d7261b; --bad: #d7261b;
@@ -57,7 +57,7 @@
   /* 上方字幕列 */
   #caption { position: fixed; top: 16px; left: 50%; transform: translateX(-50%);
     width: min(560px, calc(100% - 32px)); background: var(--panel); border: 1px solid var(--line);
-    border-radius: 6px; padding: 10px 14px 12px; backdrop-filter: blur(8px); }
+    border-radius: 6px; padding: 10px 14px 12px; }
   #caption .who { font-size: 10px; letter-spacing: .18em; color: var(--ink-dim); display: flex; gap: 8px; align-items: center; }
   #caption .who i { width: 6px; height: 6px; border-radius: 50%; background: var(--acc); display: inline-block; transition: background-color 1.2s ease; }
   body.alert #caption .who i { background: var(--warn); }
@@ -67,7 +67,7 @@
 
   /* 資訊小卡 */
   .card { position: fixed; background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
-    padding: 10px 12px; min-width: 200px; backdrop-filter: blur(8px);
+    padding: 10px 12px; min-width: 200px;
     opacity: 0; transform: translateY(6px) scale(.98); transition: opacity .35s, transform .35s; pointer-events: none; }
   .card.on { opacity: 1; transform: none; }
   .card .k { font-size: 10px; letter-spacing: .18em; color: var(--ink-dim); }
@@ -104,7 +104,7 @@
   /* v3 #1：需要你的選項面板 */
   #askCard { position: fixed; left: 50%; bottom: 112px; transform: translateX(-50%) translateY(8px);
     width: min(580px, calc(100% - 32px)); background: var(--panel); border: 1px solid var(--acc-dim);
-    border-radius: 6px; padding: 10px 14px 12px; backdrop-filter: blur(8px);
+    border-radius: 6px; padding: 10px 14px 12px;
     opacity: 0; pointer-events: none; transition: opacity .3s, transform .3s; }
   #askCard.on { opacity: 1; pointer-events: auto; transform: translateX(-50%); }
   #askCard .top { display: flex; align-items: center; gap: 8px; font-size: 10px; letter-spacing: .16em; color: var(--warn); }
@@ -237,7 +237,7 @@
   .card.flash { animation: cflash 1.6s ease-out; }
   @keyframes cflash { 0%, 40% { border-color: var(--warn); box-shadow: 0 0 24px var(--acc-dim); } 100% { border-color: var(--line); box-shadow: none; } }
   /* ④ 戰情卡 */
-  #cardTeam { width: 310px; }
+  #cardTeam { width: 310px; max-height: calc(58% - 20px); overflow: auto; }
   .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: -2px 0 8px; }
   .chips span { font-size: 10px; letter-spacing: .06em; color: var(--ink-dim); display: inline-flex; align-items: center; gap: 4px; }
   .chips i, .trow .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--c); display: inline-block; }
@@ -269,28 +269,27 @@
   #banner .main .cur { animation: blink 1s steps(1) infinite; }
   #banner .sub { font-size: 12px; color: rgba(255,255,255,.75); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     @media (prefers-reduced-motion: reduce) { #banner.on, .pop.on::after, .trow .dot.pulse, .card.flash, .trow.flash { animation: none; } }
-  @media (max-width: 640px) {
-    #cardUsage { left: 16px; top: auto; bottom: 120px; min-width: 0; width: calc(50% - 24px); }
-    #cardTeam { right: 16px; top: auto; bottom: 120px; min-width: 0; width: calc(50% - 24px); }
-    #cardSys { display: none; }
-    #askCard { bottom: 76px; }
-  }
-  /* 桌面版直式（小／中）：卡片在下面左右排，太高就捲動，不要蓋到球；字幕窄一點 */
+  /* 疊排（body.stack，resize() 判斷）：球左右放不下兩張卡片時（直式、偏方的視窗、桌面版小／中），
+     球往上移、卡片排到下面左右兩張，太高就捲動；外環卡併進額度卡（#sysRows2）。11-22 Keng 截圖：分頁視窗偏直時卡片蓋住球、拉線亂繞 */
+  #sysWrap { display: none; }
+  body.stack #sysWrap:not(:empty) { display: block; }
+  body.stack #cardSys { display: none; }
+  body.stack #cardUsage, body.stack #cardTeam { top: auto; bottom: 96px; padding: 8px 10px; min-width: 0; max-height: 32%; overflow: auto;
+    width: min(380px, calc(50% - 20px)); }
+  body.stack #cardUsage { left: 12px; } body.stack #cardTeam { right: 12px; }
+  body.stack .card .head b { font-size: 20px; }
+  body.stack #cardUsage .donut { width: 30px; height: 30px; }
+  body.stack #caption { width: min(560px, calc(100% - 24px)); }
+  body.stack .pop { width: min(290px, calc(100% - 24px)); }
+  body.stack .pop.r { right: 12px; } body.stack .pop.l { left: 12px; }
+  body.stack #state { bottom: 58px; }
+  body.stack #hint { bottom: 34px; }
+  body.stack #askCard { bottom: 96px; width: min(580px, calc(100% - 24px)); z-index: 7; }
+  /* 有人在等你：選項面板佔卡片的位置（卡片先收起來，答完就回來；session 狀態看衛星） */
+  body.stack.asking #cardUsage, body.stack.asking #cardTeam { opacity: 0; pointer-events: none; }
   @media (max-width: 640px) {
     body.desk .wide { display: none; }
     body.desk #voiceSel { max-width: 84px; }
-    body.desk #cardUsage, body.desk #cardTeam { bottom: 96px; padding: 8px 10px; max-height: 30%; overflow: auto; }
-    body.desk #cardUsage { width: calc(50% - 20px); left: 12px; } body.desk #cardTeam { width: calc(50% - 20px); right: 12px; }
-    body.desk .card .head b { font-size: 20px; }
-    body.desk #cardUsage .donut { width: 30px; height: 30px; }
-    body.desk #caption { width: calc(100% - 24px); }
-    body.desk .pop { width: min(290px, calc(100% - 24px)); }
-    body.desk .pop.r { right: 12px; } body.desk .pop.l { left: 12px; }
-    body.desk #state { bottom: 58px; }
-    body.desk #hint { bottom: 34px; }
-    body.desk #askCard { bottom: 96px; width: calc(100% - 24px); z-index: 7; }
-    /* 有人在等你：選項面板佔卡片的位置（卡片先收起來，答完就回來；session 狀態看衛星） */
-    body.desk.asking #cardUsage, body.desk.asking #cardTeam, body.desk.asking #cardSys { opacity: 0; pointer-events: none; }
   }
   /* 桌面版橫式（大）：卡片窄一點，球留在中間 */
   @media (min-width: 641px) and (max-width: 1100px) {
@@ -317,6 +316,7 @@
   <div class="row"><span class="t">7D</span><span>7 天額度<span class="rs" id="r7"></span></span><span id="u7b">--%</span><div class="meter seg"><b id="m7"></b></div></div>
   <div class="row"><span class="t">CTX</span><span>記憶量<span class="rs" id="rc"></span></span><span id="uc">--%</span><div class="meter seg"><b id="mc"></b></div></div>
   <div class="fc" id="fc" hidden></div>
+  <div id="sysWrap"></div>
 </div>
 
 <div class="card" id="cardTeam">
@@ -409,7 +409,8 @@ let accent = accentFade.c;
 
 /* ---------- three.js 場景 ---------- */
 const canvas = document.getElementById("gl");
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+// 效能（11-22）：Retina（2 倍）本身就夠細，再開多重取樣抗鋸齒＝每格多畫好幾倍像素；只在 1 倍螢幕開
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: devicePixelRatio < 2, alpha: true, powerPreference: "low-power" });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100);
@@ -450,17 +451,31 @@ const shell = new THREE.Group(); root.add(shell);
   root.add(hex); hex.userData.spin = -0.4; root.userData.hex = hex;
 }
 
+/** 幾個有索引的幾何併成一個（只要位置；RingGeometry 用） */
+function mergeGeo(list) {
+  const pos = [], idx = []; let base = 0;
+  for (const g of list) {
+    pos.push(...g.attributes.position.array);
+    for (const i of g.index.array) idx.push(i + base);
+    base += g.attributes.position.count; g.dispose();
+  }
+  const out = new THREE.BufferGeometry();
+  out.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3)); out.setIndex(idx);
+  return out;
+}
 // 4. 環形 HUD：分段的圓弧，各自傾斜、各自轉
 const rings = [];
 function arcRing(r, w, segs, tilt, speed, op) {
   const grp = new THREE.Group();
+  // 效能（11-22）：原本每一段弧各一個物件（四圈共 53 個 draw call）⇒ 依亮度分兩組各併成一個（每圈 2 個）
   let a = 0;
+  const groups = [[], []];
   for (let i = 0; i < segs; i++) {
     const len = (Math.PI * 2 / segs) * (0.35 + Math.random() * 0.55);
-    const geo = new THREE.RingGeometry(r, r + w, 48, 1, a, len);
-    grp.add(new THREE.Mesh(geo, meshMat(op * (0.5 + Math.random() * 0.5))));
+    groups[Math.random() < 0.5 ? 0 : 1].push(new THREE.RingGeometry(r, r + w, 48, 1, a, len));
     a += Math.PI * 2 / segs;
   }
+  groups.forEach((gs, k) => { if (gs.length) grp.add(new THREE.Mesh(mergeGeo(gs), meshMat(op * (k ? 0.95 : 0.62)))); });
   // 細線外框
   const circ = new THREE.EllipseCurve(0, 0, r + w + 0.04, r + w + 0.04).getPoints(160);
   grp.add(new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(circ), lineMat(op * 0.6)));
@@ -529,6 +544,7 @@ function animSats(dt, t) {
     s.mesh.scale.setScalar(k * (s.hover ? 1.6 : 1));
     s.mesh.material.opacity += ((st === "完成" || !SAT_COLOR[st] ? 0.55 : 0.95) - s.mesh.material.opacity) * Math.min(1, dt * 2);
     s.halo.material.opacity = need ? 0.5 + 0.4 * Math.sin(t * 5) : s.hover ? 0.7 : 0;
+    s.halo.visible = s.halo.material.opacity > 0.004;
     s.halo.lookAt(camera.position);
   }
 }
@@ -577,7 +593,7 @@ outer.add(comet);
 const shocks = [0, 1, 2].map(() => {
   const m = new THREE.Mesh(new THREE.RingGeometry(1, 1.018, 128),
     new THREE.MeshBasicMaterial({ color: ALERT, transparent: true, opacity: 0, blending: BLEND, depthWrite: false, side: THREE.DoubleSide }));
-  m.userData.t = -1; outer.add(m); return m;
+  m.userData.t = -1; m.visible = false; outer.add(m); return m;
 });
 let shockNext = 0;
 
@@ -586,8 +602,12 @@ function resize() {
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
   camera.position.z = w < h ? 15 : 10.5;  // 直式畫面拉遠一點；v3 外環（3.2–3.7）也要進框
-  // 桌面版直式：卡片在下面 ⇒ 球再拉遠一點、往上移到 40% 高的地方（外環半徑約四分之一高），不被卡片蓋住
-  if (DESK && w <= 640) { camera.position.z = 20; camera.setViewOffset(w, h, 0, h * 0.1, w, h); }
+  // 疊排判斷：球（半徑 2 的那圈）的直徑 ≈ 5.49·h／z 像素；左右兩張卡片＋邊距吃掉之後剩的寬度放不下球 ⇒ 卡片改排到下面
+  const side = DESK && w <= 1100 ? 2 * (16 + 270) : 2 * (24 + 310);
+  const stack = w - side < 5.49 * h / camera.position.z * 1.05;
+  document.body.classList.toggle("stack", stack);
+  // 疊排：球拉遠一點、往上移到 40% 高（外環半徑約四分之一高），不被下面的卡片蓋住
+  if (stack) { camera.position.z = 20; camera.setViewOffset(w, h, 0, h * 0.1, w, h); }
   else camera.clearViewOffset();
   camera.updateProjectionMatrix();
 }
@@ -596,7 +616,7 @@ addEventListener("resize", resize); resize();
 /* ---------- 動畫 ---------- */
 const clock = new THREE.Clock();
 const tmp = new THREE.Vector3();
-let lastDraw = 0, wordPulse = 0, bounceAt = -1e9;
+let lastDraw = 0, wordPulse = 0, bounceAt = -1e9, motionAt = -1e9;
 const bitMats = new Set(bits.map(b => b.material));
 function frame(now) {
   requestAnimationFrame(frame);
@@ -606,7 +626,10 @@ function frame(now) {
   const lean = data.paused;
   const want = lean ? 1 : Math.min(devicePixelRatio, 2);
   if (renderer.getPixelRatio() !== want) { renderer.setPixelRatio(want); resize(); }
-  const gap = lean || DESK ? 33.3 : 0;
+  // 效能（11-22 Keng：降低耗電、提升順暢）：分頁平常也 30 張（球轉得慢，看不出差別）；
+  // 有東西在動才 60 張：說話、聆聽、搜尋、彈一下、滑鼠在衛星上、橫幅／事件卡正在展開
+  const busy = state === "speaking" || state === "searching" || listening || hovered || now - bounceAt < 1600 || now - motionAt < 1200;
+  const gap = lean || DESK || !busy ? 33.3 : 0;
   if (now - lastDraw < gap - 4) return;          // 留 4ms 誤差，避免 60Hz 螢幕上偶爾跳過一格變成頓
   lastDraw = now;
   const dt = Math.min(clock.getDelta(), 0.08), t = clock.elapsedTime;
@@ -646,7 +669,8 @@ function frame(now) {
     const u = b.userData; u.t = (u.t + dt * u.speed * (0.5 + cur.spin)) % 1;
     b.position.copy(u.dir).multiplyScalar(1.6 + u.t * 3.2);
     b.material.opacity = cur.scatter * Math.sin(u.t * Math.PI) * 0.9;
-    b.lookAt(camera.position);
+    b.visible = b.material.opacity > 0.004;          // 效能：看不見就不畫（不搜尋時 40 個 draw call 全省）
+    if (b.visible) b.lookAt(camera.position);
   }
 
   // 整體亮度與顏色
@@ -667,8 +691,14 @@ function frame(now) {
   root.rotation.x = Math.sin(t * 0.17) * 0.08;
 
   renderer.render(scene, camera);
+  perf.n++; perf.ms += performance.now() - now;
 }
 requestAnimationFrame(frame);
+// 效能量測（測試用，平常只多兩次 performance.now）：window.karaPerf() → 每格 JS 毫秒、每秒張數、draw call、三角形
+const perf = { n: 0, ms: 0, t0: performance.now() };
+window.karaPerf = () => { const sec = (performance.now() - perf.t0) / 1000, r = renderer.info.render;
+  const o = { fps: +(perf.n / sec).toFixed(1), jsMs: +(perf.ms / Math.max(1, perf.n)).toFixed(2), calls: r.calls, tris: r.triangles, lines: r.lines, px: renderer.getPixelRatio() };
+  perf.n = 0; perf.ms = 0; perf.t0 = performance.now(); return o; };
 
 /* v5 聲波：目標值＝真的頻譜（有送）或假的（沒送但在講）；上升快、下降慢，看起來像音響的表 */
 function animWave(dt, t, talking, hearing, live) {
@@ -697,6 +727,7 @@ function animFx(dt, t) {
   comet.rotation.z -= dt * (state === "searching" ? 5.5 : 3.2);
   comet.material.opacity += ((scan ? 0.75 : 0) - comet.material.opacity) * Math.min(1, dt * 3);
   comet.material.color.copy(accent);
+  comet.visible = comet.material.opacity > 0.004;
   const alarm = state === "alert" || bannerOn;
   if (alarm && t > shockNext) {
     const m = shocks.find(x => x.userData.t < 0); if (m) m.userData.t = 0;
@@ -707,7 +738,8 @@ function animFx(dt, t) {
     if (m.userData.t < 0) continue;
     m.userData.t += dt / 1.6;
     const k = m.userData.t;
-    if (k >= 1) { m.userData.t = -1; m.material.opacity = 0; continue; }
+    if (k >= 1) { m.userData.t = -1; m.material.opacity = 0; m.visible = false; continue; }
+    m.visible = true;
     m.scale.setScalar(1.7 + k * 2.4); m.material.opacity = 0.7 * (1 - k) * (1 - k); m.material.color.copy(col);
   }
 }
@@ -937,8 +969,15 @@ function sphereScreen() {
 }
 function linkPath(el, cls = "") {
   if (!el || !el.classList.contains("on") || getComputedStyle(el).display === "none") return "";
-  if (DESK && innerWidth <= 640 && el.id !== "pop" && document.body.classList.contains("asking")) return "";     // 桌面版直式：卡片讓位給選項面板時不拉線
+  const stacked = document.body.classList.contains("stack");
+  if (stacked && el.id !== "pop" && document.body.classList.contains("asking")) return "";     // 疊排：卡片讓位給選項面板時不拉線
   const b = el.getBoundingClientRect(), { cx, cy, r } = sphereScreen();
+  if (stacked && el.id !== "pop") {
+    // 疊排：卡片在球下面 ⇒ 從球邊往卡片方向出發、轉直角、垂直落到卡片上緣（靠球那一側的四分之一處）
+    const left = b.left + b.width / 2 < cx, ex = left ? b.right - b.width * 0.25 : b.left + b.width * 0.25, ey = b.top;
+    const a = Math.atan2(ey - cy, ex - cx), sx = cx + Math.cos(a) * r, sy = cy + Math.sin(a) * r, ky = Math.max(sy + 10, ey - 18);
+    return `<path class="${cls}" d="M${sx.toFixed(1)},${sy.toFixed(1)} L${ex.toFixed(1)},${ky.toFixed(1)} L${ex.toFixed(1)},${ey.toFixed(1)}"/><circle class="${cls}" cx="${sx.toFixed(1)}" cy="${sy.toFixed(1)}" r="2.2"/>`;
+  }
   const left = b.left + b.width / 2 < cx, ex = left ? b.right : b.left, ey = Math.max(b.top + 18, Math.min(b.bottom - 18, cy));
   const ty = b.top + 22, a = Math.atan2(ty - cy, ex - cx), sx = cx + Math.cos(a) * r, sy = cy + Math.sin(a) * r;
   const elbow = ex + (left ? 26 : -26);
@@ -947,7 +986,7 @@ function linkPath(el, cls = "") {
 function drawLinks() {
   // 外環卡接在額度卡下面（額度卡 v5 變高了，不能再用固定位置）
   const u = $("cardUsage").getBoundingClientRect();
-  if (innerWidth > 640 && u.height) $("cardSys").style.top = Math.round(u.bottom + 12) + "px";
+  if (!document.body.classList.contains("stack") && u.height) $("cardSys").style.top = Math.round(u.bottom + 12) + "px";
   $("lkStatic").innerHTML = ["cardUsage", "cardTeam", "cardSys"].map(id => linkPath($(id))).join("");
 }
 addEventListener("resize", () => { drawLinks(); if (popEl.classList.contains("on")) drawPopLink(); });
@@ -973,7 +1012,7 @@ function showPop(p) {
   popEl.className = `card pop ${p.side || "r"} ${p.level || ""}`;
   popEl.innerHTML = p.html; popSid = p.sid || null;
   if (p.flash) { $(p.flash).classList.remove("flash"); void $(p.flash).offsetWidth; $(p.flash).classList.add("flash"); }
-  requestAnimationFrame(() => { popEl.classList.add("on"); drawPopLink(true); });
+  requestAnimationFrame(() => { popEl.classList.add("on"); drawPopLink(true); }); motionAt = performance.now();
 }
 function drawPopLink(fresh) {
   const lvl = popEl.classList.contains("bad") ? "bad" : popEl.classList.contains("warn") ? "warn" : "";
@@ -1002,7 +1041,7 @@ function showBanner(b) {
   el.className = bannerLevel === "warn" ? "warn" : "";
   el.querySelector(".in").innerHTML = `<div class="meta"><span>${esc(b.tag || "WARNING")}</span><span>${esc(b.source || "SHOWORK42")}</span><span>${now.getHours()}:${String(now.getMinutes()).padStart(2, "0")}</span></div>
     <div class="main">${ICON[b.icon || "warn"]}<span class="bt"></span><span class="cur">_</span></div>${b.sub ? `<div class="sub">${esc(b.sub)}</div>` : ""}`;
-  void el.offsetWidth; el.classList.add("on");
+  void el.offsetWidth; el.classList.add("on"); motionAt = performance.now();
   decode(el.querySelector(".bt"), b.title, 520);
   document.body.classList.toggle("bad", bannerLevel === "bad");
   setState(state);
@@ -1024,6 +1063,7 @@ function renderSys() {
     rows.push(`<div class="row"><span class="t">TEMP</span><span>機器溫度 · ${esc(lv)}${data.paused ? " · 動畫降速" : ""}</span><span>${Math.round(h.temp)}°C</span><div class="meter"><b style="width:${Math.min(100, Math.max(2, (h.temp - 35) / 65 * 100))}%;background:${col}"></b></div></div>`);
   }
   $("sysRows").innerHTML = rows.join("");
+  $("sysWrap").innerHTML = rows.join("");          // 疊排時外環卡併進額度卡
   show("cardSys", rows.length > 0);
 }
 $("teamRows").onclick = e => {
