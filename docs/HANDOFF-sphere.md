@@ -1,6 +1,6 @@
 # 球體助理（戰情中心第四個分頁）交接
 
-最後更新：2026-11-22（Bella）
+最後更新：2026-11-22（Bella，球體桌面版）
 分支：`bella/sphere-tab`，worktree：`~/github-repos/_wt-ShoWork42-sphere`。**沒有 push**（push 要 Keng／隊長轉述核可）。
 本機已安裝：c4b5401（`board/installed.json`）。
 
@@ -8,7 +8,7 @@
 - `windows/ShoWork.Win/Board/Web/sphere.html`：整個球體頁面（Mac WKWebView 和 Windows WebView2 共用）
 - `Sources/ShoWorkAgent/SphereWebScene.swift`：Mac 宿主（資料推送、動作處理、聲音選單、`SphereWebView`）
 - `Sources/ShoWorkAgent/SphereAudio.swift`：v5 播報引擎（AVAudioEngine＋vDSP FFT）
-- `Sources/ShoWorkAgent/SphereMini.swift`：桌面小球、`SphereListener`（按住講話的語音辨識＋麥克風頻譜）
+- `Sources/ShoWorkAgent/SphereMini.swift`：**球體桌面版**（11-22 起取代小球）、`DeskPanel`、`DeskChrome`（拖移／縮放）、`SphereListener`（按住講話的語音辨識＋麥克風頻譜）
 
 ## v5（11-22，參考 Keng 錄的 IG KARA 影片）
 1. 狀態：中英雙標籤＋解碼動畫、思考掃描彗星、警示衝擊波
@@ -19,6 +19,15 @@
 6. 警示橫幅：需要你（橘）、卡住／額度 ≥90%／過熱（紅）
 - 聲波：`window.karaLevels({b:[32], r, p, d, mic})` 每 1/30 秒；球外圈 120 根放射條＋字幕下波形；沒收到（Windows）就用假波形
 - 背景：交叉點小十字（Keng 指定，不要整條網格線）
+
+## 球體桌面版（11-22，T1122091602，Keng 選定的最終型態）
+- 小球放大成完整球體：同一份 sphere.html 用 `?desk=1` 載入，功能跟分頁一樣（舊的 `?mini=1` 精簡模式已拿掉）
+- 尺寸：小 460×620、中 540×720（預設）、大 1000×700；拖右下角自由縮放（最小 360×440）；工具列「尺寸」或選單列「桌面球體大小」切換；位置存 `sphere.mini.origin`、尺寸存 `sphere.desk.size`
+- 拖移：上方 34px 標題列（網頁用 `deskChrome` 回報按鈕位置，那些地方不拖）；`SphereWebView.mouseDown` 攔
+- 直式（≤640 寬）：球拉遠到 z=20、`setViewOffset` 往上移到 40% 高；卡片在下方；有人在等你時卡片讓位給選項面板（`body.asking`）
+- 兩顆都開：自動播報（`announce(..., {auto:true})`）只有桌面版出聲，分頁那顆只出字幕
+- 省電：桌面版一律 30 張／秒；解析度平常 2 倍、機器熱（paused）降 1 倍
+- 測試：`--board-window` 加 `SHOWORK_TEST_SPHERE_MINI=1`（開在螢幕外）、`SHOWORK_TEST_DESK_SIZE={540,720}`、`SHOWORK_TEST_SPHERE_MINI_SHOT=<png>`、`SHOWORK_TEST_SPHERE_DESK_JS`、`SHOWORK_TEST_DESK_PROBE=1`（自動按一遍＋空白鍵 3 秒數嗶聲）
 
 ## 坑
 - **tap 在 mainMixer 輸出端**：`outputVolume` 會影響量到的頻譜（測試設 0 會量到全 0，不是壞掉）

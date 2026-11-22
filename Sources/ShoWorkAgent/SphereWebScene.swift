@@ -14,6 +14,7 @@ import ShoWorkCore
 //     answer {sessionId, text}、permit {sessionId, permitId, decision, answers}（v3 #1：球旁邊的選項按鈕）
 //     listen {on}、captain {text}（v3 #2：按住球講話 → 交給隊長）
 //     mini {on}、openBoard（v3 #7：桌面常駐小球）
+//     deskSize {id?}、deskChrome {noDrag}（11-22 球體桌面版：換尺寸、告訴原生端標題列哪些地方是按鈕不能拖）
 // 球體的狀態與播報由網頁自己判（狀態一變就說一句）。
 // 語音（v2，11-21）：macOS 內建台灣中文語音（AVSpeechSynthesizer），網頁上的喇叭按鈕開關，預設關。
 // ⚠ 不准用使用者本人的聲音（11-21 使用者下令）。按住講話只做本機即時辨識成文字，不存音檔。
@@ -21,7 +22,7 @@ import ShoWorkCore
 @MainActor
 final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
     let web: WKWebView
-    let mini: Bool
+    let desk: Bool          // 11-22：球體桌面版（SphereMini 的浮動面板，?desk=1）
     private var loaded = false
     private var sent: String?
     private var pending = false
@@ -32,12 +33,14 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
     private var listener: SphereListener?
     private let edge = SphereEdgeVoice()
 
-    init?(dir: URL? = WorkWindow.webDir, mini: Bool = false) {
+    init?(dir: URL? = WorkWindow.webDir, desk: Bool = false) {
         guard let dir, FileManager.default.fileExists(atPath: dir.appendingPathComponent("sphere.html").path) else { return nil }
-        self.mini = mini
+        self.desk = desk
         let cfg = WKWebViewConfiguration()
         cfg.setURLSchemeHandler(OfficeWebSchemeHandler(root: dir), forURLScheme: OfficeWebSchemeHandler.scheme)
-        web = SphereWebView(frame: .zero, configuration: cfg)
+        let wv = SphereWebView(frame: .zero, configuration: cfg)
+        wv.desk = desk
+        web = wv
         super.init()
         cfg.userContentController.add(SphereWeakHandler(self), name: "sphere")
         audio.onEvent = { [weak self] ev in self?.voice(ev) }
@@ -51,12 +54,14 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
             unsafeBitCast(method_getImplementation(m), to: SetBool.self)(web, occ, false)
         }
         web.navigationDelegate = self
-        web.load(URLRequest(url: URL(string: "\(OfficeWebSchemeHandler.scheme)://web/sphere.html\(mini ? "?mini=1" : "")")!))
+        web.load(URLRequest(url: URL(string: "\(OfficeWebSchemeHandler.scheme)://web/sphere.html\(desk ? "?desk=1" : "")")!))
         model.start()
         model.objectWillChange.sink { [weak self] _ in self?.schedule() }.store(in: &subs)
         // 溫度、額度重置倒數不會觸發 objectWillChange：每 10 秒補一次（內容一樣就不推）
         ticker = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in MainActor.assumeIsolated { self?.push() } }
         NotificationCenter.default.publisher(for: HeatGate.changed).sink { [weak self] _ in self?.schedule() }.store(in: &subs)
+        // 桌面版開關／尺寸變了：兩顆球都要知道（分頁那顆要不要出聲、桌面版的「尺寸」按鈕字）
+        NotificationCenter.default.publisher(for: SphereMini.changed).sink { [weak self] _ in self?.pushPrefs() }.store(in: &subs)
     }
 
     func tearDown() {
@@ -108,8 +113,13 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
                 DispatchQueue.main.async { MainActor.assumeIsolated { self.say(msg + "。") } }
             }
         case "mini":
-            SphereMini.shared.enabled = m["on"] as? Bool ?? !SphereMini.shared.enabled
-            pushPrefs()
+            let on = m["on"] as? Bool ?? !SphereMini.shared.enabled
+            // 桌面版自己按「收起」：不能在它自己的訊息回呼裡拆掉自己 ⇒ 下一輪再關
+            DispatchQueue.main.async { MainActor.assumeIsolated { SphereMini.shared.enabled = on } }
+        case "deskSize":
+            if let id = str("id") { SphereMini.shared.setPreset(id) } else { SphereMini.shared.cyclePreset() }
+        case "deskChrome":
+            (web as? SphereWebView)?.noDrag = (m["noDrag"] as? [[Double]] ?? []).filter { $0.count == 4 }.map { NSRect(x: $0[0], y: $0[1], width: $0[2], height: $0[3]) }
         case "openBoard": openBoard()
         case "sessionInfo":     // v4 C：點衛星展開小卡
             guard let c = card(str("sessionId")) else { return say("這個 session 已經不在了。") }
@@ -242,9 +252,9 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
         loaded = true; sent = nil; push(); pushPrefs()
         // 測試：SHOWORK_TEST_SPHERE_SHOT=<png> 12 秒後（等卡片讀完）用 WebKit 自己截（BoardWindow.snapshot 的 cacheDisplay 拍不到 WebGL 的顏色）
         let env = ProcessInfo.processInfo.environment
-        if BoardWindow.testMode, let out = env[mini ? "SHOWORK_TEST_SPHERE_MINI_SHOT" : "SHOWORK_TEST_SPHERE_SHOT"] {
+        if BoardWindow.testMode, let out = env[desk ? "SHOWORK_TEST_SPHERE_MINI_SHOT" : "SHOWORK_TEST_SPHERE_SHOT"] {
             // SHOWORK_TEST_SPHERE_JS：截圖前先跑一段網頁程式（例如假一筆「需要你」看選項按鈕）
-            if let code = env["SHOWORK_TEST_SPHERE_JS"], !mini {
+            if let code = env[desk ? "SHOWORK_TEST_SPHERE_DESK_JS" : "SHOWORK_TEST_SPHERE_JS"] {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 9) { [weak self] in self?.web.evaluateJavaScript(code) }
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 12) { [weak self] in
@@ -268,7 +278,8 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
     }
 
     private func pushPrefs() {
-        js("window.karaPrefs", ["mini": SphereMini.shared.enabled, "voice": SphereVoices.selected,
+        let size = SphereMini.shared.currentPreset.flatMap { id in SphereMini.presets.first { $0.id == id }?.name } ?? "自訂"
+        js("window.karaPrefs", ["mini": SphereMini.shared.enabled, "deskSize": size, "voice": SphereVoices.selected,
                                 "voices": SphereVoices.all().map { ["id": $0.id, "name": $0.name, "group": $0.group] }])
     }
 
@@ -353,6 +364,16 @@ final class SphereWebView: WKWebView {
         if e.keyCode == 49 && e.isARepeat { return }
         super.keyDown(with: e)
     }
+
+    // 11-22 球體桌面版：上方標題列拖移、右下角縮放（DeskChrome）；noDrag＝網頁回報的按鈕位置（從上緣量的 CSS px）
+    var desk = false
+    var noDrag: [NSRect] = []
+    override func mouseDown(with e: NSEvent) {
+        if desk, DeskChrome.mouseDown(e, in: self, noDrag: noDrag) { return }
+        super.mouseDown(with: e)
+    }
+    // 浮動面板沒在前面時，第一下點擊也要算數（點球、按選項）
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { desk || super.acceptsFirstMouse(for: event) }
 }
 
 /// WKUserContentController 會強引用 handler：中間隔一層 weak，宿主才放得掉

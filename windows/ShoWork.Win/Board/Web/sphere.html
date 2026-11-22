@@ -11,7 +11,10 @@
        ③ 額度儀表：數字滾動、分段刻度、重置倒數、照目前速度預估幾點用完 ④ 戰情卡：狀態色點、進度細條、記憶量、狀態一變就閃
        ⑤ 字幕跟「唸到哪」逐詞同步（Mac 系統語音用 marker、微軟語音照播放進度）＋字幕下的聲波 ⑥ 警示橫幅（需要你／卡住／額度／過熱）
        聲波：原生端 window.karaLevels({b:[32 段頻譜], r:音量, p:已播秒, d:總秒, mic})，球外圈 120 根放射條跟著真的聲音跳；
-       沒收到（Windows SAPI、測試）就用假的波形頂著。 -->
+       沒收到（Windows SAPI、測試）就用假的波形頂著。
+     球體桌面版（11-22 Keng 選定最終型態，T1122091602）：?desk=1＝SphereMini.swift 的浮動面板，功能跟分頁完全一樣（舊的 ?mini=1 精簡小球拿掉了）。
+       上方 34px 是標題列（原生端拖移；按鈕位置用 deskChrome 回報）、右下角拖曳縮放、工具列多「尺寸／戰情中心／收起」。
+       兩顆都開著時，自動播報（狀態變化、額度、溫度、早報、隊長回覆）只有桌面版出聲，分頁那顆只出字幕。 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>球體助理</title>
@@ -124,14 +127,24 @@
   #voice { position: static; }
   #hint { position: fixed; bottom: 44px; left: 0; right: 0; text-align: center; font-size: 11px; letter-spacing: .12em; color: rgba(243,238,242,.32); }
   body:not(.embedded) #hint { display: none; }
-  /* v3 #7：桌面小球（?mini=1）：只有球＋一行字 */
-  body.mini { background: transparent; }
-  body.mini::before, body.mini .card, body.mini #tools, body.mini #state, body.mini #controls, body.mini #askCard, body.mini #hint, body.mini #tip { display: none !important; }
-  body.mini #caption { top: auto; bottom: 2px; width: calc(100% - 8px); padding: 4px 8px; border-radius: 10px; background: rgba(12,10,18,.72); }
-  body.mini #caption .who, body.mini #caption .bar { display: none; }
-  body.mini #caption .text { margin: 0; font-size: 11px; min-height: 0; line-height: 1.35; max-height: 2.7em; overflow: hidden; text-align: center; }
-  body.mini #caption.quiet { opacity: 0; }
-  body.mini #caption { transition: opacity .4s; }
+  /* 11-22 球體桌面版（?desk=1）：上方標題列（拖移）＋右下角縮放把手；其他跟分頁一樣 */
+  #deskBar, #deskGrip, .deskOnly { display: none; }
+  body.desk #deskBar { display: flex; position: fixed; top: 0; left: 0; right: 0; height: 34px; align-items: center; gap: 8px; padding: 0 12px;
+    font: 500 10px ui-monospace, Menlo, monospace; letter-spacing: .24em; color: var(--ink-dim); cursor: grab;
+    border-bottom: 1px solid rgba(255,255,255,.06); background: linear-gradient(rgba(255,255,255,.035), transparent); }
+  #deskBar i { width: 6px; height: 6px; border-radius: 50%; background: var(--pink); box-shadow: 0 0 8px var(--pink); transition: background-color 1.2s; }
+  body.alert #deskBar i { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
+  body.desk .deskOnly { display: inline-block; }
+  body.desk #bMini { display: none; }
+  body.desk::after { content: ""; position: fixed; inset: 0; border: 1px solid rgba(255,255,255,.12); border-radius: 14px; pointer-events: none; z-index: 20; }
+  body.desk #tools { top: 5px; right: 8px; z-index: 8; gap: 5px; }
+  body.desk #tools .pill { white-space: nowrap; }
+  body.desk #askCard { background: rgba(14,12,20,.96); }
+  body.desk #cardTeam { max-height: calc(58% - 24px); overflow: auto; }
+  body.desk #caption { top: 44px; }
+  body.desk .pop { top: 156px; }
+  body.desk #deskGrip { display: block; position: fixed; right: 0; bottom: 0; width: 18px; height: 18px; cursor: nwse-resize; z-index: 21; color: rgba(255,255,255,.35); }
+  body.desk #deskGrip:hover { color: var(--pink); }
   /* v4 C：衛星小卡 */
   #satCard { background: rgba(14,12,20,.95); position: fixed; width: 280px; z-index: 6; pointer-events: auto; }
   #satCard .head b { font-size: 14px; font-weight: 500; }
@@ -239,13 +252,34 @@
   #banner .main .bt { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #banner .main .cur { animation: blink 1s steps(1) infinite; }
   #banner .sub { font-size: 12px; color: rgba(255,255,255,.75); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  body.mini svg#links, body.mini .pop, body.mini #banner, body.mini #wave { display: none !important; }
-  @media (prefers-reduced-motion: reduce) { #banner.on, .pop.on::after, .trow .dot.pulse, .card.flash, .trow.flash { animation: none; } }
+    @media (prefers-reduced-motion: reduce) { #banner.on, .pop.on::after, .trow .dot.pulse, .card.flash, .trow.flash { animation: none; } }
   @media (max-width: 640px) {
     #cardUsage { left: 16px; top: auto; bottom: 120px; min-width: 0; width: calc(50% - 24px); }
     #cardTeam { right: 16px; top: auto; bottom: 120px; min-width: 0; width: calc(50% - 24px); }
     #cardSys { display: none; }
     #askCard { bottom: 76px; }
+  }
+  /* 桌面版直式（小／中）：卡片在下面左右排，太高就捲動，不要蓋到球；字幕窄一點 */
+  @media (max-width: 640px) {
+    body.desk .wide { display: none; }
+    body.desk #voiceSel { max-width: 84px; }
+    body.desk #cardUsage, body.desk #cardTeam { bottom: 96px; padding: 8px 10px; max-height: 30%; overflow: auto; }
+    body.desk #cardUsage { width: calc(50% - 20px); left: 12px; } body.desk #cardTeam { width: calc(50% - 20px); right: 12px; }
+    body.desk .card .head b { font-size: 20px; }
+    body.desk #cardUsage .donut { width: 30px; height: 30px; }
+    body.desk #caption { width: calc(100% - 24px); }
+    body.desk .pop { width: min(290px, calc(100% - 24px)); }
+    body.desk .pop.r { right: 12px; } body.desk .pop.l { left: 12px; }
+    body.desk #state { bottom: 58px; }
+    body.desk #hint { bottom: 34px; }
+    body.desk #askCard { bottom: 96px; width: calc(100% - 24px); z-index: 7; }
+    /* 有人在等你：選項面板佔卡片的位置（卡片先收起來，答完就回來；session 狀態看衛星） */
+    body.desk.asking #cardUsage, body.desk.asking #cardTeam, body.desk.asking #cardSys { opacity: 0; pointer-events: none; }
+  }
+  /* 桌面版橫式（大）：卡片窄一點，球留在中間 */
+  @media (min-width: 641px) and (max-width: 1100px) {
+    body.desk #cardUsage { width: 250px; left: 16px; } body.desk #cardTeam { width: 270px; right: 16px; }
+    body.desk #cardSys { left: 16px; width: 250px; }
   }
 </style>
 </head>
@@ -288,13 +322,18 @@
 <div class="card pop" id="pop" role="status"></div>
 <div id="banner" role="alert"><div class="in"></div></div>
 
+<div id="deskBar" aria-hidden="true"><i></i><span>球體</span><span class="wide">· SHOWORK42</span></div>
+<svg id="deskGrip" viewBox="0 0 18 18" aria-label="拖曳縮放"><path d="M16 7 7 16M16 11.5 11.5 16" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
 <div id="tools">
   <button class="pill sm" id="bBrief" title="唸一次早報（今天的狀況與額度）">早報</button>
   <button class="pill sm" id="bWrap" title="唸收工總結（今天做完什麼、還剩什麼）">收工</button>
-  <button class="pill sm" id="bTl" title="今天每個 session 的狀態變化">時間軸</button>
-  <button class="pill sm" id="bMini" title="桌面常駐小球：開／關">小球</button>
+  <button class="pill sm" id="bTl" title="今天每個 session 的狀態變化">時間<span class="wide">軸</span></button>
+  <button class="pill sm" id="bMini" title="球體桌面版：開／關">桌面版</button>
+  <button class="pill sm deskOnly" id="bSize" title="換尺寸：小 → 中 → 大（拖右下角也可以）">尺寸</button>
+  <button class="pill sm deskOnly" id="bBoard" title="打開戰情中心">戰情<span class="wide">中心</span></button>
   <select class="pill sm" id="voiceSel" title="播報的聲音（選了會試聽一句）" aria-label="播報的聲音" hidden></select>
   <button class="pill sm" id="voice" aria-label="語音開關"></button>
+  <button class="pill sm deskOnly" id="bClose" title="收起桌面版（選單列「桌面球體」可再打開）" aria-label="收起">✕</button>
 </div>
 <div id="state"><span class="zh" id="stZh">待命</span><span class="en" id="stEn">STANDBY</span></div>
 <div id="hint">點球聽現況 · 按住球（或空白鍵）問問題或交給隊長 · 點衛星看詳情</div>
@@ -312,8 +351,8 @@
 </script>
 <script type="module">
 import * as THREE from "three";
-const MINI = new URLSearchParams(location.search).has("mini");     // 桌面常駐小球（v3 #7）
-if (MINI) document.body.classList.add("mini");
+const DESK = new URLSearchParams(location.search).has("desk");     // 球體桌面版（11-22，SphereMini.swift）
+if (DESK) document.body.classList.add("desk");
 
 /* ---------- 狀態定義：每個狀態的轉速、亮度、標籤 ---------- */
 const STATES = {
@@ -516,6 +555,9 @@ function resize() {
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
   camera.position.z = w < h ? 15 : 10.5;  // 直式畫面拉遠一點；v3 外環（3.2–3.7）也要進框
+  // 桌面版直式：卡片在下面 ⇒ 球再拉遠一點、往上移到 40% 高的地方（外環半徑約四分之一高），不被卡片蓋住
+  if (DESK && w <= 640) { camera.position.z = 20; camera.setViewOffset(w, h, 0, h * 0.1, w, h); }
+  else camera.clearViewOffset();
   camera.updateProjectionMatrix();
 }
 addEventListener("resize", resize); resize();
@@ -528,11 +570,12 @@ const bitMats = new Set(bits.map(b => b.material));
 function frame(now) {
   requestAnimationFrame(frame);
   // 11-21 使用者錄影：機器熱時降到 8 張／秒，看起來一頓一頓 ⇒ 不再砍張數，改砍解析度（像素少 4 倍，GPU 省更多）
-  // 平常跟螢幕同步（60 張）；機器熱、桌面小球：30 張＋1 倍解析度
-  const lean = data.paused || MINI;
+  // 平常跟螢幕同步（60 張）；機器熱：30 張＋1 倍解析度
+  // 桌面版（常駐桌面、整天開著）：一律 30 張；解析度照舊——平常清楚、機器熱才降到 1 倍
+  const lean = data.paused;
   const want = lean ? 1 : Math.min(devicePixelRatio, 2);
   if (renderer.getPixelRatio() !== want) { renderer.setPixelRatio(want); resize(); }
-  const gap = lean ? 33.3 : 0;
+  const gap = lean || DESK ? 33.3 : 0;
   if (now - lastDraw < gap - 4) return;          // 留 4ms 誤差，避免 60Hz 螢幕上偶爾跳過一格變成頓
   lastDraw = now;
   const dt = Math.min(clock.getDelta(), 0.08), t = clock.elapsedTime;
@@ -693,7 +736,6 @@ function decode(el, target, ms = 420) {
 }
 let typing = false, typeTimer = null;
 function say(text, ms = 70) {
-  if (MINI) $("caption").classList.remove("quiet");
   return new Promise(res => {
     clearInterval(typeTimer); typing = true; capFull = text; capShown = 0; capWord = null; capSynced = false;
     const el = $("capText"), bar = $("capBar"); let i = 0;
@@ -723,7 +765,8 @@ function show(id, on) { $(id).classList.toggle("on", on); }
 
 /* ---------- 語音：原生端唸（AVSpeechSynthesizer），每唸到一個詞回 karaVoice("word") 讓球跳一下 ---------- */
 let voiceOn = false;
-try { voiceOn = !MINI && localStorage.getItem("sphere.voice") === "1"; } catch {}     // 小球不出聲（戰情中心那顆會唸）
+try { voiceOn = localStorage.getItem("sphere.voice") === "1"; } catch {}     // 分頁和桌面版共用這個開關（同一個 localStorage）
+let deskOn = false;          // 桌面版開著（原生端 karaPrefs.mini）：分頁那顆的自動播報只出字幕，不跟桌面版一起唸
 let voicing = false, voiceDone = null;
 window.karaVoice = (ev, loc, len) => {
   if (ev === "word") { wordPulse = 1; if (loc != null) capSync(loc + (len || 1), [loc, len || 1]); }
@@ -745,9 +788,10 @@ $("voice").onclick = () => {
   else announce("語音打開了。");
 };
 // 一句話：打字＋（有開語音就）唸；唸完或打完才往下
-async function speak(text) {
-  const typed = say(text, voiceOn && host() ? 110 : 70);
-  if (voiceOn && host()) {
+async function speak(text, mute = false) {
+  const v = voiceOn && host() && !mute;
+  const typed = say(text, v ? 110 : 70);
+  if (v) {
     const spoken = new Promise(r => { voiceDone = r; setTimeout(r, 4000 + text.length * 350); });   // 保險：原生端沒回 end 也會往下
     post({ action: "speak", text });
     await spoken;
@@ -768,7 +812,7 @@ async function pump() {
     $("capQ").textContent = queue.length ? `+${queue.length}` : "";
     if (q.banner) showBanner(q.banner);
     if (q.pop) showPop(q.pop); else hidePop();
-    setState("speaking"); await speak(q.text);
+    setState("speaking"); await speak(q.text, q.auto && !DESK && deskOn);
     if (q.pop) hidePop(2600);
   }
   $("capQ").textContent = "";
@@ -861,6 +905,7 @@ function sphereScreen() {
 }
 function linkPath(el, cls = "") {
   if (!el || !el.classList.contains("on") || getComputedStyle(el).display === "none") return "";
+  if (DESK && innerWidth <= 640 && el.id !== "pop" && document.body.classList.contains("asking")) return "";     // 桌面版直式：卡片讓位給選項面板時不拉線
   const b = el.getBoundingClientRect(), { cx, cy, r } = sphereScreen();
   const left = b.left + b.width / 2 < cx, ex = left ? b.right : b.left, ey = Math.max(b.top + 18, Math.min(b.bottom - 18, cy));
   const ty = b.top + 22, a = Math.atan2(ty - cy, ex - cx), sx = cx + Math.cos(a) * r, sy = cy + Math.sin(a) * r;
@@ -868,7 +913,6 @@ function linkPath(el, cls = "") {
   return `<path class="${cls}" d="M${sx.toFixed(1)},${sy.toFixed(1)} L${elbow.toFixed(1)},${ty.toFixed(1)} L${ex.toFixed(1)},${ty.toFixed(1)}"/><circle class="${cls}" cx="${sx.toFixed(1)}" cy="${sy.toFixed(1)}" r="2.2"/>`;
 }
 function drawLinks() {
-  if (MINI) return;
   // 外環卡接在額度卡下面（額度卡 v5 變高了，不能再用固定位置）
   const u = $("cardUsage").getBoundingClientRect();
   if (innerWidth > 640 && u.height) $("cardSys").style.top = Math.round(u.bottom + 12) + "px";
@@ -921,7 +965,6 @@ const ICON = {
   gauge: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 18a8 8 0 1 1 16 0"/><path d="M12 18l4-6"/></svg>',
 };
 function showBanner(b) {
-  if (MINI) return;
   const el = $("banner"), now = new Date();
   bannerOn = true; bannerLevel = b.level || "warn"; bannerSid = b.sid || null;
   el.className = bannerLevel === "warn" ? "warn" : "";
@@ -949,7 +992,7 @@ function renderSys() {
     rows.push(`<div class="row"><span class="t">TEMP</span><span>機器溫度 · ${esc(lv)}${data.paused ? " · 動畫降速" : ""}</span><span>${Math.round(h.temp)}°C</span><div class="meter"><b style="width:${Math.min(100, Math.max(2, (h.temp - 35) / 65 * 100))}%;background:${col}"></b></div></div>`);
   }
   $("sysRows").innerHTML = rows.join("");
-  show("cardSys", rows.length > 0 && !MINI);
+  show("cardSys", rows.length > 0);
 }
 $("teamRows").onclick = e => {
   const row = e.target.closest(".row"); if (!row) return;
@@ -971,11 +1014,11 @@ function diff(team) {
       const who = c.name || "有個 session";
       const pop = sessionPop(c);
       if (is === "需要你") announce(c.ask ? `${who} 在等你回答：${clip(c.ask, 40)}` : `${who} 在等你回答。`,
-        { pop, banner: { level: "warn", icon: "user", tag: "需要你 · ACTION", source: who, title: `${who} 在等你`, sub: clip(c.ask || "", 60), sid: c.sessionId } });
-      else if (is === "待審" && was) announce(c.summary ? `${who} 做完了，等你看：${clip(c.summary, 40)}` : `${who} 做完了，等你看。`, { pop });
-      else if (is === "完成" && was && was !== "完成") announce(`${who} 完成了。`, { pop });
+        { auto: true, pop, banner: { level: "warn", icon: "user", tag: "需要你 · ACTION", source: who, title: `${who} 在等你`, sub: clip(c.ask || "", 60), sid: c.sessionId } });
+      else if (is === "待審" && was) announce(c.summary ? `${who} 做完了，等你看：${clip(c.summary, 40)}` : `${who} 做完了，等你看。`, { auto: true, pop });
+      else if (is === "完成" && was && was !== "完成") announce(`${who} 完成了。`, { auto: true, pop });
       else if (is === "卡住" && was !== "卡住") announce(`${who} 卡住了${c.summary ? "：" + clip(c.summary, 30) : "。"}`,
-        { pop, banner: { level: "bad", icon: "warn", tag: "卡住 · BLOCKED", source: who, title: `${who} 卡住了`, sub: clip(c.summary || "", 60), sid: c.sessionId } });
+        { auto: true, pop, banner: { level: "bad", icon: "warn", tag: "卡住 · BLOCKED", source: who, title: `${who} 卡住了`, sub: clip(c.summary || "", 60), sid: c.sessionId } });
     }
   }
   prev = now;
@@ -993,7 +1036,22 @@ window.karaPrefs = (p) => {
     const sel = $("voiceSel"), groups = [...new Set(p.voices.map(v => v.group))];
     sel.innerHTML = groups.map(g => `<optgroup label="${esc(g)}">${p.voices.filter(v => v.group === g).map(v => `<option value="${esc(v.id)}">${esc(v.name)}</option>`).join("")}</optgroup>`).join("");
     sel.value = p.voice; sel.hidden = false;
-  } $("bMini").classList.toggle("on", !!p.mini); $("bMini").title = p.mini ? "桌面小球：開（點一下關掉）" : "桌面小球：關（點一下打開）"; };
+  }
+  deskOn = !!p.mini;
+  $("bMini").classList.toggle("on", deskOn); $("bMini").title = deskOn ? "球體桌面版：開（點一下關掉）" : "球體桌面版：關（點一下打開）";
+  if (p.deskSize) $("bSize").innerHTML = `<span class="wide">尺寸 · </span>${esc(p.deskSize)}`;
+  deskChrome();
+};
+/* 桌面版：告訴原生端標題列上哪些地方是按鈕（其他地方按住＝拖視窗） */
+function deskChrome() {
+  if (!DESK) return;
+  const r = $("tools").getBoundingClientRect();
+  post({ action: "deskChrome", noDrag: [[r.left - 4, 0, r.width + 8, r.bottom + 4]] });
+}
+addEventListener("resize", deskChrome);
+$("bSize").onclick = () => post({ action: "deskSize" });
+$("bBoard").onclick = () => post({ action: "openBoard" });
+$("bClose").onclick = () => post({ action: "mini", on: false });
 
 /* ---------- v3 #4 額度預警：跨過門檻（5 小時 70／90／100，7 天 80／95）就說一次 ---------- */
 let quotaLv = null;
@@ -1001,21 +1059,21 @@ function quota() {
   const l5 = v => v == null ? 0 : v >= 100 ? 3 : v >= 90 ? 2 : v >= 70 ? 1 : 0;
   const l7 = v => v == null ? 0 : v >= 95 ? 2 : v >= 80 ? 1 : 0;
   const now = { f: l5(data.five_hour), s: l7(data.seven_day) };
-  if (quotaLv && !MINI) {
+  if (quotaLv) {
     const left = m => m == null ? "" : m >= 1440 ? `，${Math.round(m / 1440)} 天後重置` : m >= 60 ? `，大約 ${Math.floor(m / 60)} 小時 ${m % 60} 分後重置` : `，大約 ${m} 分鐘後重置`;
     const bn = (title, v, rs) => ({ level: "bad", icon: "gauge", tag: "額度 · USAGE", source: "CLAUDE", title, sub: rs != null ? `${hmZh(rs)}後重置` : "" });
     if (now.f > quotaLv.f) announce(now.f === 3 ? `5 小時額度用完了，AI 會停下來${left(data.five_reset)}。` : `注意，5 小時額度已經用了 ${pct(data.five_hour)}${left(data.five_reset)}。`,
-      { pop: usagePop("5h"), banner: now.f >= 2 ? bn(now.f === 3 ? "5 小時額度用完了" : `5 小時額度 ${pct(data.five_hour)}`, data.five_hour, data.five_reset) : null });
+      { auto: true, pop: usagePop("5h"), banner: now.f >= 2 ? bn(now.f === 3 ? "5 小時額度用完了" : `5 小時額度 ${pct(data.five_hour)}`, data.five_hour, data.five_reset) : null });
     if (now.s > quotaLv.s) announce(`注意，這週的額度已經用了 ${pct(data.seven_day)}${left(data.seven_reset)}。`,
-      { pop: usagePop("7d"), banner: now.s >= 2 ? bn(`這週額度 ${pct(data.seven_day)}`, data.seven_day, data.seven_reset) : null });
+      { auto: true, pop: usagePop("7d"), banner: now.s >= 2 ? bn(`這週額度 ${pct(data.seven_day)}`, data.seven_day, data.seven_reset) : null });
   }
   quotaLv = now;
   // v5 ⑥：機器變很熱（cool42 hot／critical）講一次＋紅色橫幅；30 分鐘內不重講
   const hot = data.heat && (data.heat.level === "hot" || data.heat.level === "critical");
-  if (hot && heatWas === false && !MINI && Date.now() - heatSaid > 30 * 60000) {
+  if (hot && heatWas === false && Date.now() - heatSaid > 30 * 60000) {
     heatSaid = Date.now();
     const t = Math.round(data.heat.temp);
-    announce(`機器現在 ${t} 度，有點熱，動畫先降速。`, { banner: { level: "bad", icon: "heat", tag: "溫度 · THERMAL", source: "COOL42", title: `機器 ${t}°C`, sub: "動畫降速中，重的工作可以晚點再跑" },
+    announce(`機器現在 ${t} 度，有點熱，動畫先降速。`, { auto: true, banner: { level: "bad", icon: "heat", tag: "溫度 · THERMAL", source: "COOL42", title: `機器 ${t}°C`, sub: "動畫降速中，重的工作可以晚點再跑" },
       pop: { level: "bad", side: "l", html: `<div class="k">THERMAL · COOL42</div><div class="head"><span>機器溫度</span><b style="color:var(--bad)">${t}°C</b></div><div class="meter seg"><b style="width:${Math.min(100, Math.max(2, (t - 35) / 65 * 100))}%;background-color:var(--bad)"></b></div>` } });
   }
   if (data.heat) heatWas = !!hot;
@@ -1047,9 +1105,9 @@ function wrapText() {
 }
 // 每天一次：早上（5–11 點）第一次收到資料唸早報；晚上 7 點後第一次收到資料唸收工總結
 function brief() {
-  if (MINI || !data.team) return;
+  if (!data.team) return;
   const h = new Date().getHours(), day = new Date().toDateString();
-  const once = (k, fn) => { let d = null; try { d = localStorage.getItem(k); } catch {} if (d === day) return; try { localStorage.setItem(k, day); } catch {} setTimeout(() => announce(fn()), 1500); };
+  const once = (k, fn) => { let d = null; try { d = localStorage.getItem(k); } catch {} if (d === day) return; try { localStorage.setItem(k, day); } catch {} setTimeout(() => announce(fn(), { auto: true }), 1500); };
   if (h >= 5 && h < 11) once("sphere.brief", briefText);
   else if (h >= 19) once("sphere.wrap", wrapText);
 }
@@ -1068,7 +1126,7 @@ function askKey(c) { return (c.permit?.id || "") + "|" + (c.ask || ""); }
 function pending() { return (data.team || []).filter(c => c.status === "需要你" && c.sessionId && sentKey.get(c.sessionId) !== askKey(c)); }
 function renderAsk() {
   const list = pending(), card = $("askCard");
-  if (!list.length || MINI) { card.classList.remove("on"); askSid = null; return; }
+  if (!list.length) { card.classList.remove("on"); document.body.classList.remove("asking"); askSid = null; return; }
   let i = list.findIndex(c => c.sessionId === askSid); if (i < 0) i = 0;
   const c = list[i]; askSid = c.sessionId;
   const sig = askKey(c) + "#" + i + "/" + list.length;
@@ -1096,6 +1154,7 @@ function renderAsk() {
     <div class="btns">${btns}</div>
     ${free ? `<form class="free"><input placeholder="或自己打一句回答⋯" aria-label="自己打回答"><button class="pill">送出</button></form>` : ""}`;
   card.classList.add("on");
+  document.body.classList.add("asking");
 }
 $("askCard").addEventListener("click", e => {
   const nav = e.target.closest("[data-nav]");
@@ -1148,10 +1207,8 @@ function autoState() {
   if (pending().length) setState("alert");
   else if (team.some(c => c.status === "進行中")) setState("thinking");
   else setState("idle");
-  const n = pending().length;
-  const line = MINI ? (n ? `${n} 個在等你` : "") : statusLine();
+  const line = statusLine();
   if (!typing && $("capText").textContent !== line) { $("capText").textContent = line; $("capBar").style.width = "100%"; }
-  if (MINI) $("caption").classList.toggle("quiet", !typing && !line);
 }
 /* ---------- 滑鼠：點衛星＝跳過去；點球＝唸現況；按住球（或空白鍵）＝講話交給隊長（v3 #2） ---------- */
 const ray = new THREE.Raycaster(), mouse = new THREE.Vector2();
@@ -1255,10 +1312,10 @@ function captainReply() {
   if (captainSeen === undefined) { captainSeen = c.id; return; }      // 第一次只記下來
   if (c.id === captainSeen) return;
   captainSeen = c.id;
-  if (!handoffAt || Date.now() - handoffAt > 20 * 60 * 1000 || MINI) return;
+  if (!handoffAt || Date.now() - handoffAt > 20 * 60 * 1000) return;
   handoffAt = 0;
   const plain = String(c.text).replace(/```[\s\S]*?```/g, "（程式碼略）").replace(/[#*`>|_]/g, "").replace(/\s+/g, " ").trim();
-  announce(`隊長回覆：${clip(plain, 90)}`, { pop: { html: `<div class="k">CAPTAIN · 回覆</div><div class="ln" style="border:0">${esc(clip(plain, 220))}</div>` } });
+  announce(`隊長回覆：${clip(plain, 90)}`, { auto: true, pop: { html: `<div class="k">CAPTAIN · 回覆</div><div class="ln" style="border:0">${esc(clip(plain, 220))}</div>` } });
 }
 
 /* ---------- v4 C：點衛星展開小卡 ---------- */
@@ -1286,7 +1343,7 @@ $("satCard").addEventListener("click", e => {
 });
 
 /* ---------- v4 D：彈一下 ---------- */
-window.karaBounce = () => { bounceAt = performance.now(); if (MINI) $("caption").classList.remove("quiet"); };
+window.karaBounce = () => { bounceAt = performance.now(); };
 
 /* ---------- v4 E：今日時間軸 ---------- */
 const TL_COLOR = { "需要你": "var(--warn)", "進行中": "var(--pink)", "待審": "var(--cyan)", "卡住": "var(--bad)", "完成": "#7dffb0", "待辦": "#8a8494" };
