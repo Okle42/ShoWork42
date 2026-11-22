@@ -245,6 +245,7 @@
   .row .abtn { grid-column: 1 / -1; display: flex; gap: 6px; justify-content: flex-end; }
   .row.arow { padding-top: 2px; }
   .row .abtn .pill { padding: 1px 7px; font-size: 10px; }
+  .row .abtn .pill.on { color: var(--acc); border-color: var(--acc); }
   .row .aks { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 10px; margin-top: 3px; }
   .row.atip { font-size: 11px; color: var(--ink-dim); padding: 2px 0; }
   .row.atip span:last-child { grid-column: 2 / -1; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
@@ -1636,6 +1637,17 @@ function renderSys() {
     const col = h.level === "hot" || h.level === "critical" ? "var(--bad)" : h.level === "warm" ? "var(--ink)" : "var(--gray)";
     rows.push(`<div class="row"><span class="t">TEMP</span><span>機器溫度 · ${esc(lv)}${data.paused ? " · 動畫降速" : ""}</span><span>${Math.round(h.temp)}°C</span><div class="meter"><b style="width:${Math.min(100, Math.max(2, (h.temp - 35) / 65 * 100))}%;background:${col}"></b></div></div>`);
   }
+  // 11-23 Keng：cool42 面板併進來——風扇（轉速＋模式鈕）、時脈／降頻、吃 CPU 前三名
+  const cool = data.cool;
+  if (cool) {
+    const f = cool.fan || {}, mode = cool.guardMode, fixedMax = mode === "fixed";
+    const mb = (m, label, on) => `<button class="pill sm${on ? " on" : ""}" data-fan="${m}">${label}</button>`;
+    const fanPct = f.max ? Math.round(f.rpm / f.max * 100) : 0;
+    rows.push(`<div class="row"><span class="t">FAN</span><span>風扇${cool.guardRunning ? "" : " · 守護程式沒在跑"}</span><span>${f.rpm ?? "--"} rpm</span><div class="meter"><b style="width:${fanPct}%;background:var(--ink)"></b></div><span class="abtn">${mb("curve", "曲線", mode === "curve")}${mb("auto", "系統", mode === "auto")}${mb("max", "全速", fixedMax)}</span></div>`);
+    const thr = cool.clockThrottled || cool.gpuThrottlePercent > 0 || (cool.thermalPressure && cool.thermalPressure !== "Nominal");
+    rows.push(`<div class="row"><span class="t">CLK</span><span title="${cool.maxToday ? `今天最高 ${cool.maxToday}°C` : ""}">P 核 ${((cool.pcoreMHz || 0) / 1000).toFixed(1)}GHz · GPU ${Math.round(cool.gpuMax || 0)}°C</span><span${thr ? ' style="color:var(--bad)"' : ""}>${thr ? "降頻" : "全速"}</span></div>`);
+    if ((cool.top || []).length) rows.push(`<div class="row atip"><span class="t">CPU</span><span>${cool.top.map(p => `${esc(clip(p.name, 18))} ${p.cpu}%`).join(" · ")}</span></div>`);
+  }
   for (const d of data.disks || []) {
     const col = d.used >= 95 ? "var(--bad)" : d.used >= 85 ? "var(--warn)" : "var(--ink)";
     rows.push(`<div class="row"><span class="t">DISK</span><span>${esc(d.name)} · 剩 ${d.freeGB} GB</span><span>${Math.round(d.used)}%</span><div class="meter seg"><b style="width:${d.used}%;background-color:${col}"></b></div></div>`);
@@ -1647,6 +1659,8 @@ function renderSys() {
   show("cardSys", rows.length > 0);
 }
 for (const id of ["sysRows", "sysWrap"]) $(id).addEventListener("click", e => {
+  const fb = e.target.closest("[data-fan]");
+  if (fb) { e.stopPropagation(); post({ action: "coolFan", mode: fb.dataset.fan }); return; }
   const b = e.target.closest("[data-audit]"); if (!b || b.disabled) return;
   e.stopPropagation();
   if (b.dataset.audit === "fix") post({ action: "auditFix" }); else post({ action: "audit", send: b.dataset.audit === "send" });

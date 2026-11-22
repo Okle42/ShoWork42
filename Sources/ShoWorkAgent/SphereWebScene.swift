@@ -136,6 +136,10 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
                 if send { self?.say(ok ? "自檢已送到 Discord #自檢回報。" : "自檢送出失敗（看 ~/.claude/flow-audit/sphere/last.log）。") }
             }) { say("自檢正在跑，等它跑完。") }
             sent = nil; push()
+        case "coolFan":         // 11-23：外環卡上切風扇模式（改 cool42 設定檔，guard 會自己重讀；不需要額外權限）
+            if blocked { return say("測試模式不改風扇。") }
+            say(SphereCool42.setMode(str("mode") ?? "curve"))
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in self?.sent = nil; self?.push() }
         case "auditFix":        // 11-22 Keng 選「加，直接處理」：關掉停放空殼、停掉 Claude 預備程序（都不會丟對話），做完重跑自檢
             if blocked { return say("測試模式不動手。") }
             say("處理中⋯")
@@ -310,7 +314,8 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
         var o = Self.payload(model.cards, model.rateLimits, runs: model.runs, heat: heat)
         o["paused"] = HeatGate.shared.paused
         o["disks"] = SphereDisks.read()          // 11-22 Keng：球右半邊的硬碟空間刻度環
-        if let a = SphereAudit.latest() { o["audit"] = a }       // 11-22 Keng：自檢原子環（流量架構自檢的優化建議，不是用量）
+        if let a = SphereAudit.latest() { o["audit"] = a }
+        if let c = SphereCool42.read() { o["cool"] = c }        // 11-23 Keng：cool42 面板併進球體（風扇、時脈降頻、吃 CPU 的程式、風扇模式）       // 11-22 Keng：自檢原子環（流量架構自檢的優化建議，不是用量）
         o["auditBusy"] = SphereAudit.busy
         // v4 A：隊長最後一句（網頁判斷是不是回覆剛交辦的事）
         if let l = model.captainThread.last(where: { $0.role == .captain }) {
@@ -427,6 +432,46 @@ enum GhosttyTheme {
             p.standardOutput = FileHandle.nullDevice; p.standardError = FileHandle.nullDevice
             try? p.run(); p.waitUntilExit()
         }
+    }
+}
+
+/// 11-23 Keng：cool42 面板併進球體——讀 guard 寫的 /var/run/cool42/state.json（HeatGate 同一份），挑球體要顯示的；
+/// 風扇模式照 cool42_mcp.py cool42_set_fan 的做法改 /etc/cool42/config.json（安裝時已 chown 給使用者）的 mode／fixedRPM，guard 熱重讀
+@MainActor
+enum SphereCool42 {
+    static let configPaths = ["/etc/cool42/config.json", NSHomeDirectory() + "/.config/cool42/config.json"]
+
+    static func read() -> [String: Any]? {
+        guard let d = FileManager.default.contents(atPath: HeatGate.cool42Path),
+              let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { return nil }
+        var o: [String: Any] = [:]
+        for k in ["guardMode", "guardRunning", "pcoreMHz", "ecoreMHz", "gpuThrottlePercent", "clockThrottled", "thermalPressure", "cpuMax", "gpuMax", "ssd", "level"] {
+            if let v = j[k] { o[k] = v }
+        }
+        if let f = (j["fans"] as? [[String: Any]])?.first {
+            o["fan"] = ["rpm": (f["rpm"] as? Double ?? 0).rounded(), "max": f["max"] ?? 0, "min": f["min"] ?? 0]
+        }
+        o["top"] = ((j["topProcesses"] as? [[String: Any]]) ?? []).prefix(3).map { ["name": $0["name"] ?? "", "cpu": (($0["cpuPercent"] as? Double) ?? 0).rounded()] }
+        if let st = j["stats"] as? [String: Any] { o["maxToday"] = (st["maxTemp"] as? Double)?.rounded() ?? NSNull() }
+        return o
+    }
+
+    /// curve＝cool42 曲線、auto＝交還系統、max＝固定最高轉速。回一句給語音／字幕
+    static func setMode(_ m: String) -> String {
+        let fm = FileManager.default
+        let path = configPaths.first { fm.fileExists(atPath: $0) } ?? configPaths[1]
+        var cfg = (fm.contents(atPath: path).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }) ?? [:]
+        switch m {
+        case "auto": cfg["mode"] = "auto"
+        case "max":
+            let hi = (read()?["fan"] as? [String: Any])?["max"] as? Double ?? 0
+            guard hi > 0 else { return "讀不到風扇最高轉速，沒改。" }
+            cfg["mode"] = "fixed"; cfg["fixedRPM"] = hi
+        default: cfg["mode"] = "curve"
+        }
+        guard let d = try? JSONSerialization.data(withJSONObject: cfg, options: [.prettyPrinted, .sortedKeys]) else { return "風扇設定寫不出來。" }
+        do { try (d + Data("\n".utf8)).write(to: URL(fileURLWithPath: path)) } catch { return "改不了 \(path)（權限）。" }
+        return ["auto": "風扇交還給系統。", "max": "風扇開到最高轉速。"][m] ?? "風扇改回 cool42 曲線。"
     }
 }
 
