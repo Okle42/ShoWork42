@@ -214,8 +214,8 @@
   svg#links path { fill: none; stroke: var(--acc); stroke-width: 1; opacity: .55; }
   svg#links path.pop { stroke-width: 1.2; opacity: .9; transition: stroke-dashoffset .45s ease-out; }
   svg#links circle { fill: var(--acc); }
-  svg#links text { pointer-events: auto; cursor: pointer; fill: var(--ink); stroke: none; font: 600 10px ui-monospace, Menlo, monospace; letter-spacing: .08em; paint-order: stroke; }
-  svg#links text.warn, svg#links text.bad, svg#links tspan.warn { fill: var(--acc); }
+  svg#links text { pointer-events: auto; cursor: pointer; fill: var(--ink); stroke: none; font: 400 10.5px ui-monospace, Menlo, monospace; letter-spacing: .08em; paint-order: stroke; }
+  svg#links text.warn, svg#links text.bad, svg#links tspan.warn { fill: var(--acc); stroke: none; }      /* 只變色、不描邊（描邊會看起來像粗體） */
   svg#links .warn { stroke: var(--warn); fill: var(--warn); }
   svg#links .bad { stroke: var(--bad); fill: var(--bad); }
   .pop { position: fixed; top: 96px; width: var(--cw); z-index: 4; pointer-events: auto; cursor: pointer;
