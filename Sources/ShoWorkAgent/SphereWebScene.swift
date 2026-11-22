@@ -58,7 +58,7 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
         model.start()
         model.objectWillChange.sink { [weak self] _ in self?.schedule() }.store(in: &subs)
         // 溫度、額度重置倒數不會觸發 objectWillChange：每 10 秒補一次（內容一樣就不推）
-        ticker = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in MainActor.assumeIsolated { self?.push() } }
+        ticker = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in MainActor.assumeIsolated { self?.push(); if self?.desk == false { GhosttyTheme.recheck() } } }
         NotificationCenter.default.publisher(for: HeatGate.changed).sink { [weak self] _ in self?.schedule() }.store(in: &subs)
         // 桌面版開關／尺寸變了：兩顆球都要知道（分頁那顆要不要出聲、桌面版的「尺寸」按鈕字）
         NotificationCenter.default.publisher(for: SphereMini.changed).sink { [weak self] _ in self?.pushPrefs() }.store(in: &subs)
@@ -366,14 +366,29 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
 enum GhosttyTheme {
     static let config = NSHomeDirectory() + "/Library/Application Support/com.mitchellh.ghostty/config.ghostty"
     private static var last: String?
-    static func apply(mode: String, now: String, blocked: Bool) {
+    /// 第一次看到 Claude Code 主題是淺色／auto 的時間（之前開的 session 都是深色介面）
+    private static func sinceAuto(_ on: Bool) -> Double {
+        let d = UserDefaults(suiteName: "ai.okle42.showork"), k = "ghostty.lightSince"
+        if !on { d?.removeObject(forKey: k); return .infinity }
+        if let v = d?.object(forKey: k) as? Double { return v }
+        let v = Date().timeIntervalSince1970; d?.set(v, forKey: k); return v
+    }
+    /// 每分鐘重看一次（舊 session 關光了就自動換成跟球體）
+    static func recheck() { if let m = lastMode { apply(mode: m.0, now: m.1, blocked: false, force: true) } }
+    private static var lastMode: (String, String)?
+    static func apply(mode: String, now: String, blocked: Bool, force: Bool = false) {
+        lastMode = (mode, now)
         // 11-22 Keng 截圖：終端機切淺色後 Claude Code 的介面（框、表格、灰字）還是深色版 ⇒ 淺底上看不清楚。
         // 所以只有 Claude Code 自己也設成淺色主題（~/.claude.json theme 以 light 開頭）時才讓終端機跟著變淺；否則一律深色
         let ccLight = ((try? JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: NSHomeDirectory() + "/.claude.json")))) as? [String: Any])?["theme"]
             .flatMap { $0 as? String }.map { $0.hasPrefix("light") || $0 == "auto" } == true      // auto＝Claude Code 跟著終端機深淺
-        let line = !ccLight ? "theme = Okle42-Dark"
+        // 已經開著的 Claude Code 是用舊主題（深色）畫的，要重開才會吃到 auto ⇒ 還有「主題改成 auto 之前開的」session 活著就先維持深色
+        let since = sinceAuto(ccLight)
+        let oldAlive = NicknameStore.liveSessions().contains { ($0.startedAt ?? 0) / 1000 < since && $0.kind != "bg" }
+        let line = !ccLight || oldAlive ? "theme = Okle42-Dark"
             : mode == "auto" ? "theme = light:Okle42-Light,dark:Okle42-Dark" : "theme = Okle42-\(now == "light" ? "Light" : "Dark")"
-        guard line != last, !blocked else { return }
+        guard line != last || force, !blocked else { return }
+        if line == last { return }
         last = line
         guard FileManager.default.fileExists(atPath: NSHomeDirectory() + "/.config/ghostty/themes/Okle42-Dark"),
               let text = try? String(contentsOfFile: config, encoding: .utf8), text.contains("theme =") else { return }   // 沒裝 Okle42 主題就不動
