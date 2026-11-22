@@ -1569,7 +1569,14 @@ let holdTimer = null, listening = false, heard = "", heardFinal = null, heardDon
 canvas.addEventListener("pointerdown", e => {
   if (e.button !== 0) return;
   const s = satAt(e);
-  if (s?.c) { satAnchor = { x: e.clientX, y: e.clientY }; post({ action: "sessionInfo", sessionId: s.c.sessionId }); return; }
+  if (s?.c) {
+    satAnchor = { x: e.clientX, y: e.clientY }; post({ action: "sessionInfo", sessionId: s.c.sessionId });
+    // 11-22 Keng：點衛星也要打開戰情小視窗，並把那個 session 那一列捲到看得到、閃一下
+    openPanelFor("cardTeam");
+    const i = (data.team || []).findIndex(c => c.sessionId === s.c.sessionId), row = $("teamRows").querySelector(`.row[data-i="${i}"]`);
+    if (row) { row.scrollIntoView({ block: "nearest" }); row.classList.remove("flash"); void row.offsetWidth; row.classList.add("flash"); }
+    return;
+  }
   const gk = gaugeAt(e); if (gk) { openPanelFor(gk); return; }
   closeSat();
   holdTimer = setTimeout(() => { holdTimer = null; startListen(); }, 380);
