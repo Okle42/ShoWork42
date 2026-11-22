@@ -97,6 +97,13 @@
   只有 Claude Code 主題（**~/.claude/settings.json** 的 theme，不是 ~/.claude.json）是 light／auto、且主題改之前開的 session 都關了，才會切淺色（不然深色介面配淺底看不清楚）
 - ~/.claude/settings.json：theme dark→auto；pluginConfigs prismantis options replyStyle／promptStyle／codeStyle=framed（備份 settings.json.bak-20261122-theme）
 
+## 再下一件（未開工，Keng 11-22 21:25 指示）：重看 KARA 錄影，研究聲波細節做得比它好
+- 錄影：/Users/hairllypoter/Desktop/螢幕錄影 2026-11-22 清晨7.20.21.mov（ffmpeg 抽說話段的影格放大看）
+- Keng 重點：①它的三角形是**圓角**（導圓角）——我們球殼的小三角是尖角，要改圓角 ②它的六角形外殼 Keng **不想要**（可拿掉我們的 hex 外殼或不要學它）
+  ③**聲波細節**它做得比我們好很多：逐格比對它的波形（粗細、間距、漸層、起落速度、是否雙向／殘影、跟字幕的關係），列差異表後做得比它好
+- 我們的聲波：sphere.html `animWave()`（球外 120 根放射條，`WAVE_N`、`lv.bands`）＋字幕下 `drawCapWave()`；原生頻譜 SphereAudio.swift（32 段、30 次／秒）
+- 做完：螢幕外截圖（說話中 karaSay）對照錄影影格，推 main
+
 ## 下一件（未開工，Keng 11-22 21:20 指示）：把 prismantis 外掛內化成我們自己的樣式，之後停用 prismantis
 - Keng 選：放進 **ShoWork42 repo**
 - prismantis 0.46.0：~/.claude/plugins/cache/prismantis/prismantis/0.46.0，MIT（Nahum Litvin），約 8,100 行 TS／TSX，hooks.json → register.tsx；主題在 hooks/theme.ts、繪製在 render.tsx
