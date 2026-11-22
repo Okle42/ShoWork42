@@ -242,6 +242,10 @@
   #cardUsage .head .big { display: flex; align-items: center; gap: 10px; }
   .meter.seg { height: 5px; background: repeating-linear-gradient(90deg, var(--seg) 0 5px, transparent 5px 7px); }
   .meter.seg b { -webkit-mask-image: repeating-linear-gradient(90deg, #000 0 5px, transparent 5px 7px); mask-image: repeating-linear-gradient(90deg, #000 0 5px, transparent 5px 7px); }
+  #satMenu { position: fixed; z-index: 30; display: none; background: var(--panel-solid, var(--panel)); border: 1px solid var(--line); border-radius: 8px; padding: 6px; min-width: 200px; }
+  #satMenu.on { display: block; }
+  #satMenu .mi { display: flex; justify-content: space-between; gap: 12px; padding: 7px 10px; border-radius: 5px; cursor: pointer; font-size: 13px; color: var(--ink); }
+  #satMenu .mi:hover { background: var(--soft); } #satMenu small { color: var(--ink-dim); }
   .row .abtn { grid-column: 1 / -1; display: flex; gap: 6px; justify-content: flex-end; }
   .row.arow { padding-top: 2px; }
   .row .abtn .pill { padding: 1px 7px; font-size: 10px; }
@@ -404,6 +408,7 @@
 <div id="brandTab" class="brand" aria-hidden="true">OKLE<b>42</b> <span class="dim">· SHOWORK<b>42</b></span></div>
 <svg id="deskGrip" viewBox="0 0 18 18" aria-label="拖曳縮放"><path d="M16 7 7 16M16 11.5 11.5 16" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
 <div id="tools">
+  <button class="pill sm on" id="bNewSat" title="開一顆新衛星（新的 AI 工作者，Orbit42）" hidden>＋ 新衛星</button>
   <button class="pill sm" id="bBrief" title="唸一次早報（今天的狀況與額度）">早報</button>
   <button class="pill sm" id="bWrap" title="唸收工總結（今天做完什麼、還剩什麼）">收工</button>
   <button class="pill sm" id="bTl" title="今天每個 session 的狀態變化">時間<span class="wide">軸</span></button>
@@ -433,7 +438,8 @@
 </script>
 <script type="module">
 import * as THREE from "three";
-const DESK = new URLSearchParams(location.search).has("desk");     // 球體桌面版（11-22，SphereMini.swift）
+const DESK = new URLSearchParams(location.search).has("desk");
+const ORBIT = new URLSearchParams(location.search).has("orbit");     // 11-23：嵌在 Orbit42 裡（SphereEmbed.swift）     // 球體桌面版（11-22，SphereMini.swift）
 if (DESK) document.body.classList.add("desk");
 
 /* ---------- 狀態定義：每個狀態的轉速、亮度、標籤 ---------- */
@@ -1808,6 +1814,17 @@ function brief() {
   const auditOnce = k => { let d = null; try { d = localStorage.getItem(k); } catch {} if (d === day) return; try { localStorage.setItem(k, day); } catch {} post({ action: "audit" }); };
   if (h >= 5 && h < 11) { once("sphere.brief", briefText); auditOnce("sphere.audit.am"); }
   else if (h >= 19) { once("sphere.wrap", wrapText); auditOnce("sphere.audit.pm"); }
+}
+// 11-23 Orbit42：＋ 新衛星（選大腦）
+if (ORBIT) {
+  const b = $("bNewSat"); b.hidden = false;
+  const m = document.createElement("div"); m.id = "satMenu"; m.setAttribute("role", "menu");
+  m.innerHTML = [["claude", "Claude", "Claude Code"], ["gemini", "Gemini", "Antigravity CLI"], ["codex", "ChatGPT", "Codex CLI"]]
+    .map(([k, n, d]) => `<div class="mi" data-brain="${k}"><span>${n}</span><small>${d}</small></div>`).join("");
+  document.body.appendChild(m);
+  b.onclick = e => { e.stopPropagation(); const r = b.getBoundingClientRect(); m.style.top = (r.bottom + 6) + "px"; m.style.left = Math.max(8, r.left - 60) + "px"; m.classList.toggle("on"); };
+  m.onclick = e => { const mi = e.target.closest("[data-brain]"); if (!mi) return; m.classList.remove("on"); post({ action: "newSatellite", brain: mi.dataset.brain }); };
+  document.addEventListener("click", () => m.classList.remove("on"));
 }
 $("bBrief").onclick = () => { announce(briefText()); post({ action: "audit" }); };
 $("bWrap").onclick = () => { announce(wrapText()); post({ action: "audit" }); };

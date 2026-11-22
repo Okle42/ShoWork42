@@ -5,7 +5,7 @@ import ShoWorkCore
 // 11-23：ShoWorkAgent 拆成函式庫（ShoWorkApp），原本 main.swift 的內容整段搬進來當 run()，行為不變；
 // ShoWorkAgent 執行檔和 Orbit42 都呼叫這裡（Orbit42 取代 ShoWorkAgent，見 docs/PLAN-SPHERE-OS.md）
 public enum ShoWorkAgentMain {
-    @MainActor public static func run() {
+    @MainActor public static func run(_ options: AgentOptions = AgentOptions()) {
 
 let argv = CommandLine.arguments
 
@@ -421,7 +421,9 @@ if argv.count >= 2, argv[1].hasPrefix("--") {
 
 // Accessibility is required (window frames, focus, key/click monitor). Under launchd, exiting here
 // would respawn-loop, so ask ONCE (system prompt) and then wait quietly until it is granted.
-if !AXIsProcessTrusted() {
+if !options.waitForAccessibility && !AXIsProcessTrusted() {
+    _ = AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary)   // Orbit42：問一次就繼續（排窗、光暈這些要輔助使用的功能先不動）
+} else if !AXIsProcessTrusted() {
     FileHandle.standardError.write(Data("ShoWorkAgent: waiting for Accessibility permission (System Settings → Privacy & Security → Accessibility → ShoWorkAgent)\n".utf8))
     _ = AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary)
     // AXIsProcessTrusted() can keep answering false inside this process even after the user flips the
@@ -441,7 +443,7 @@ if !AXIsProcessTrusted() {
 
 MainActor.assumeIsolated {
     let app = NSApplication.shared
-    app.setActivationPolicy(.accessory)                       // no Dock icon, no menu bar
+    app.setActivationPolicy(options.regularApp ? .regular : .accessory)   // ShoWorkAgent: no Dock icon; Orbit42: a normal app
     EditMenu.install()                                        // 聽寫（按兩下 Control）、⌘C／⌘V 的快捷鍵要掛在編輯選單上（EditMenu.swift）
     let engine = Engine()
     engine.start()
@@ -476,6 +478,7 @@ MainActor.assumeIsolated {
         exit(1)
     }
     FileHandle.standardError.write(Data("ShoWorkAgent listening on \(Paths.socket.path)\n".utf8))
+    if let launch = options.onLaunch { DispatchQueue.main.async { MainActor.assumeIsolated { launch() } } }   // Orbit42 開自己的主視窗
     withExtendedLifetime((server, titles)) { app.run() }
 }
 

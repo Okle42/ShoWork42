@@ -33,7 +33,7 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
     private var listener: SphereListener?
     private let edge = SphereEdgeVoice()
 
-    init?(dir: URL? = WorkWindow.webDir, desk: Bool = false) {
+    init?(dir: URL? = WorkWindow.webDir, desk: Bool = false, orbit: Bool = false) {
         guard let dir, FileManager.default.fileExists(atPath: dir.appendingPathComponent("sphere.html").path) else { return nil }
         self.desk = desk
         let cfg = WKWebViewConfiguration()
@@ -54,7 +54,8 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
             unsafeBitCast(method_getImplementation(m), to: SetBool.self)(web, occ, false)
         }
         web.navigationDelegate = self
-        web.load(URLRequest(url: URL(string: "\(OfficeWebSchemeHandler.scheme)://web/sphere.html\(desk ? "?desk=1" : "")")!))
+        let q = [desk ? "desk=1" : nil, orbit ? "orbit=1" : nil].compactMap { $0 }.joined(separator: "&")
+        web.load(URLRequest(url: URL(string: "\(OfficeWebSchemeHandler.scheme)://web/sphere.html\(q.isEmpty ? "" : "?" + q)")!))
         model.start()
         model.objectWillChange.sink { [weak self] _ in self?.schedule() }.store(in: &subs)
         // 溫度、額度重置倒數不會觸發 objectWillChange：每 10 秒補一次（內容一樣就不推）
@@ -128,6 +129,8 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
             js("window.karaSessionInfo", Self.info(c))
         case "timeline":        // v4 E：今日時間軸
             js("window.karaTimeline", SphereWatch.todayTimeline())
+        case "newSatellite":    // 11-23 Orbit42：球體工具列「＋ 新衛星」
+            SphereEmbed.newSatellite?(str("brain") ?? "claude")
         case "audit":           // 11-22 Keng：自檢原子環——開工（早報）／收工各跑一次，自檢卡也能手動重跑／送出
             let send = m["send"] as? Bool ?? false
             if send && blocked { return say("測試模式不送出。") }
@@ -187,6 +190,9 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
     /// 跳到那個 session：戰情中心自己開的（kind board）開工作視窗，其他的把終端機視窗叫到前面
     private func jump(_ c: BoardCard) {
         if blocked { return say("測試：不跳到 \(c.display)。") }
+        // 11-23 Orbit42：點衛星先交給 Orbit42（在它自己的終端機面板打開）；它處理不了才走原本的跳 Ghostty
+        if let open = SphereEmbed.openSession,
+           open(SphereEmbed.SessionRef(sessionId: c.sessionId, pid: c.pid, jobId: c.jobId, kind: c.kind, cwd: c.cwd, name: c.display)) { return }
         if c.kind == "board" {
             WorkWindow.show(SessionHost.shared.handle(for: c.sessionId) ?? c.sessionId, cwd: c.cwd)
         } else if let msg = BoardActions.jumpOrAttach(c) {
