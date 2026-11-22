@@ -282,7 +282,21 @@
   .drag .row, .drag .q, .drag .text { cursor: auto; }
   .drag .row.link { cursor: pointer; }
   .drag::-webkit-resizer { background: transparent; }
+  /* 11-22 Keng：小視窗要能開關 ⇒ .off＝關掉（工具列「面板」選單或卡片右上 ×），記在 localStorage sphere.hide.tab／desk */
+  .card.off, body.stack .card.off { display: none !important; }
+  .card .k { display: flex; align-items: center; }
+  .card .k .x { margin-left: auto; background: none; border: 0; color: var(--ink-faint); font: 13px/1 -apple-system, sans-serif; cursor: pointer; padding: 0 2px; }
+  .card .k .x:hover { color: var(--acc); }
+  #panelMenu { position: fixed; z-index: 9; background: var(--panel-solid); border: 1px solid var(--line); border-radius: 8px; padding: 6px; display: none; min-width: 150px; }
+  #panelMenu.on { display: block; }
+  #panelMenu label { display: flex; align-items: center; gap: 8px; padding: 5px 8px; font-size: 12px; border-radius: 4px; cursor: pointer; }
+  #panelMenu label:hover { background: var(--soft); }
+  #panelMenu input { accent-color: var(--acc); margin: 0; }
+  #panelMenu .more { display: none; border-top: 1px solid var(--line); margin-top: 4px; padding-top: 4px; }
+  #panelMenu .more button { display: block; width: 100%; text-align: left; background: none; border: 0; color: var(--ink); font: inherit; font-size: 12px; padding: 5px 8px; border-radius: 4px; cursor: pointer; }
+  #panelMenu .more button:hover { background: var(--soft); }
   #sysWrap { display: none; }
+  #sysWrap.off { display: none !important; }
   /* 11-22 Keng：上方「球體 · 思考中」字幕框拿掉（底下本來就有狀態字）⇒ 現況／字幕移到狀態字下面，不要框：
      平常＝「1 個進行中，4 個待審」，講話時＝逐詞字幕＋聲波 */
   #caption { top: auto; bottom: 38px; width: min(680px, calc(100% - 32px)); background: none; border: 0; padding: 0; text-align: center; }
@@ -306,6 +320,8 @@
   body.stack.asking #cardUsage, body.stack.asking #cardTeam { opacity: 0; pointer-events: none; }
   @media (max-width: 640px) {
     body.desk .wide { display: none; }
+    body.desk #bBrief, body.desk #bWrap, body.desk #bTl { display: none; }       /* 桌面版窄的時候收進「面板」選單 */
+    body.desk #panelMenu .more { display: block; }
     body.desk #voiceSel { max-width: 84px; }
   }
   /* 桌面版橫式（大）：卡片窄一點，球留在中間 */
@@ -353,6 +369,7 @@
 <div class="card" id="satCard" role="dialog" aria-label="session 詳情"></div>
 <div class="card" id="tlCard" role="dialog" aria-label="今日時間軸"></div>
 <div id="tip"></div>
+<div id="panelMenu" role="menu" aria-label="開關面板"></div>
 <div class="card pop" id="pop" role="status"></div>
 <div id="banner" role="alert"><div class="in"></div></div>
 
@@ -367,6 +384,7 @@
   <button class="pill sm deskOnly" id="bSize" title="換尺寸：小 → 中 → 大（拖右下角也可以）">尺寸</button>
   <button class="pill sm deskOnly" id="bBoard" title="打開戰情中心">戰情<span class="wide">中心</span></button>
   <select class="pill sm" id="voiceSel" title="播報的聲音（選了會試聽一句）" aria-label="播報的聲音" hidden></select>
+  <button class="pill sm" id="bPanels" title="開關裡面的小視窗（額度、外環、戰情）">面板</button>
   <button class="pill sm" id="bAuto">自動<span class="wide">排版</span></button>
   <button class="pill sm" id="bTheme" title="配色：自動（跟系統）→ 深色 → 淺色" aria-label="配色">◐</button>
   <button class="pill sm" id="voice" aria-label="語音開關"></button>
@@ -500,7 +518,15 @@ function arcRing(r, w, segs, tilt, speed, op) {
   grp.add(new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(circ), lineMat(op * 0.6)));
   grp.rotation.set(tilt[0], tilt[1], tilt[2]);
   grp.userData.speed = speed;
-  root.add(grp); rings.push(grp);
+  // 11-22 Keng：斜環要像原子軌道一樣繞著球心自由轉（不是固定傾角）⇒ 外面包一層 pivot，各自繞一條不同的軸慢慢翻
+  const pivot = new THREE.Group(); pivot.add(grp); root.add(pivot);
+  if (tilt.some(v => v)) {
+    const k = rings.length;
+    pivot.userData.axis = new THREE.Vector3(Math.sin(k * 2.1) * 0.6, 1, Math.cos(k * 1.7) * 0.5).normalize();
+    pivot.userData.w = (k % 2 ? -1 : 1) * (0.22 + k * 0.07);
+    pivot.rotation.y = k * 2.09;                  // 起始錯開 120°
+  }
+  grp.userData.pivot = pivot; rings.push(grp);
   return grp;
 }
 arcRing(2.15, 0.07, 9, [1.25, 0.15, 0], 0.30, 0.55);
@@ -774,7 +800,11 @@ function frame(now) {
   shell.rotation.y -= dt * cur.spin * 0.35; shell.rotation.z += dt * cur.spin * 0.1;
   shell.scale.setScalar(breathe);
   root.userData.hex.rotation.y += dt * root.userData.hex.userData.spin * cur.spin;
-  for (const r of rings) r.rotateZ(dt * r.userData.speed * (0.4 + cur.spin));
+  for (const r of rings) {
+    r.rotateZ(dt * r.userData.speed * (0.4 + cur.spin));
+    const pv = r.userData.pivot;
+    if (pv?.userData.axis) pv.rotateOnAxis(pv.userData.axis, dt * pv.userData.w * (0.5 + cur.spin * 0.8));      // 軌道面繞球心翻
+  }
 
   // 搜尋碎片
   for (const b of bits) {
@@ -1731,7 +1761,7 @@ function autoLayout() {
     const W = innerWidth, H = innerHeight;
     for (const k of ["left", "top", "right", "bottom", "width", "height", "maxHeight", "transform"]) $("askCard").style[k] = "";
     const capB = topMin() + 48, floor = H - 150, room = floor - capB;       // 工具列下面 ～ 底部狀態字＋現況那一行的上面
-    const vis = id => id === "cardSys" ? $("cardSys").classList.contains("on") && $("sysRows").innerHTML !== ""
+    const vis = id => $(id).classList.contains("off") ? false : id === "cardSys" ? $("cardSys").classList.contains("on") && $("sysRows").innerHTML !== ""
       : id === "cardTeam" ? $("cardTeam").classList.contains("on") : true;
     const cols = layout.cols || DEF_COLS, zmul = layout.zmul || 1;
     const zSide = W < H ? 15 : 10.5, upS = (H / 2) / (zSide * TAN20);              // 1 倍時每單位幾像素
@@ -1853,6 +1883,42 @@ if (autoOn) { resize(); drawLinks(); }
 // 卡片第一次拿到資料、「需要你」出現／消失時重排一次（外環卡、選項面板的有無會改變版面）
 let autoSig = "";
 setInterval(() => { const sig = ["cardSys", "cardTeam", "askCard"].map(i => +$(i).classList.contains("on")).join() + $("sysRows").innerHTML.length; if (sig !== autoSig) { autoSig = sig; autoSoon(); } }, 500);
+
+/* ---------- 11-22 小視窗開關（Keng） ---------- */
+const TOGGLES = [["cardUsage", "額度 · 用量"], ["cardSys", "外環 · 溫度／背景工作"], ["cardTeam", "戰情 · SESSION"]];
+const HKEY = "sphere.hide." + (DESK ? "desk" : "tab");
+let hidden = new Set();
+try { hidden = new Set(JSON.parse(localStorage.getItem(HKEY) || "[]")); } catch {}
+function setPanel(id, on) {
+  on ? hidden.delete(id) : hidden.add(id);
+  try { localStorage.setItem(HKEY, JSON.stringify([...hidden])); } catch {}
+  applyPanels(); autoSoon(); drawLinks();
+}
+function applyPanels() {
+  for (const [id] of TOGGLES) $(id).classList.toggle("off", hidden.has(id));
+  $("sysWrap").classList.toggle("off", hidden.has("cardSys"));       // 疊排時外環併在額度卡裡，也要一起關
+  $("bPanels").classList.toggle("on", hidden.size > 0);
+  $("bPanels").textContent = hidden.size ? `面板 ${TOGGLES.length - hidden.size}/${TOGGLES.length}` : "面板";
+  $("panelMenu").innerHTML = TOGGLES.map(([id, name]) => `<label><input type="checkbox" data-p="${id}"${hidden.has(id) ? "" : " checked"}>${esc(name)}</label>`).join("")
+    + `<div class="more"><button data-go="bBrief">早報</button><button data-go="bWrap">收工總結</button><button data-go="bTl">今日時間軸</button></div>`;
+}
+// 卡片右上角的 ×
+for (const [id] of TOGGLES) {
+  const k = $(id).querySelector(".k"), x = document.createElement("button");
+  x.className = "x"; x.textContent = "×"; x.title = "關掉這個面板（工具列「面板」可再打開）"; x.setAttribute("aria-label", "關掉");
+  x.onclick = e => { e.stopPropagation(); setPanel(id, false); };
+  k.appendChild(x);
+}
+$("bPanels").onclick = e => {
+  e.stopPropagation();
+  const m = $("panelMenu"), r = $("bPanels").getBoundingClientRect();
+  m.style.top = (r.bottom + 6) + "px"; m.style.left = Math.max(8, Math.min(innerWidth - 168, r.left)) + "px";
+  m.classList.toggle("on");
+};
+$("panelMenu").addEventListener("click", e => { const g = e.target.closest("[data-go]"); if (g) { $("panelMenu").classList.remove("on"); $(g.dataset.go).click(); } });
+$("panelMenu").addEventListener("change", e => { const id = e.target.dataset.p; if (id) setPanel(id, e.target.checked); });
+addEventListener("pointerdown", e => { if (!e.target.closest("#panelMenu,#bPanels")) $("panelMenu").classList.remove("on"); });
+applyPanels();
 
 /* ---------- 11-22 配色：自動（跟系統）／深色／淺色 ---------- */
 const THEME_LABEL = { auto: "配色：自動（跟系統）", dark: "配色：深色", light: "配色：淺色" };
