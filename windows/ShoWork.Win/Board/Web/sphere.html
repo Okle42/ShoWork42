@@ -41,6 +41,8 @@
     --warn: #d7261b; --bad: #d7261b;
     --cross: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='56'%3E%3Cpath d='M28 24.5v7M24.5 28h7' stroke='%23000' stroke-opacity='.22' stroke-width='1'/%3E%3C/svg%3E");
   }
+  /* 11-22 Keng：小視窗的寬度全部一樣（額度、外環、戰情、事件卡、衛星小卡）；自動排版會依視窗改 --cw */
+  :root { --cw: 310px; }
   :root { --acc-dim: color-mix(in srgb, var(--acc) 38%, transparent); --acc-soft: color-mix(in srgb, var(--acc) 10%, transparent); }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; color: var(--ink); overflow: hidden;
@@ -161,7 +163,7 @@
   body.desk #deskGrip { display: block; position: fixed; right: 0; bottom: 0; width: 18px; height: 18px; cursor: nwse-resize; z-index: 21; color: var(--ink-faint); }
   body.desk #deskGrip:hover { color: var(--acc); }
   /* v4 C：衛星小卡 */
-  #satCard { background: var(--panel-solid); position: fixed; width: 280px; z-index: 6; pointer-events: auto; }
+  #satCard { background: var(--panel-solid); position: fixed; width: var(--cw); z-index: 6; pointer-events: auto; }
   #satCard .head b { font-size: 14px; font-weight: 500; }
   #satCard .ln { font-size: 12px; line-height: 1.5; padding: 4px 0; border-top: 1px solid var(--line); color: var(--ink); }
   #satCard .ln .t { color: var(--ink-dim); font-size: 10px; letter-spacing: .12em; margin-right: 6px; }
@@ -206,7 +208,7 @@
   svg#links circle { fill: var(--acc); }
   svg#links .warn { stroke: var(--warn); fill: var(--warn); }
   svg#links .bad { stroke: var(--bad); fill: var(--bad); }
-  .pop { position: fixed; top: 96px; width: 290px; z-index: 4; pointer-events: auto; cursor: pointer;
+  .pop { position: fixed; top: 96px; width: var(--cw); z-index: 4; pointer-events: auto; cursor: pointer;
     background: var(--panel-solid); border-color: var(--line);
     clip-path: inset(0 0 100% 0); opacity: 1; transform: none; transition: clip-path .4s cubic-bezier(.2,.8,.2,1) .25s; }
   .pop.on { clip-path: inset(0 0 0 0); }
@@ -221,7 +223,7 @@
   .pop .ln { font-size: 12px; line-height: 1.5; padding: 4px 0; border-top: 1px solid var(--line); }
   .pop .ln .t { color: var(--ink-dim); font-size: 10px; letter-spacing: .12em; margin-right: 6px; }
   /* ③ 額度儀表 */
-  #cardUsage { width: 286px; }
+  #cardUsage, #cardSys { width: var(--cw); }
   .donut { width: 40px; height: 40px; transform: rotate(-90deg); }
   .donut circle { fill: none; stroke-width: 3.2; }
   .donut .tr { stroke: var(--line); }
@@ -236,7 +238,7 @@
   .card.flash { animation: cflash 1.6s ease-out; }
   @keyframes cflash { 0%, 40% { border-color: var(--warn); box-shadow: 0 0 24px var(--acc-dim); } 100% { border-color: var(--line); box-shadow: none; } }
   /* ④ 戰情卡 */
-  #cardTeam { width: 310px; max-height: calc(58% - 20px); overflow: auto; }
+  #cardTeam { width: var(--cw); max-height: calc(58% - 20px); overflow: auto; }
   .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: -2px 0 8px; }
   .chips span { font-size: 10px; letter-spacing: .06em; color: var(--ink-dim); display: inline-flex; align-items: center; gap: 4px; }
   .chips i, .trow .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--c); display: inline-block; }
@@ -295,7 +297,7 @@
   body.stack #cardUsage { left: 12px; } body.stack #cardTeam { right: 12px; }
   body.stack .card .head b { font-size: 20px; }
   body.stack #cardUsage .donut { width: 30px; height: 30px; }
-  body.stack .pop { width: min(290px, calc(100% - 24px)); }
+  body.stack .pop { width: min(var(--cw), calc(100% - 24px)); }
   body.stack .pop.r { right: 12px; } body.stack .pop.l { left: 12px; }
   body.stack #askCard { bottom: 168px; width: min(580px, calc(100% - 24px)); z-index: 7; }
   /* 有人在等你：選項面板佔卡片的位置（卡片先收起來，答完就回來；session 狀態看衛星） */
@@ -306,8 +308,9 @@
   }
   /* 桌面版橫式（大）：卡片窄一點，球留在中間 */
   @media (min-width: 641px) and (max-width: 1100px) {
-    body.desk #cardUsage { width: 250px; left: 16px; } body.desk #cardTeam { width: 270px; right: 16px; }
-    body.desk #cardSys { left: 16px; width: 250px; }
+    body.desk { --cw: 260px; }
+    body.desk #cardUsage { left: 16px; } body.desk #cardTeam { right: 16px; }
+    body.desk #cardSys { left: 16px; }
   }
 </style>
 </head>
@@ -1454,7 +1457,7 @@ window.karaSessionInfo = (o) => {
     ${ln("動靜", ago)}${ln("子代理", o.subagents ? o.subagents + " 個在跑" : null)}${ln("摘要", o.summary)}
     ${o.detail ? `<div class="ln detail"><span class="t">最後一句</span>${esc(o.detail)}</div>` : ""}
     <div class="btns"><button class="pill sm" data-go>跳到它的視窗</button><button class="pill sm no" data-x>關閉</button></div>`;
-  const w = 280, h = el.offsetHeight || 220;
+  const w = el.offsetWidth || 310, h = el.offsetHeight || 220;
   el.style.left = Math.max(12, Math.min(satAnchor.x + 16, innerWidth - w - 12)) + "px";
   el.style.top = Math.max(12, Math.min(satAnchor.y - 20, innerHeight - h - 12)) + "px";
   show("satCard", true);
@@ -1593,11 +1596,11 @@ function autoLayout() {
     const want = Math.min(310, Math.max(250, W * 0.24));
     // 球的大小：兩欄放得下（寬）、上下塞得進字幕和狀態字之間（高）取小的，再乘上你滾輪調的倍數
     const z = Math.max(0.45, Math.min(2, Math.min(1.15, (W / 2 - want - 2 * M - 12) / (CLEAR * upS), (room / 2) / (2.7 * upS)) * zmul));
-    const cw = Math.min(330, W / 2 - CLEAR * upS * z - 2 * M - 12);
+    const cw = Math.min(310, W / 2 - CLEAR * upS * z - 2 * M - 12);
     autoStack = cw < 220;
     document.body.classList.toggle("stack", autoStack);          // 先切版型再量高度（疊排時外環會併進額度卡）
     if (!autoStack) {
-      zoom = z;
+      zoom = z; document.documentElement.style.setProperty("--cw", Math.round(cw) + "px");
       // 球心放在可用空間的正中間（11-22 Keng：左右兩欄的總高度要以球心那條水平線上下置中）
       const cy = (capB + floor) / 2; autoLift = H / 2 - cy;
       for (const [side, ids0] of [["l", cols.l], ["r", cols.r]]) {
@@ -1617,7 +1620,8 @@ function autoLayout() {
       autoLift = 0;
       const upB = (H / 2) / (20 * TAN20), cy = H * 0.4, cardsTop = Math.max(H * 0.56, capB + 120);
       zoom = Math.max(0.45, Math.min(2, Math.min(1.3, Math.min(cardsTop - cy - 6, W / 2 - M) / (CLEAR * upB)) * zmul));
-      const w2 = Math.min(380, (W - 3 * M - 8) / 2), ch = Math.max(120, floor - cardsTop);
+      const w2 = Math.min(380, (W - 3 * M - 8) / 2); document.documentElement.style.setProperty("--cw", Math.round(w2) + "px");
+      const ch = Math.max(120, floor - cardsTop);
       const ids = [...cols.l, ...cols.r].filter(id => id !== "cardSys" && vis(id));       // 疊排時外環併進額度卡
       ids.slice(0, 2).forEach((id, n) => put($(id), n ? W - M - 4 - w2 : M + 4, cardsTop, w2, Math.min(ch, natH($(id), w2))));
     }
