@@ -206,6 +206,8 @@
   svg#links path { fill: none; stroke: var(--acc); stroke-width: 1; opacity: .55; }
   svg#links path.pop { stroke-width: 1.2; opacity: .9; transition: stroke-dashoffset .45s ease-out; }
   svg#links circle { fill: var(--acc); }
+  svg#links text { fill: var(--ink); stroke: none; font: 600 10px ui-monospace, Menlo, monospace; letter-spacing: .08em; paint-order: stroke; }
+  svg#links text.warn, svg#links text.bad { fill: var(--acc); }
   svg#links .warn { stroke: var(--warn); fill: var(--warn); }
   svg#links .bad { stroke: var(--bad); fill: var(--bad); }
   .pop { position: fixed; top: 96px; width: var(--cw); z-index: 4; pointer-events: auto; cursor: pointer;
@@ -558,7 +560,7 @@ function animSats(dt, t) {
     const col = s.fade.step(); s.mesh.material.color.copy(col); s.halo.material.color.copy(col);
     const need = st === "需要你";
     const k = need ? 1 + 0.35 * Math.sin(t * 5) : 1;
-    s.mesh.scale.setScalar(k * (s.hover ? 1.6 : 1));
+    s.mesh.scale.setScalar(k * (s.hover || s.c?.sessionId === rowSid ? 1.6 : 1));
     s.mesh.material.opacity += ((st === "完成" || !SAT_COLOR[st] ? 0.55 : 0.95) - s.mesh.material.opacity) * Math.min(1, dt * 2);
     s.halo.material.opacity = need ? 0.5 + 0.4 * Math.sin(t * 5) : s.hover ? 0.7 : 0;
     s.halo.visible = s.halo.material.opacity > 0.004;
@@ -580,11 +582,7 @@ const heatFade = new Fade(GRAY, 2);
 function syncOuter(runs, heat) {
   const want = [];
   (runs || []).slice(0, 3).forEach((r, i) => want.push({ key: `run${i}:${Math.round(r.fraction * 100)}`, r: 3.18 + i * 0.12, w: 0.035, f: r.fraction, color: BALL, op: 0.75 }));
-  if (heat?.temp != null) {
-    const lv = heat.level, col = lv === "hot" || lv === "critical" ? BAD : lv === "warm" ? BALL : GRAY;
-    heatFade.set(col);
-    want.push({ heat: true, key: `heat:${heat.temp}`, r: 3.62, w: 0.05, f: Math.min(1, Math.max(0.02, (heat.temp - 35) / 65)), color: col, op: 0.6 });
-  }
+  // 溫度改由下面的「溫度環」（gHeat）畫：會走過去、依溫度變色、過熱警報
   if (want.map(w => w.key).join("|") === outerArcs.map(a => a.key).join("|")) return;
   for (const a of outerArcs) { outer.remove(a.mesh, a.track); a.mesh.geometry.dispose(); a.track.geometry.dispose(); }
   outerArcs.length = 0;
@@ -593,6 +591,79 @@ function syncOuter(runs, heat) {
     if (w.heat) { mesh.userData.heat = track.userData.heat = true; mesh.material.color.copy(heatFade.c); track.material.color.copy(heatFade.c); }
     outer.add(track, mesh); outerArcs.push({ key: w.key, mesh, track });
   }
+}
+
+// 7b. 11-22 Keng：拉線要指到「有真正內容的圈」，不是隨便勾到球邊 ⇒ 三個資料環（面向鏡頭、半圓刻度：
+//   從球的正下方沿著「卡片那一側」往上長到正上方，0% 在下、100% 在上；卡片拖到另一邊，環也翻過去，線不會穿過球）：
+//   額度環 5 小時（內）／7 天（外）：分段刻度＝真實百分比，70%、90% 有門檻刻線，≥70 變紅；額度卡的線接 5 小時的尖端
+//   溫度環：35–100°C，填滿會慢慢「走」到目前溫度，一顆亮點沿著跑；顏色 55°C 以下灰 → 75°C 白 → 90°C 紅，過熱閃爍＋衝擊波；外環卡的線接溫度尖端
+const gAng = f => -Math.PI / 2 - f * Math.PI;          // 0＝正下方、0.5＝左邊、1＝正上方（右邊用鏡像）
+function segGeo(r, w, n, gap = 0.28) {
+  const pos = [], idx = [], step = 1 / n;
+  for (let k = 0; k < n; k++) {
+    const a0 = gAng(k * step), a1 = gAng((k + 1 - gap) * step), b = k * 4;
+    for (const [a, rr] of [[a0, r], [a0, r + w], [a1, r], [a1, r + w]]) pos.push(Math.cos(a) * rr, Math.sin(a) * rr, 0);
+    idx.push(b, b + 1, b + 2, b + 1, b + 3, b + 2);
+  }
+  const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx); return g;
+}
+function tickGeo(r0, r1, fracs) {
+  const pos = []; for (const f of fracs) { const a = gAng(f); pos.push(Math.cos(a) * r0, Math.sin(a) * r0, 0, Math.cos(a) * r1, Math.sin(a) * r1, 0); }
+  const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3)); return g;
+}
+const gmat = (op) => new THREE.MeshBasicMaterial({ color: BALL, transparent: true, opacity: op, blending: BLEND, depthWrite: false, side: THREE.DoubleSide });
+function gauge(r, w, n, ticks) {
+  const track = new THREE.Mesh(segGeo(r, w, n), gmat(0.13)), fill = new THREE.Mesh(segGeo(r, w, n), gmat(0.85));
+  const tk = new THREE.LineSegments(tickGeo(r - 0.05, r + w + 0.05, ticks), new THREE.LineBasicMaterial({ color: ALERT, transparent: true, opacity: 0.55, blending: BLEND, depthWrite: false }));
+  fill.geometry.setDrawRange(0, 0); outer.add(track, fill, tk);
+  return { r, w, n, track, fill, tk, cur: 0, target: null, col: new THREE.Color().copy(BALL), flip: 1 };
+}
+/** 環長在卡片那一側：卡片在球右邊就鏡像 */
+function gaugeSide(g, rect) {
+  if (!rect) return;
+  const { cx } = sphereScreen(), f = rect.left + rect.width / 2 > cx ? -1 : 1;
+  if (f !== g.flip) { g.flip = f; for (const m of [g.track, g.fill, g.tk]) m.scale.x = f; }
+}
+const g5 = gauge(2.98, 0.07, 72, [0.7, 0.9]), g7 = gauge(3.09, 0.035, 72, [0.8, 0.95]);
+const gHeat = gauge(3.62, 0.055, 65, [(70 - 35) / 65, (85 - 35) / 65]);       // 一格＝1°C
+const heatDot = new THREE.Mesh(new THREE.CircleGeometry(0.05, 12), gmat(0)); outer.add(heatDot);
+const _tmpC = new THREE.Color();
+function heatCol(t) {             // 灰（≤55）→ 白（75）→ 紅（≥90）
+  if (t <= 55) return _tmpC.copy(GRAY);
+  if (t <= 75) return _tmpC.copy(GRAY).lerp(BALL, (t - 55) / 20);
+  return _tmpC.copy(BALL).lerp(BAD, Math.min(1, (t - 75) / 15));
+}
+function animGauges(dt, t) {
+  const u5 = data.five_hour, u7 = data.seven_day, h = data.heat;
+  g5.target = u5 == null ? null : u5 / 100; g7.target = u7 == null ? null : u7 / 100;
+  gHeat.target = h?.temp == null ? null : Math.min(1, Math.max(0.02, (h.temp - 35) / 65));
+  for (const g of [g5, g7, gHeat]) {
+    const on = g.target != null;
+    g.track.visible = g.fill.visible = g.tk.visible = on; if (!on) continue;
+    g.cur += (g.target - g.cur) * Math.min(1, dt * (g === gHeat ? 0.9 : 2.2));        // 溫度慢慢走過去
+    g.fill.geometry.setDrawRange(0, Math.round(Math.min(1, g.cur) * g.n) * 6);
+    g.track.material.color.copy(GRAY); g.tk.material.color.copy(ALERT);
+  }
+  for (const g of [g5, g7]) if (g.target != null) {
+    const v = g.target * 100, warnAt = g === g5 ? 70 : 80;
+    g.col.lerp(v >= warnAt ? ALERT : BALL, Math.min(1, dt * 3)); g.fill.material.color.copy(g.col);
+  }
+  heatDot.visible = gHeat.target != null;
+  if (gHeat.target != null) {
+    const temp = h.temp, crit = h.level === "critical" || temp >= 92, hot = crit || h.level === "hot";
+    gHeat.col.lerp(heatCol(temp), Math.min(1, dt * 2)); gHeat.fill.material.color.copy(gHeat.col);
+    gHeat.fill.material.opacity = hot ? 0.55 + 0.4 * (0.5 + 0.5 * Math.sin(t * (crit ? 9 : 4))) : 0.85;      // 過熱閃
+    const ph = (t * 0.45) % 1, f = ph * gHeat.cur, a = gAng(f), rr = gHeat.r + gHeat.w / 2;
+    heatDot.position.set(Math.cos(a) * rr * gHeat.flip, Math.sin(a) * rr, 0.001);
+    heatDot.material.color.copy(gHeat.col); heatDot.material.opacity = 0.95 * Math.sin(ph * Math.PI);
+  }
+}
+/** 資料環尖端（目前值的位置）的世界座標 */
+const _tip = new THREE.Vector3();
+function gaugeTip(g) {
+  if (g.target == null) return null;
+  const a = gAng(Math.max(0.004, Math.min(1, g.cur))), rr = g.r + g.w / 2;
+  return _tip.set(Math.cos(a) * rr * g.flip, Math.sin(a) * rr, 0).applyMatrix4(outer.matrixWorld);
 }
 
 // 8. v5 聲波：球外圈 120 根放射條（面向鏡頭），左右對稱，跟著真的頻譜跳
@@ -731,7 +802,9 @@ function frame(now) {
   root.rotation.y = Math.sin(t * 0.2) * 0.15;
   root.rotation.x = Math.sin(t * 0.17) * 0.08;
 
+  animGauges(dt, t);
   renderer.render(scene, camera);
+  linkFrame();
   perf.n++; perf.ms += performance.now() - now;
 }
 requestAnimationFrame(frame);
@@ -769,12 +842,13 @@ function animFx(dt, t) {
   comet.material.opacity += ((scan ? 0.75 : 0) - comet.material.opacity) * Math.min(1, dt * 3);
   comet.material.color.copy(accent);
   comet.visible = comet.material.opacity > 0.004;
-  const alarm = state === "alert" || bannerOn;
+  const heatHot = data.heat && (data.heat.level === "hot" || data.heat.level === "critical" || data.heat.temp >= 92);
+  const alarm = state === "alert" || bannerOn || heatHot;
   if (alarm && t > shockNext) {
     const m = shocks.find(x => x.userData.t < 0); if (m) m.userData.t = 0;
     shockNext = t + 1.5;
   }
-  const col = bannerLevel === "bad" ? BAD : ALERT;
+  const col = bannerLevel === "bad" || heatHot ? BAD : ALERT;
   for (const m of shocks) {
     if (m.userData.t < 0) continue;
     m.userData.t += dt / 1.6;
@@ -1041,8 +1115,82 @@ function drawLinks() {
   // 額度卡被拖走了就不再跟著它（回 CSS 預設位置），自己被拖過就照自己的
   const moved = id => !!(layout && layout[id] && layout[id].ah);
   if (!autoOn && !moved("cardSys")) $("cardSys").style.top = !document.body.classList.contains("stack") && u.height && !moved("cardUsage") ? Math.round(u.bottom + 12) + "px" : "";
-  $("lkStatic").innerHTML = ["cardUsage", "cardTeam", "cardSys"].map(id => linkPath($(id))).join("");
+  // 卡片位置在事件時量一次（拖、縮放、顯示／隱藏），每格只算目標點（球在轉）
+  const stackAsk = document.body.classList.contains("stack") && document.body.classList.contains("asking");
+  for (const id of ["cardUsage", "cardTeam", "cardSys"]) {
+    const el = $(id);
+    linkRect[id] = el.classList.contains("on") && getComputedStyle(el).display !== "none" && !stackAsk ? el.getBoundingClientRect() : null;
+  }
+  linkRect.pop = popEl.classList.contains("on") ? popEl.getBoundingClientRect() : null;
 }
+/* 11-22 拉線指向真資料：額度卡→額度環 5 小時尖端、外環卡→溫度環尖端（沒溫度就背景工作弧）、戰情卡→那個 session 的衛星
+   （滑鼠在哪一列就指哪顆；沒有就指最需要注意的：需要你 > 卡住 > 進行中）、事件卡→講到的那個東西 */
+const linkRect = {};
+let rowSid = null, popTarget = null, popFresh = false;
+$("lkStatic").innerHTML = ["cardUsage", "cardTeam", "cardSys"].map(id => `<path id="lp_${id}"/><circle id="lc_${id}" r="2.6"/><circle id="lr_${id}" r="6" style="fill:none;stroke-width:1"/><text id="lt_${id}"></text>`).join("");
+$("lkPop").innerHTML = `<path id="lp_pop" class="pop"/><circle id="lc_pop" class="pop" r="2.6"/><circle id="lr_pop" class="pop" r="6" style="fill:none;stroke-width:1"/><text id="lt_pop"></text>`;
+/** 尖端的標籤：指到的東西是什麼、多少 */
+function labelOf(key) {
+  const name = sid => (data.team || []).find(c => c.sessionId === sid)?.name || "";
+  if (key === "5h" || key === "cardUsage") return data.five_hour == null ? "" : `5H ${Math.round(data.five_hour)}%`;
+  if (key === "7d") return data.seven_day == null ? "" : `7D ${Math.round(data.seven_day)}%`;
+  if (key === "heat" || key === "cardSys") return data.heat?.temp == null ? "" : `${Math.round(data.heat.temp)}°C`;
+  if (key === "cardTeam") return name(teamFocus());
+  return key ? name(key) : "";
+}
+const _sv = new THREE.Vector3();
+function toScreen(v) { if (!v) return null; _sv.copy(v).project(camera); return _sv.z > 1 ? null : { x: (_sv.x + 1) / 2 * innerWidth, y: (1 - _sv.y) / 2 * innerHeight }; }
+function satPoint(sid) { const s = sid && sats.get(sid); return s ? s.mesh.getWorldPosition(_sv) && toScreen(s.mesh.getWorldPosition(new THREE.Vector3())) : null; }
+function teamFocus() {
+  if (rowSid && sats.has(rowSid)) return rowSid;
+  const team = data.team || [];
+  for (const st of ["需要你", "卡住", "進行中"]) { const c = team.find(c => c.status === st && sats.has(c.sessionId)); if (c) return c.sessionId; }
+  return team.find(c => sats.has(c.sessionId))?.sessionId || null;
+}
+function targetOf(key) {
+  if (key === "5h" || key === "cardUsage") return toScreen(gaugeTip(g5));
+  if (key === "7d") return toScreen(gaugeTip(g7));
+  if (key === "heat" || key === "cardSys") return toScreen(gaugeTip(gHeat));
+  if (key === "cardTeam") return satPoint(teamFocus());
+  return key ? satPoint(key) : null;
+}
+function setLink(id, rect, pt, cls) {
+  const p = $("lp_" + id), c = $("lc_" + id), r = $("lr_" + id);
+  const tx = $("lt_" + id);
+  if (!rect || !pt) { p.setAttribute("d", ""); c.setAttribute("r", 0); r.setAttribute("r", 0); tx.textContent = ""; return; }
+  const cl = (v, a, z) => Math.max(a, Math.min(z, v));
+  // 卡片在目標左／右＝從側邊水平出來 26px 再直接接到目標；目標在卡片正上／下＝從上／下緣出來
+  const side = pt.x < rect.left || pt.x > rect.right;
+  const ex = side ? (pt.x < rect.left ? rect.left : rect.right) : cl(pt.x, rect.left + 18, rect.right - 18);
+  const ey = side ? cl(pt.y, rect.top + 18, rect.bottom - 18) : (pt.y < rect.top ? rect.top : rect.bottom);
+  const kx = side ? ex + (pt.x < ex ? -26 : 26) : ex, ky = side ? ey : ey + (pt.y < ey ? -18 : 18);
+  p.setAttribute("d", `M${ex.toFixed(1)},${ey.toFixed(1)} L${kx.toFixed(1)},${ky.toFixed(1)} L${pt.x.toFixed(1)},${pt.y.toFixed(1)}`);
+  c.setAttribute("cx", pt.x.toFixed(1)); c.setAttribute("cy", pt.y.toFixed(1)); c.setAttribute("r", 2.6);
+  r.setAttribute("cx", pt.x.toFixed(1)); r.setAttribute("cy", pt.y.toFixed(1)); r.setAttribute("r", 6);
+  if (cls != null) for (const e of [p, c, r, tx]) e.setAttribute("class", cls);
+  // 標籤放在尖端「離卡片遠的那一側」，不壓到線
+  const lbl = labelOf(id === "pop" ? popTarget : id), away = pt.x >= kx ? 1 : -1;
+  if (tx.textContent !== lbl) tx.textContent = lbl;
+  tx.setAttribute("x", (pt.x + away * 10).toFixed(1)); tx.setAttribute("y", (pt.y - 8).toFixed(1));
+  tx.setAttribute("text-anchor", away > 0 ? "start" : "end");
+}
+function linkFrame() {
+  gaugeSide(g5, linkRect.cardUsage); gaugeSide(g7, linkRect.cardUsage); gaugeSide(gHeat, linkRect.cardSys || linkRect.cardUsage);
+  for (const id of ["cardUsage", "cardTeam", "cardSys"]) {
+    const lvl = id === "cardUsage" ? (data.five_hour >= 70 ? "warn" : "") : id === "cardSys" ? (data.heat && (data.heat.level === "hot" || data.heat.level === "critical") ? "bad" : "") : "";
+    setLink(id, linkRect[id], targetOf(id), lvl);
+  }
+  const lvl = popEl.classList.contains("bad") ? "bad" : popEl.classList.contains("warn") ? "warn" : "";
+  setLink("pop", linkRect.pop, linkRect.pop ? targetOf(popTarget) || ballEdge(linkRect.pop) : null, "pop " + lvl);
+  if (popFresh && linkRect.pop) {       // 剛彈出：線從卡片畫到目標
+    popFresh = false; const path = $("lp_pop"), L = path.getTotalLength() || 1;
+    path.style.transition = "none"; path.style.strokeDasharray = L * 3; path.style.strokeDashoffset = L;
+    requestAnimationFrame(() => { path.style.transition = ""; path.style.strokeDashoffset = 0; });
+  }
+}
+function ballEdge(rect) { const { cx, cy, r } = sphereScreen(), x = rect.left + rect.width / 2, y = rect.top + rect.height / 2, a = Math.atan2(y - cy, x - cx); return { x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r }; }
+$("teamRows").addEventListener("mouseover", e => { const row = e.target.closest(".row"); const c = row && (data.team || [])[+row.dataset.i]; rowSid = c?.sessionId || null; });
+$("teamRows").addEventListener("mouseleave", () => { rowSid = null; });
 addEventListener("resize", () => { drawLinks(); if (popEl.classList.contains("on")) drawPopLink(); });
 
 /* v5 ② 事件卡：唸到誰就從球拉一條線彈出誰（session／額度／溫度／隊長） */
@@ -1056,7 +1204,7 @@ function sessionPop(c) {
 }
 function usagePop(which) {
   const v = which === "7d" ? data.seven_day : data.five_hour, rs = which === "7d" ? data.seven_reset : data.five_reset, f = forecast();
-  return { level: v >= 90 ? "bad" : "warn", side: "l", flash: "cardUsage",
+  return { level: v >= 90 ? "bad" : "warn", side: "l", flash: "cardUsage", target: which === "7d" ? "7d" : "5h",
     html: `<div class="k">USAGE · ${which === "7d" ? "THIS WEEK" : "5 HOURS"}</div><div class="head"><span>${which === "7d" ? "這週額度" : "5 小時額度"}</span><b style="color:${lvlCol(v)}">${pct(v)}</b></div>
       <div class="meter seg" style="margin:0 0 6px"><b style="width:${Math.min(100, v ?? 0)}%;background-color:${lvlCol(v)}"></b></div>
       ${rs != null ? `<div class="ln"><span class="t">重置</span>${hm(rs)} 後</div>` : ""}${which === "5h" && f && !f.calm ? `<div class="ln"><span class="t">預估</span>${f.before ? `${hm(f.left)} 後用完` : "撐得到重置"}</div>` : ""}` };
@@ -1064,20 +1212,14 @@ function usagePop(which) {
 function showPop(p) {
   clearTimeout(popTimer);
   popEl.className = `card pop ${p.side || "r"} ${p.level || ""}`;
-  popEl.innerHTML = p.html; popSid = p.sid || null;
+  popEl.innerHTML = p.html; popSid = p.sid || null; popTarget = p.target || p.sid || null;
   if (p.flash) { $(p.flash).classList.remove("flash"); void $(p.flash).offsetWidth; $(p.flash).classList.add("flash"); }
   requestAnimationFrame(() => { popEl.classList.add("on"); drawPopLink(true); }); motionAt = performance.now();
 }
-function drawPopLink(fresh) {
-  const lvl = popEl.classList.contains("bad") ? "bad" : popEl.classList.contains("warn") ? "warn" : "";
-  const g = $("lkPop"); g.innerHTML = linkPath(popEl, "pop " + lvl);
-  const path = g.querySelector("path"); if (!path || !fresh) return;
-  const L = path.getTotalLength(); path.style.strokeDasharray = L; path.style.strokeDashoffset = L;
-  requestAnimationFrame(() => { path.style.strokeDashoffset = 0; });
-}
+function drawPopLink(fresh) { linkRect.pop = popEl.classList.contains("on") ? popEl.getBoundingClientRect() : null; if (fresh) popFresh = true; }
 function hidePop(after = 0) {
   clearTimeout(popTimer);
-  popTimer = setTimeout(() => { popEl.classList.remove("on"); $("lkPop").innerHTML = ""; popSid = null; }, after);
+  popTimer = setTimeout(() => { popEl.classList.remove("on"); linkRect.pop = null; popSid = null; popTarget = null; }, after);
 }
 popEl.addEventListener("click", () => { if (popSid) post({ action: "focus", sessionId: popSid }); hidePop(); });
 
@@ -1200,7 +1342,7 @@ function quota() {
     heatSaid = Date.now();
     const t = Math.round(data.heat.temp);
     announce(`機器現在 ${t} 度，有點熱，動畫先降速。`, { auto: true, banner: { level: "bad", icon: "heat", tag: "溫度 · THERMAL", source: "COOL42", title: `機器 ${t}°C`, sub: "動畫降速中，重的工作可以晚點再跑" },
-      pop: { level: "bad", side: "l", html: `<div class="k">THERMAL · COOL42</div><div class="head"><span>機器溫度</span><b style="color:var(--bad)">${t}°C</b></div><div class="meter seg"><b style="width:${Math.min(100, Math.max(2, (t - 35) / 65 * 100))}%;background-color:var(--bad)"></b></div>` } });
+      pop: { level: "bad", side: "l", target: "heat", html: `<div class="k">THERMAL · COOL42</div><div class="head"><span>機器溫度</span><b style="color:var(--bad)">${t}°C</b></div><div class="meter seg"><b style="width:${Math.min(100, Math.max(2, (t - 35) / 65 * 100))}%;background-color:var(--bad)"></b></div>` } });
   }
   if (data.heat) heatWas = !!hot;
 }
