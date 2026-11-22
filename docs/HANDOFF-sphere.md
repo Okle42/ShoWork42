@@ -144,6 +144,16 @@
 - 同日：7D 尖端也標 %（`lt_g7`，跟 5H 太近就錯開一行）
 - 硬碟標籤被工具列蓋住：avoidCards 把工具列（含上緣以上）當障礙物，往下找空位（11-23 修）
 
+## Orbit42 接手（11-23，Keng：Orbit42 取代 ShoWorkAgent、球體整套搬過去）
+- 規劃 docs/PLAN-SPHERE-OS.md；新 App 在 ~/github-repos/Orbit42（公開 repo Okle42/Orbit42，規格 docs/SPEC.md）
+- ShoWorkAgent 拆成函式庫 **ShoWorkApp**（Sources/ShoWorkApp，原 main.swift → AgentMain.swift 的 `ShoWorkAgentMain.run(AgentOptions)`）；執行檔只剩一行
+- `SphereEmbed`（ShoWorkApp/SphereEmbed.swift）：`makeView()` 完整球體（sphere.html?orbit=1，多「＋ 新衛星」）、`openSession`（點衛星交給宿主）、`newSatellite`
+- AgentOptions：regularApp、waitForAccessibility（Orbit42 不等輔助使用）、testOnly（螢幕外測試、不開 socket、不碰正在跑的 ShoWorkAgent）
+- Orbit42 開著時 `launchctl bootout ai.okle42.showork.agent`，結束時 bootstrap 回來（AgentSwap）
+- 本機開發 Orbit42 要用這個 worktree 的 ShoWorkApp：`cd ~/github-repos/Orbit42 && swift package edit ShoWork42 --path ~/github-repos/_wt-ShoWork42-sphere`（Packages/ 已忽略；推之前 unedit）
+- 測試：`ORBIT_OFFSCREEN=1 SHOWORK_TEST_SPHERE_SHOT=<png> SHOWORK_TEST_SPHERE_JS=<點＋新衛星> ORBIT_TEST_JS=<打字> ORBIT_TEST_SHOT=<png> ORBIT_TEST_SHOT_DELAY=55 ORBIT_TEST_QUIT=1 .build/debug/Orbit42`（實測：Claude 回「好」）
+- 待辦：Orbit42 自己的輔助使用／麥克風／語音辨識授權（新身分要重新授權）、.app 打包與安裝程式切換（S5）、S2 大腦接口、S3 登入
+
 ## 字幕跟語音（11-22）
 - 開語音時 `say(..., follow=true)`：不先打字，等原生報「唸到哪」才出字（Mac：逐詞 marker＋合成完算出總長後的播放進度；微軟：播放進度）；`karaVoice('start')` 後 1.2 秒沒同步才退回照速度打字
 

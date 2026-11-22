@@ -10,6 +10,9 @@ export const PRESETS = {
     codeComment: 'blackBright', link: 'redBright', path: 'white', number: 'whiteBright', quote: 'white',
     rule: 'blackBright', tableRule: 'blackBright', bullet: 'red', diagram: 'white', diagramText: 'whiteBright',
     diffAdded: 'green', diffRemoved: 'red',
+    // 11-23 Keng：對話框（你的提問框、Claude 的回覆框、提示框）也走黑白灰紅，終端機深淺切換時跟著變
+    promptBorder: 'white', promptText: 'whiteBright', replyBorder: 'red',
+    alertNote: 'white', alertTip: 'white', alertImportant: 'whiteBright', alertWarning: 'red', alertCaution: 'redBright',
   },
   'catppuccin-mocha': {
     accent: '#cba6f7', heading: '#f9e2af', tableHeader: '#f9e2af', strong: '#ffffff', emphasis: '#f5c2e7',
