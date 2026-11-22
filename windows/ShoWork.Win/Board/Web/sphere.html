@@ -824,17 +824,24 @@ function decode(el, target, ms = 420) {
   }, 33);
 }
 let typing = false, typeTimer = null;
-function say(text, ms = 70) {
+// follow＝有開語音：字幕不自己先打字（11-22 Keng：字幕跑在語音前面、還停下來等語音），
+// 等原生端報「唸到哪」（Mac 語音的逐詞 marker、播放進度）才出字；語音開始 1.2 秒都沒同步才退回照速度打字
+let followTimer = null, startType = null;
+function say(text, ms = 70, follow = false) {
   return new Promise(res => {
-    clearInterval(typeTimer); typing = true; capFull = text; capShown = 0; capWord = null; capSynced = false;
+    clearInterval(typeTimer); clearTimeout(followTimer); typing = true; capFull = text; capShown = 0; capWord = null; capSynced = false;
     const el = $("capText"), bar = $("capBar"); let i = 0;
-    el.textContent = "";
-    typeTimer = setInterval(() => {
-      if (capSynced) return;                           // v5：原生端在報「唸到哪」，改由它推進
-      i++; capPaint(i); bar.style.width = (i / text.length * 100) + "%";
-      if (i >= text.length) { clearInterval(typeTimer); typing = false; setTimeout(res, 600); }
-    }, ms);
-    capDone = () => { clearInterval(typeTimer); typing = false; capPaint(text.length); bar.style.width = "100%"; setTimeout(res, 500); };
+    el.textContent = ""; bar.style.width = "0%";
+    startType = () => {
+      startType = null; clearInterval(typeTimer);
+      typeTimer = setInterval(() => {
+        if (capSynced) return;                           // v5：原生端在報「唸到哪」，改由它推進
+        i = Math.max(i, capShown) + 1; capPaint(i); bar.style.width = (i / text.length * 100) + "%";
+        if (i >= text.length) { clearInterval(typeTimer); typing = false; setTimeout(res, 600); }
+      }, ms);
+    };
+    if (follow) capPaint(0); else startType();
+    capDone = () => { clearInterval(typeTimer); clearTimeout(followTimer); startType = null; typing = false; capPaint(text.length); bar.style.width = "100%"; setTimeout(res, 500); };
   });
 }
 /* v5 ⑤ 字幕逐詞同步：唸過的亮、正在唸的粉、還沒唸的暗；尾巴一個閃爍游標 */
@@ -859,7 +866,11 @@ let deskOn = false;          // 桌面版開著（原生端 karaPrefs.mini）：
 let voicing = false, voiceDone = null;
 window.karaVoice = (ev, loc, len) => {
   if (ev === "word") { wordPulse = 1; if (loc != null) capSync(loc + (len || 1), [loc, len || 1]); }
-  else if (ev === "start") voicing = true;
+  else if (ev === "start") {
+    voicing = true;
+    // 語音真的開始了：1.2 秒內沒收到「唸到哪」就退回照速度打字（保險，正常會先收到）
+    clearTimeout(followTimer); followTimer = setTimeout(() => { if (!capSynced) startType?.(); }, 1200);
+  }
   else if (ev === "end") { voicing = false; capWord = null; const f = voiceDone; voiceDone = null; f?.(); }
 };
 function renderVoice() {
@@ -879,7 +890,7 @@ $("voice").onclick = () => {
 // 一句話：打字＋（有開語音就）唸；唸完或打完才往下
 async function speak(text, mute = false) {
   const v = voiceOn && host() && !mute;
-  const typed = say(text, v ? 110 : 70);
+  const typed = say(text, v ? 110 : 70, v);
   if (v) {
     const spoken = new Promise(r => { voiceDone = r; setTimeout(r, 4000 + text.length * 350); });   // 保險：原生端沒回 end 也會往下
     post({ action: "speak", text });
@@ -1011,7 +1022,9 @@ function linkPath(el, cls = "") {
 function drawLinks() {
   // 外環卡接在額度卡下面（額度卡 v5 變高了，不能再用固定位置）
   const u = $("cardUsage").getBoundingClientRect();
-  if (!document.body.classList.contains("stack") && u.height && !(layout && layout.cardSys)) $("cardSys").style.top = Math.round(u.bottom + 12) + "px";
+  // 額度卡被拖走了就不再跟著它（回 CSS 預設位置），自己被拖過就照自己的
+  const moved = id => !!(layout && layout[id] && layout[id].ah);
+  if (!moved("cardSys")) $("cardSys").style.top = !document.body.classList.contains("stack") && u.height && !moved("cardUsage") ? Math.round(u.bottom + 12) + "px" : "";
   $("lkStatic").innerHTML = ["cardUsage", "cardTeam", "cardSys"].map(id => linkPath($(id))).join("");
 }
 addEventListener("resize", () => { drawLinks(); if (popEl.classList.contains("on")) drawPopLink(); });
@@ -1510,16 +1523,34 @@ var layout = {};
 try { layout = JSON.parse(localStorage.getItem(LKEY) || "{}") || {}; } catch {}
 const saveLayout = () => { try { localStorage.setItem(LKEY, JSON.stringify(layout)); } catch {} };
 const topMin = () => DESK ? 36 : 0;
+// 11-22 Keng：調視窗大小時面板要跟著移動、不要跑版 ⇒ 位置記成「靠哪一邊」：
+//   靠左／靠上（離邊 < 20%）＝記跟那一邊的距離；靠右／靠下＝記跟右／下邊的距離；在中間＝記中心點在畫面的比例
+//   視窗一變就照這個重新擺，而且整個面板一定在畫面內（面板比視窗大就先縮）
+const M = 8;
+function anchorOf(a, size, view) {                 // a＝左（上）緣位置
+  const far = view - a - size;
+  if (a < view * 0.2) return ["s", Math.round(a)];
+  if (far < view * 0.2) return ["e", Math.round(far)];
+  return ["c", +((a + size / 2) / view).toFixed(4)];
+}
+function fromAnchor(an, size, view, min) {
+  const a = an[0] === "s" ? an[1] : an[0] === "e" ? view - size - an[1] : an[1] * view - size / 2;
+  return Math.max(min, Math.min(view - size - M, a));
+}
 function place(id) {
   const el = $(id), L = layout[id]; if (!L) return;
-  if (L.w) el.style.width = L.w + "px";
-  if (L.h) { el.style.height = L.h + "px"; el.style.maxHeight = "none"; }
-  if (L.x == null) return;
-  const w = el.offsetWidth || L.w || 240;
-  // 至少留 60px 在畫面裡（視窗縮小後面板不會跑到外面找不到）
-  el.style.left = Math.max(60 - w, Math.min(innerWidth - 60, L.x)) + "px";
-  el.style.top = Math.max(topMin(), Math.min(innerHeight - 40, L.y)) + "px";
+  if (L.x != null && !L.ah) { L.ah = anchorOf(L.x, el.offsetWidth, innerWidth); L.av = anchorOf(L.y, el.offsetHeight, innerHeight); }   // 舊格式
+  if (L.w) el.style.width = Math.min(L.w, innerWidth - 2 * M) + "px";
+  if (L.h) { el.style.height = Math.min(L.h, innerHeight - topMin() - 2 * M) + "px"; el.style.maxHeight = "none"; }
+  if (!L.ah) return;
+  el.style.left = fromAnchor(L.ah, el.offsetWidth, innerWidth, M) + "px";
+  el.style.top = fromAnchor(L.av, el.offsetHeight, innerHeight, topMin() + M) + "px";
   el.style.right = "auto"; el.style.bottom = "auto"; el.style.transform = "none";
+}
+function remember(id) {
+  const el = $(id), r = el.getBoundingClientRect();
+  layout[id] = { ...layout[id], ah: anchorOf(r.left, r.width, innerWidth), av: anchorOf(r.top, r.height, innerHeight) };
+  delete layout[id].x; delete layout[id].y;
 }
 let resizing = false;
 for (const id of PANELS) {
@@ -1535,25 +1566,27 @@ for (const id of PANELS) {
     el.classList.add("dragging");
     let x = r.left, y = r.top;
     const move = ev => {
-      x = Math.max(60 - r.width, Math.min(innerWidth - 60, ev.clientX - dx)); y = Math.max(topMin(), Math.min(innerHeight - 40, ev.clientY - dy));
+      x = Math.max(M, Math.min(innerWidth - r.width - M, ev.clientX - dx)); y = Math.max(topMin() + M, Math.min(innerHeight - r.height - M, ev.clientY - dy));
       el.style.left = x + "px"; el.style.top = y + "px"; el.style.right = "auto"; el.style.bottom = "auto"; el.style.transform = "none";
       drawLinks();
     };
     const up = () => {
       el.removeEventListener("pointermove", move); el.removeEventListener("pointerup", up); el.removeEventListener("pointercancel", up);
       el.classList.remove("dragging");
-      layout[id] = { ...layout[id], x: Math.round(x), y: Math.round(y) }; saveLayout(); drawLinks();
+      remember(id); saveLayout(); drawLinks();
     };
     el.addEventListener("pointermove", move); el.addEventListener("pointerup", up); el.addEventListener("pointercancel", up);
   });
   // 拉右下角調大小：瀏覽器改的是 style.width／height ⇒ 放開時記下來
-  new ResizeObserver(() => { drawLinks(); }).observe(el);
+  // 內容變多／變少（卡片剛拿到資料、選項面板換題）：靠右／靠下的面板要重新擺，才不會被撐出畫面
+  new ResizeObserver(() => { if (layout[id]?.ah && !el.classList.contains("dragging") && !resizing) place(id); drawLinks(); }).observe(el);
 }
 addEventListener("pointerup", () => {
   if (!resizing) return; resizing = false;
   for (const id of PANELS) { const el = $(id); if (el.style.width || el.style.height) {
     layout[id] = { ...layout[id], w: Math.round(el.offsetWidth), h: Math.round(el.offsetHeight) };
     el.style.maxHeight = "none";
+    if (layout[id].ah) remember(id);
   } }
   saveLayout();
 }, true);

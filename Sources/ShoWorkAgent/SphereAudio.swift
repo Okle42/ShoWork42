@@ -171,7 +171,9 @@ final class SphereAudio {
         if let nt = player.lastRenderTime, let pt = player.playerTime(forNodeTime: nt) { pos = max(0, pt.sampleTime) }
         while let m = markers.first, m.frame <= pos { markers.removeFirst(); onWord?(m.loc, m.len) }
         lock.lock(); let l = latest; lock.unlock()
-        onLevels?(l.bands, l.rms, Double(pos) / f.sampleRate, duration)
+        // Mac 語音邊合成邊播、一開始不知道總長；合成比播放快很多，合成完就知道了 ⇒ 網頁可以照播放進度出字（逐詞 marker 再補準）
+        let total = duration ?? (synthDone ? Double(scheduled) / f.sampleRate : nil)
+        onLevels?(l.bands, l.rms, Double(pos) / f.sampleRate, total)
         if synthDone && pos >= scheduled {
             // 唸完：剩下的 marker 一次補完，讓字幕停在整句
             for m in markers { onWord?(m.loc, m.len) }
