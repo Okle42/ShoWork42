@@ -1,6 +1,6 @@
 # 球體助理（戰情中心第四個分頁）交接
 
-最後更新：2026-11-22（Bella，球體桌面版）
+最後更新：2026-11-22 下午（Bella，球體外圍量表、命名、背景 session 清理）
 分支：`bella/sphere-tab`，worktree：`~/github-repos/_wt-ShoWork42-sphere`。**沒有 push**（push 要 Keng／隊長轉述核可）。
 本機已安裝：c4b5401（`board/installed.json`）。
 
@@ -65,6 +65,22 @@
 ## 面板開關與原子環（11-22）
 - 額度／外環／戰情卡可關：卡片右上 ×、工具列「面板」選單（`.off`，存 `sphere.hide.tab／desk`）；關掉的卡不排版、不拉線；桌面版窄時早報／收工／時間軸收進這個選單
 - 三個斜環（arcRing 有傾角的）外包 pivot，各自繞不同軸翻轉（`pivot.userData.axis／w`），像原子軌道；平的那圈不動
+
+## 外圍量表（11-22 下午）
+- 同心分層 `LAYER(k) = 2.96 + 0.1k`：由內到外 5H(0) → 7D(1) → 硬碟 1…4(2–5，右半邊 12 點→6 點，`dAng`) → 溫度(6，左半邊 6 點→12 點，`gAng`)；背景工作弧在最外圈
+- 硬碟資料：原生端 `SphereDisks.read()`（內建＋/Volumes 可見、排除 Recovery），payload `disks:[{name, used, freeGB, totalGB}]`；外環卡多 DISK 列
+- 顏色：每格照位置漸層 白→灰→黑→紅（`RAMP_AT` 0／0.4／0.7／0.85，`THEME3.ramp` 深淺主題各一組，深色的黑用深灰、淺色的白用淺灰）；警示波紋擴散時同一組漸層、最外圈紅後淡出
+- 尖端：紅心黑圈準星＋標籤（名稱固定 ink、只有超標數字紅、一般粗細）；硬碟標籤放最外圈外側、太近錯開；`avoidCards()` 撞到卡片就翻邊／上下挪
+- 點環或標籤：額度環→額度卡；溫度、硬碟環→外環卡；點衛星→戰情卡＋那一列閃
+- 衛星：滑鼠指到的那顆停住，其他衛星與原子環減速到約 15%（`satSlow`、`s.slow`）；測試入口 `window.karaSats()`
+- 配色多一檔 ☀ 日出日落（`sunTimes()` 台北座標本機算，每分鐘檢查）；測試 `window.karaSun(iso)`
+- 工具列 `fitTools()`：不夠寬就 tight → tighter → tightest 逐級收
+
+## 戰情中心：命名與背景 session（11-22 下午，動到 ShoWorkCore／showork CLI）
+- 顯示名：有職稱用職稱（`showork role <職稱>`），沒有就「專案 · 任務」（家目錄只顯示任務）；英文名只當收件地址（`BoardCard.display／label`）
+- 停放到背景（終端機 `parkedJobId` → 背景 `jobId`）：背景沿用終端機的英文名；空殼不上看板、不算活著
+- Claude 背景常駐程式的預備程序（daemon.log `bg spawned <id> (spare)`：bg、沒名字、沒對話）不上看板
+- `BgJanitor`：背景、從沒接過工作、閒置 10 分鐘 ⇒ `claude stop`（kill 會被重開）；做過事、/clear 過、比監看早出生、有自報卡都不動；記錄 `board/guard/bg-janitor.log`
 
 ## 字幕跟語音（11-22）
 - 開語音時 `say(..., follow=true)`：不先打字，等原生報「唸到哪」才出字（Mac：逐詞 marker＋合成完算出總長後的播放進度；微軟：播放進度）；`karaVoice('start')` 後 1.2 秒沒同步才退回照速度打字
