@@ -380,7 +380,8 @@ enum GhosttyTheme {
         lastMode = (mode, now)
         // 11-22 Keng 截圖：終端機切淺色後 Claude Code 的介面（框、表格、灰字）還是深色版 ⇒ 淺底上看不清楚。
         // 所以只有 Claude Code 自己也設成淺色主題（~/.claude.json theme 以 light 開頭）時才讓終端機跟著變淺；否則一律深色
-        let ccLight = ((try? JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: NSHomeDirectory() + "/.claude.json")))) as? [String: Any])?["theme"]
+        // 主題設定以 ~/.claude/settings.json 為準（11-22 實查：那裡寫著 "dark"，~/.claude.json 的不算數）
+        let ccLight = ((try? JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: NSHomeDirectory() + "/.claude/settings.json")))) as? [String: Any])?["theme"]
             .flatMap { $0 as? String }.map { $0.hasPrefix("light") || $0 == "auto" } == true      // auto＝Claude Code 跟著終端機深淺
         // 已經開著的 Claude Code 是用舊主題（深色）畫的，要重開才會吃到 auto ⇒ 還有「主題改成 auto 之前開的」session 活著就先維持深色
         let since = sinceAuto(ccLight)
