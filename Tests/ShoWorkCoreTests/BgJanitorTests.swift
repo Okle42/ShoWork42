@@ -123,3 +123,10 @@ struct InheritNameTests {
         #expect(Nicknames.inherited(head("clear-conversation")) == nil)        // Claude 自動標題不是英文名
     }
 }
+
+@Suite("DisplayName2")
+struct DisplayName2Tests {
+    @Test func worktreePrefixStripped() {
+        #expect(Nicknames.label(nil, project: "_wt-ShoWork42-sphere") == "ShoWork42-sphere")
+    }
+}

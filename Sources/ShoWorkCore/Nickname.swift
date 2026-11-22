@@ -65,7 +65,8 @@ public enum Nicknames {
     /// 11-22 Keng：畫面上不再顯示英文人名（英文名只當收件地址）⇒ 顯示名＝職稱，沒有職稱就用專案（家目錄不算專案）
     public static func label(_ n: Nickname?, project: String) -> String? {
         if let r = n?.role?.trimmingCharacters(in: .whitespaces), !r.isEmpty { return r }
-        return project == "（家目錄）" || project.isEmpty ? nil : project
+        if project == "（家目錄）" || project.isEmpty { return nil }
+        return project.hasPrefix("_wt-") ? String(project.dropFirst(4)) : project      // worktree 資料夾 _wt-ShoWork42-sphere → ShoWork42-sphere
     }
     /// 卡片標題：「職稱／專案 · 任務」；沒有職稱又在家目錄就只有任務；還沒自報過任務就接原本的標題
     public static func title(_ n: Nickname?, project: String = "（家目錄）", fallback: String) -> String {
