@@ -947,14 +947,16 @@ function animFx(dt, t) {
     const m = shocks.find(x => x.userData.t < 0); if (m) m.userData.t = 0;
     shockNext = t + 1.5;
   }
-  const col = bannerLevel === "bad" || heatHot ? BAD : ALERT;
   for (const m of shocks) {
     if (m.userData.t < 0) continue;
     m.userData.t += dt / 1.6;
     const k = m.userData.t;
     if (k >= 1) { m.userData.t = -1; m.material.opacity = 0; m.visible = false; continue; }
     m.visible = true;
-    m.scale.setScalar(1.7 + k * 2.4); m.material.opacity = 0.7 * (1 - k) * (1 - k); m.material.color.copy(col);
+    // 11-22 Keng：邊擴散邊變色（跟量表同一組 白→灰→黑→紅），擴到最外圈是紅的，最後一段才淡掉
+    m.scale.setScalar(1.7 + k * 2.4);
+    rampColor(Math.min(1, k / 0.8), m.material.color);
+    m.material.opacity = k < 0.8 ? 0.75 : 0.75 * (1 - k) / 0.2;
   }
 }
 const rgb3 = c => `${Math.round(c.r * 255)},${Math.round(c.g * 255)},${Math.round(c.b * 255)}`;
