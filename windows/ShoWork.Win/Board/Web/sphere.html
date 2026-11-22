@@ -1394,7 +1394,9 @@ function targetOf(key) {
 /* 11-22 Keng「SD128B 標籤避開戰情卡」：標籤框跟任何一張開著的卡片重疊 ⇒ 改放到尖端另一側；兩邊都撞就往上下找空位 */
 function avoidCards() {
   const cards = ["cardUsage", "cardTeam", "cardSys"].map(id => linkRect[id]).filter(Boolean);
-  if (!cards.length) return;
+  // 11-23 Keng：硬碟尖端轉到 12 點方向時標籤被工具列蓋住／跑出畫面上緣 ⇒ 工具列（含上面整條）也當障礙物
+  const bar = (DESK ? $("deskBar") : $("tools"))?.getBoundingClientRect();
+  cards.push({ left: -1e4, right: 1e4, top: -1e4, bottom: Math.max(bar?.bottom || 0, 0) + 4 });
   const hit = b => cards.some(r => b.x < r.right && b.x + b.width > r.left && b.y < r.bottom && b.y + b.height > r.top);
   for (const id of ["cardUsage", "g7", "cardSys", "disk0", "disk1", "disk2", "disk3"]) {
     const t = $("lt_" + id), c = $("lc_" + id); if (!t?.textContent || !c) continue;
@@ -1403,7 +1405,7 @@ function avoidCards() {
     t.setAttribute("text-anchor", right ? "end" : "start"); t.setAttribute("x", (px + (right ? -10 : 10)).toFixed(1));
     if (!hit(t.getBBox())) continue;
     const y0 = +t.getAttribute("y");
-    for (const dy of [-16, 16, -32, 32, -48, 48]) { t.setAttribute("y", (y0 + dy).toFixed(1)); if (!hit(t.getBBox())) break; }
+    for (const dy of [-16, 16, -32, 32, -48, 48, 64, 80]) { t.setAttribute("y", (y0 + dy).toFixed(1)); if (!hit(t.getBBox())) break; }
   }
 }
 /* 11-22 Keng：標籤的名稱一律黑（深色主題白），只有超過門檻時「數字」變紅（SD128 黑、87% 紅） */
