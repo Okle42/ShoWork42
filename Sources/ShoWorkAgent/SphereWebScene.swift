@@ -288,6 +288,7 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
         let heat = CityParse.cool42(FileManager.default.contents(atPath: HeatGate.cool42Path), now: Date())
         var o = Self.payload(model.cards, model.rateLimits, runs: model.runs, heat: heat)
         o["paused"] = HeatGate.shared.paused
+        o["disks"] = SphereDisks.read()          // 11-22 Keng：球右半邊的硬碟空間刻度環
         // v4 A：隊長最後一句（網頁判斷是不是回覆剛交辦的事）
         if let l = model.captainThread.last(where: { $0.role == .captain }) {
             o["captain"] = ["id": l.id, "text": String(l.text.prefix(400)), "at": l.at.map { ISO8601DateFormatter().string(from: $0) } ?? ""]
@@ -355,6 +356,26 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
     }
 
     static func needsYou(_ c: BoardCard) -> Bool { !c.asks.isEmpty || c.permit != nil }
+}
+
+/// 11-22 Keng：球右半邊的硬碟空間（每顆一圈）。只列看得到的實體硬碟：內建（/）＋ /Volumes 底下可瀏覽、不是 Recovery 的
+enum SphereDisks {
+    static func read() -> [[String: Any]] {
+        let keys: [URLResourceKey] = [.volumeNameKey, .volumeTotalCapacityKey, .volumeAvailableCapacityForImportantUsageKey, .volumeAvailableCapacityKey, .volumeIsBrowsableKey]
+        let urls = FileManager.default.mountedVolumeURLs(includingResourceValuesForKeys: keys, options: [.skipHiddenVolumes]) ?? []
+        var out: [[String: Any]] = []
+        for u in urls {
+            guard let v = try? u.resourceValues(forKeys: Set(keys)), v.volumeIsBrowsable != false, let total = v.volumeTotalCapacity, total > 1_000_000_000 else { continue }
+            let path = u.path
+            guard path == "/" || (path.hasPrefix("/Volumes/") && v.volumeName != "Recovery") else { continue }
+            // 可用空間：內建碟用「重要用途可用」（含可清除的，跟 Finder 一致）；外接碟用一般可用
+            let free = (path == "/" ? v.volumeAvailableCapacityForImportantUsage.map(Int.init) : nil) ?? v.volumeAvailableCapacity ?? 0
+            let used = max(0, min(100, Double(total - free) / Double(total) * 100))
+            out.append(["name": path == "/" ? "內建" : (v.volumeName ?? u.lastPathComponent), "used": used.rounded(),
+                        "freeGB": (Double(free) / 1e9).rounded(), "totalGB": (Double(total) / 1e9).rounded()])
+        }
+        return Array(out.prefix(4))
+    }
 }
 
 /// 11-22 使用者：按住空白鍵講話時聽到一堆嗶聲＝自動重複的空白鍵沒人收，macOS 每下嗶一聲（約 30 聲／秒，麥克風也錄進去）。
