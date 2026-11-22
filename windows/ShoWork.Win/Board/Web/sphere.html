@@ -672,12 +672,12 @@ function gaugeSide(g, rect) {
   const { cx } = sphereScreen(), f = rect.left + rect.width / 2 > cx ? -1 : 1;
   if (f !== g.flip) { g.flip = f; for (const m of [g.track, g.fill, g.tk, g.hit]) m.scale.x = f; }
 }
-// 11-22 Keng：外圍量表全部同心、每個一層（半徑都不同）：由內到外 5H → 7D → 溫度 → 硬碟 1…4，層距 0.1
+// 11-22 Keng：外圍量表全部同心、每個一層（半徑都不同）：由內到外 5H → 7D → 硬碟 1…4 → 溫度（最外層），層距 0.1
 const LAYER = r => 2.96 + r * 0.1;
 const g5 = gauge(LAYER(0), 0.055, 72, [0.7, 0.9]), g7 = gauge(LAYER(1), 0.055, 72, [0.8, 0.95]);
-const gHeat = gauge(LAYER(2), 0.055, 65, [(70 - 35) / 65, (85 - 35) / 65]);       // 一格＝1°C
+const gHeat = gauge(LAYER(6), 0.055, 65, [(70 - 35) / 65, (85 - 35) / 65]);       // 一格＝1°C
 // 硬碟環（右半邊，固定不翻）：最多 4 顆，一格 1%，85% 門檻刻線、超過變紅
-const gDisks = [3, 4, 5, 6].map(k => gauge(LAYER(k), 0.055, 100, [0.85, 0.95], dAng));
+const gDisks = [2, 3, 4, 5].map(k => gauge(LAYER(k), 0.055, 100, [0.85, 0.95], dAng));
 const heatDot = new THREE.Mesh(new THREE.CircleGeometry(0.05, 12), gmat(0)); outer.add(heatDot);
 const _tmpC = new THREE.Color();
 function heatCol(t) {             // 灰（≤55）→ 白（75）→ 紅（≥90）
@@ -1260,7 +1260,7 @@ function linkFrame() {
     const tl = [];
     gDisks.forEach((g, i) => {
       const t = $("lt_disk" + i); if (!t.textContent || g.target == null) return;
-      const a = g.ang(Math.max(0.004, Math.min(1, g.cur))), P = toScreen(_tip.set(Math.cos(a) * (LAYER(6) + 0.18), Math.sin(a) * (LAYER(6) + 0.18), 0).applyMatrix4(outer.matrixWorld));
+      const a = g.ang(Math.max(0.004, Math.min(1, g.cur))), P = toScreen(_tip.set(Math.cos(a) * (LAYER(5) + 0.18), Math.sin(a) * (LAYER(5) + 0.18), 0).applyMatrix4(outer.matrixWorld));
       if (P) tl.push({ t, x: P.x + 6, y: P.y + 4 });
     });
     tl.sort((a, b) => a.y - b.y);
