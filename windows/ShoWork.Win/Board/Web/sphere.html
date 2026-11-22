@@ -580,8 +580,9 @@ function syncSats(team) {
 // 11-22 Keng：點衛星要追著跑 ⇒ 滑鼠移到衛星軌道附近就減速到 15%，停在某顆衛星上就整個停住；移開再慢慢回到原速
 let satSlow = 1, pointerAt = null;
 function animSats(dt, t) {
+  // 11-22 Keng：只有指到的那顆停住；其他衛星和三個原子環一起減速（營造氣氛）
   let want = 1;
-  if (hovered) want = 0;
+  if (hovered) want = 0.15;
   else if (pointerAt && performance.now() - pointerAt.t < 4000) {
     const { cx, cy, r } = sphereScreen(), d = Math.hypot(pointerAt.x - cx, pointerAt.y - cy) / r;      // r＝半徑 2 單位的那圈
     if (d > 0.8 && d < 1.8) want = 0.15;          // 衛星軌道半徑 2.5–3.1 單位 ≈ 1.25–1.55 r，前後留餘裕
@@ -589,7 +590,8 @@ function animSats(dt, t) {
   satSlow += (want - satSlow) * Math.min(1, dt * (want < satSlow ? 8 : 2));      // 減速快、恢復慢
   for (const s of sats.values()) {
     const st = s.c?.status, speed = st === "進行中" ? 0.55 : st === "需要你" ? 0.25 : 0.12;
-    s.orbit.a += dt * speed * satSlow;
+    s.slow = (s.slow ?? 1) + ((s === hovered ? 0 : satSlow) - (s.slow ?? 1)) * Math.min(1, dt * 8);
+    s.orbit.a += dt * speed * s.slow;
     const x = Math.cos(s.orbit.a) * s.orbit.r, z = Math.sin(s.orbit.a) * s.orbit.r;
     for (const m of [s.mesh, s.halo, s.hit]) m.position.set(x, 0, z);
     const col = s.fade.step(); s.mesh.material.color.copy(col); s.halo.material.color.copy(col);
@@ -812,9 +814,9 @@ function frame(now) {
   shell.scale.setScalar(breathe);
   root.userData.hex.rotation.y += dt * root.userData.hex.userData.spin * cur.spin;
   for (const r of rings) {
-    r.rotateZ(dt * r.userData.speed * (0.4 + cur.spin));
+    r.rotateZ(dt * r.userData.speed * (0.4 + cur.spin) * satSlow);
     const pv = r.userData.pivot;
-    if (pv?.userData.axis) pv.rotateOnAxis(pv.userData.axis, dt * pv.userData.w * (0.5 + cur.spin * 0.8));      // 軌道面繞球心翻
+    if (pv?.userData.axis) pv.rotateOnAxis(pv.userData.axis, dt * pv.userData.w * (0.5 + cur.spin * 0.8) * satSlow);      // 軌道面繞球心翻（滑鼠靠近衛星時跟著減速）
   }
 
   // 搜尋碎片
@@ -1526,7 +1528,8 @@ $("askCard").addEventListener("submit", e => {
 });
 function done(c) { sentKey.set(c.sessionId, askKey(c)); askSid = null; $("askCard").dataset.sig = ""; renderAsk(); autoState(); }
 window.karaSetState = setState;
-window.karaData = () => data;            // 測試注入碼讀資料用（SHOWORK_TEST_SPHERE_JS）
+window.karaData = () => data;
+window.karaSats = () => [...sats.values()].map(s => ({ name: s.c?.name, a: +s.orbit.a.toFixed(4), hovered: s === hovered }));   // 測試：衛星的軌道角度            // 測試注入碼讀資料用（SHOWORK_TEST_SPHERE_JS）
 window.karaAnchor = (x, y) => { satAnchor = { x, y }; };
 window.karaSay = (text) => announce(text);
 window.karaToast = (text) => announce(text);
