@@ -1609,9 +1609,10 @@ function auditRows() {
   const fixBtn = fixN && !busy ? `<button class="pill sm" data-audit="fix" title="關掉停放空殼、停掉 Claude 預備程序（對話都不會丟）">處理 ${fixN} 項</button>` : "";
   const btns = `<span class="abtn">${fixBtn}<button class="pill sm" data-audit="run"${busy ? " disabled" : ""}>${busy ? "自檢中⋯" : "重跑"}</button><button class="pill sm" data-audit="send"${busy || !a ? " disabled" : ""}>送 #自檢回報</button></span>`;
   if (!a) { rows.push(`<div class="row"><span class="t">AUDIT</span><span>還沒跑過自檢（開工／收工會自動跑）</span><span></span>${btns}</div>`); return rows; }
-  const f = auditScores(a), bad = f.filter(x => x >= 0.6).length;
-  const chips = AUDIT_KEYS.map((k, i) => `<span class="ak" style="color:${f[i] >= 0.85 ? "var(--bad)" : f[i] >= 0.6 ? "var(--ink)" : "var(--ink-dim)"}">${f[i] >= 0.6 ? "●" : "○"} ${k}</span>`).join("");
-  rows.push(`<div class="row"><span class="t">AUDIT</span><span>流量自檢 · ${esc(String(a.at).slice(5))}</span><span${bad ? ' style="color:var(--bad)"' : ""}>${bad ? bad + " 項待優化" : "健康"}</span><div class="aks">${chips}</div></div>`);
+  // 11-22 Keng：「待優化」只算紅的（＝flow_audit.py 會出建議的門檻），數字才跟下面的建議清單對得上；快到門檻的只標「注意」（◐）
+  const f = auditScores(a), bad = f.filter(x => x >= 0.85).length, warn = f.filter(x => x >= 0.6 && x < 0.85).length;
+  const chips = AUDIT_KEYS.map((k, i) => `<span class="ak" style="color:${f[i] >= 0.85 ? "var(--bad)" : f[i] >= 0.6 ? "var(--ink)" : "var(--ink-dim)"}" title="${f[i] >= 0.85 ? "待優化" : f[i] >= 0.6 ? "注意：快到門檻" : "健康"}">${f[i] >= 0.85 ? "●" : f[i] >= 0.6 ? "◐" : "○"} ${k}</span>`).join("");
+  rows.push(`<div class="row"><span class="t">AUDIT</span><span>流量自檢 · ${esc(String(a.at).slice(5))}</span><span${bad ? ' style="color:var(--bad)"' : ""}>${bad ? bad + " 項待優化" : warn ? warn + " 項注意" : "健康"}</span><div class="aks">${chips}</div></div>`);
   for (const tip of (a.advice || []).filter(x => !/額度已用/.test(x)).slice(0, 3))      // 額度那條不放（左邊半圓表已經有）
     rows.push(`<div class="row atip" title="${esc(tip)}"><span class="t">·</span><span>${esc(tip)}</span></div>`);
   rows.push(`<div class="row arow">${btns}</div>`);

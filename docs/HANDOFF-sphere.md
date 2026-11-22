@@ -133,6 +133,8 @@
 - 安裝腳本把 scripts/flow_audit.py 複製進 App 包 Resources；送出（--send）一律去隱私
 - 「處理 N 項」鈕（Keng 選「加，直接處理」）：原生 `SphereAudit.fix()` 重讀 ~/.claude/sessions，只動不丟對話的兩種——停放空殼（parkedJobId 指向活的背景 job）送 SIGTERM、預備程序（bg、沒名字、沒講過話）`claude stop`；做完重跑自檢；記錄 ~/.claude/flow-audit/sphere/fix.log；閒置大記憶量／常駐設定不動。**沒實按過**（按了會真的關程序）
 - 驗證：螢幕外桌面版 1000×860 深／淺色截圖，環 7 段有上色、卡片區塊正常；重跑／送出按鈕沒實按過
+- 11-22 Keng：「N 項待優化」只算紅的（≥0.85，跟 flow_audit.py 出建議的門檻一致）；0.6–0.85 標「◐ 注意」，沒有紅的時顯示「N 項注意」
+- 同日依自檢建議精簡 MEMORY.md：214 行／6952 token → 97 行／3367 token（專案分 10 個總表 hub_*.md、已結束的進 hub_封存.md，原記憶檔都沒刪；備份 ~/.claude/projects/-Users-hairllypoter/memory.bak-20261122-slim）
 
 ## 字幕跟語音（11-22）
 - 開語音時 `say(..., follow=true)`：不先打字，等原生報「唸到哪」才出字（Mac：逐詞 marker＋合成完算出總長後的播放進度；微軟：播放進度）；`karaVoice('start')` 後 1.2 秒沒同步才退回照速度打字
