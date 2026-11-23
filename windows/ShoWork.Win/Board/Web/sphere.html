@@ -340,6 +340,8 @@
   #panelMenu .more { display: none; border-top: 1px solid var(--line); margin-top: 4px; padding-top: 4px; }
   #panelMenu .more button { display: block; width: 100%; text-align: left; background: none; border: 0; color: var(--ink); font: inherit; font-size: 12px; padding: 5px 8px; border-radius: 4px; cursor: pointer; }
   #panelMenu .more button:hover { background: var(--soft); }
+  body.orbitMode #panelMenu .more { display: block; }      /* 11-23 Orbit42：早報／收工／時間軸／自動排版／聲音都在「⋯」裡 */
+  body.orbitMode #panelMenu #voiceSel { width: 100%; max-width: none; margin: 2px 0; }
   #sysWrap { display: none; }
   #sysWrap.off { display: none !important; }
   /* 11-22 Keng：上方「球體 · 思考中」字幕框拿掉（底下本來就有狀態字）⇒ 現況／字幕移到狀態字下面，不要框：
@@ -1818,7 +1820,7 @@ window.karaPrefs = (p) => {
   if (p.voices) {
     const sel = $("voiceSel"), groups = [...new Set(p.voices.map(v => v.group))];
     sel.innerHTML = groups.map(g => `<optgroup label="${esc(g)}">${p.voices.filter(v => v.group === g).map(v => `<option value="${esc(v.id)}">${esc(v.name)}</option>`).join("")}</optgroup>`).join("");
-    sel.value = p.voice; sel.hidden = false;
+    sel.value = p.voice; sel.hidden = false; if (ORBIT && typeof applyPanels === "function") try { applyPanels(); } catch {}
   }
   deskOn = !!p.mini;
   $("bMini").classList.toggle("on", deskOn); $("bMini").title = deskOn ? "球體桌面版：開（點一下關掉）" : "球體桌面版：關（點一下打開）";
@@ -1911,6 +1913,10 @@ function brief() {
 }
 // 11-23 Orbit42：＋ 新衛星（選大腦）
 if (ORBIT) {
+  // 11-23 Keng（主畫面整頓）：Orbit42 工具列只留 ＋新衛星、全螢幕、⋯、深淺、語音；早報／收工／時間軸／自動排版／聲音收進「⋯」，桌面版用不到
+  for (const id of ["bBrief", "bWrap", "bTl", "bMini", "bAuto"]) $(id).style.display = "none";
+  document.body.classList.add("orbitMode");
+  $("bPanels").title = "面板開關、早報、收工、時間軸、自動排版、播報聲音";
   $("bFull").hidden = false; $("bFull").onclick = () => post({ action: "orbit", cmd: "fullscreen" });
   const b = $("bNewSat"); b.hidden = false;
   const m = document.createElement("div"); m.id = "satMenu"; m.setAttribute("role", "menu");
@@ -2432,9 +2438,11 @@ setInterval(() => { const sig = ["cardSys", "cardCool", "cardTeam", "askCard"].m
 
 /* ---------- 11-22 小視窗開關（Keng） ---------- */
 const TOGGLES = [["cardUsage", "額度 · 用量"], ["cardSys", "外環 · 硬碟／背景工作／自檢"], ["cardCool", "散熱 · 溫度／風扇／時脈"], ["cardTeam", "戰情 · SESSION"]];
-const HKEY = "sphere.hide." + (DESK ? "desk" : "tab");
+const VOICE_SEL = $("voiceSel");        // 11-23：Orbit42 把它收進「⋯」選單；選單重畫（innerHTML）前先抓住，不然會被清掉
+const HKEY = "sphere.hide." + (DESK ? "desk" : ORBIT ? "orbit" : "tab");
 let hidden = new Set();
-try { hidden = new Set(JSON.parse(localStorage.getItem(HKEY) || "[]")); } catch {}
+// 11-23 Keng（Orbit42 主畫面整頓）：額度卡、散熱卡的數字球外圈的環已經一眼看得到 ⇒ Orbit42 第一次打開預設收起（「⋯」選單可再打開）
+try { const v = localStorage.getItem(HKEY); hidden = new Set(v == null && ORBIT ? ["cardUsage", "cardCool"] : JSON.parse(v || "[]")); } catch {}
 function setPanel(id, on) {
   on ? hidden.delete(id) : hidden.add(id);
   try { localStorage.setItem(HKEY, JSON.stringify([...hidden])); } catch {}
@@ -2443,10 +2451,13 @@ function setPanel(id, on) {
 function applyPanels() {
   for (const [id] of TOGGLES) $(id).classList.toggle("off", hidden.has(id));
   $("sysWrap").classList.toggle("off", hidden.has("cardSys"));       // 疊排時外環併在額度卡裡，也要一起關
-  $("bPanels").classList.toggle("on", hidden.size > 0);
-  $("bPanels").textContent = hidden.size ? `面板 ${TOGGLES.length - hidden.size}/${TOGGLES.length}` : "面板";
+  $("bPanels").classList.toggle("on", !ORBIT && hidden.size > 0);
+  $("bPanels").textContent = ORBIT ? "⋯" : hidden.size ? `面板 ${TOGGLES.length - hidden.size}/${TOGGLES.length}` : "面板";
   $("panelMenu").innerHTML = TOGGLES.map(([id, name]) => `<label><input type="checkbox" data-p="${id}"${hidden.has(id) ? "" : " checked"}>${esc(name)}</label>`).join("")
-    + `<div class="more"><button data-go="bBrief">早報</button><button data-go="bWrap">收工總結</button><button data-go="bTl">今日時間軸</button></div>`;
+    + `<div class="more"><button data-go="bBrief">早報</button><button data-go="bWrap">收工總結</button><button data-go="bTl">今日時間軸</button>`
+    + (ORBIT ? `<button data-go="bAuto">自動排版${$("bAuto").classList.contains("on") ? " ✓" : ""}</button>` : "") + `</div>`;
+  // Orbit42：工具列只留常用的，播報聲音也收進這個選單
+  if (ORBIT && !VOICE_SEL.hidden) { const w = document.createElement("div"); w.className = "more"; w.append(VOICE_SEL); $("panelMenu").append(w); }
 }
 // 卡片右上角的 ×
 for (const [id] of TOGGLES) {
@@ -2457,6 +2468,7 @@ for (const [id] of TOGGLES) {
 }
 $("bPanels").onclick = e => {
   e.stopPropagation();
+  if (ORBIT) applyPanels();              // 選單裡「自動排版 ✓」要是現在的狀態
   const m = $("panelMenu"), r = $("bPanels").getBoundingClientRect();
   m.style.top = (r.bottom + 6) + "px"; m.style.left = Math.max(8, Math.min(innerWidth - 168, r.left)) + "px";
   m.classList.toggle("on");

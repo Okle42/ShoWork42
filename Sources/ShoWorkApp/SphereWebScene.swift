@@ -360,7 +360,10 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
         // 需要你的排最前，再來進行中
         func rank(_ c: BoardCard) -> Int { needsYou(c) ? 0 : c.column == .active ? 1 : 2 }
         o["team"] = people.sorted { rank($0) < rank($1) }.map { c -> [String: Any] in
-            var t: [String: Any] = ["name": c.display, "status": needsYou(c) ? "需要你" : c.column.title, "sessionId": c.sessionId]
+            // 11-23 Keng：剛開、還沒下過指令的 session 標題是「還沒交代工作」，看不出是哪一個 ⇒ 用英文名（AI 用英文名稱呼）＋「待命」
+            let idle = c.display == "還沒交代工作"
+            var t: [String: Any] = ["name": idle ? (c.name ?? "新的 session") : c.display, "status": needsYou(c) ? "需要你" : c.column.title, "sessionId": c.sessionId]
+            if idle { t["doing"] = "待命" }
             if let p = c.report?.progress { t["progress"] = p }
             if let d = c.report?.doing, c.label != nil { t["doing"] = d }   // 沒職稱／專案時名字就是任務，不重複
             if let a = c.name { t["address"] = a }                            // 英文名：只給語音「Hana 在幹嘛」這種問法對得上
