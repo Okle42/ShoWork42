@@ -15,7 +15,7 @@ namespace ShoWork;
 /// 11-21：第三格「球體」＝WebView2＋sphere.html（SphereHost，Mac SphereWebScene 的移植）；資料 UpdateSphere 推、動作 OnSphereAction 接。
 sealed class BoardForm : Form
 {
-    public sealed record Options(bool Demo = false, Size? Size = null, string? Shot = null, bool ExitAfterShot = false, bool TopMost = false, bool? Tower = null);
+    public sealed record Options(bool Demo = false, Size? Size = null, string? Shot = null, bool ExitAfterShot = false, bool TopMost = false, bool? Tower = null, bool Orbit = false);
 
     static BoardForm? instance;
 
@@ -249,10 +249,12 @@ sealed class BoardForm : Form
                     : Environment.GetEnvironmentVariable("SHOWORK_BOARD_VIEW") is { Length: > 0 } ev ? ev : ReadViewPref();
         switcher.Enabled = OfficeHost.RuntimeVersion != null;
         if (!switcher.Enabled) Tips.SetToolTip(switcher, "這台電腦沒有 WebView2 Runtime，只能看卡片（Windows 11 內建；Windows 10 要另外裝）");
+        if (opt.Orbit) want = ViewSwitch.Sphere;          // 11-23 Orbit42：只有球體
         if (want != ViewSwitch.Cards) SetView(want, remember: false);
         Log.Note($"BOARD open demo={opt.Demo} dpi={DeviceDpi} size={Size} client={ClientSize} reduce={ReduceMotion}");
         Refresh_();
         refresh.Start();
+        if (opt.Orbit) OrbitEmbed.BoardReady?.Invoke(this);        // 11-23 Orbit42：登入畫面、衛星小視窗加上來
         if (opt.Shot is { } path)
         {
             // 截圖驗收：等動畫跑幾格再拍
@@ -275,6 +277,14 @@ sealed class BoardForm : Form
     {
         base.OnLayout(e);
         if (usage == null) return;
+        if (opt.Orbit)
+        {
+            // 11-23 Orbit42：工具列、流量表、卡片都不要，球體鋪滿整個視窗（衛星小視窗由 Orbit42 蓋在上面）
+            switcher.Visible = controls.Visible = usage.Visible = scroller.Visible = false;
+            scroller.Bounds = ClientRectangle;
+            if (sphere != null) sphere.View.Bounds = ClientRectangle;
+            return;
+        }
         float s = S;
         int pad = (int)(16 * s);
         int w = Math.Max(0, ClientSize.Width - pad * 2);
@@ -524,7 +534,8 @@ sealed class BoardForm : Form
             if (sphereOn) sphere.View.BringToFront(); else sphere.Hidden();
         }
         if (on) office?.View.BringToFront();
-        scroller.Visible = want == ViewSwitch.Cards;
+        scroller.Visible = want == ViewSwitch.Cards && !opt.Orbit;
+        if (opt.Orbit && sphere != null) sphere.View.SendToBack();      // 衛星小視窗、登入畫面在球體上面
         if (!on) ShowDetail(null);
         UpdateOffice(force: true);
         UpdateSphere();
@@ -613,6 +624,8 @@ sealed class BoardForm : Form
             case "focus":
             {
                 if (Card() is not { } c) { Say("找不到這個 session 了"); return; }
+                // 11-23 Orbit42：點衛星先交給 Orbit42（在它自己的終端機小視窗打開）；它處理不了才走原本的跳到視窗
+                if (OrbitEmbed.OpenSession?.Invoke(new OrbitEmbed.SessionRef(c.SessionId, c.Pid, c.Kind, c.Cwd, c.Name ?? c.Project)) == true) return;
                 if (BoardWindowTestMode) { Say($"測試：不跳到 {c.Name ?? c.Project}"); return; }
                 if (DemoCard(c)) { Say("示範資料：不跳到視窗"); return; }
                 Run(() => BoardActions.Focus(c), msg => Say(msg));
@@ -1006,6 +1019,7 @@ sealed class BoardForm : Form
     void CheckVisible()
     {
         bool v = IsHandleCreated && Visible && !IsIconic(Handle) && !Occlusion.Covered(Handle);
+        if (opt.Orbit && Environment.GetEnvironmentVariable("ORBIT_OFFSCREEN") != null) v = true;   // 11-23 Orbit42 螢幕外測試：視窗在螢幕外也要畫球體（不然截不到）
         if (v == visibleOnScreen) return;
         visibleOnScreen = v;
         Log.Note($"BOARD visible={v} frames={frames} anim={anim.Enabled}");

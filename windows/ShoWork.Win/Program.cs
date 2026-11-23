@@ -177,7 +177,26 @@ static class Program
         };
     }
 
-    static int RunAgent(string[] args)
+    /// 11-23 Orbit42 Windows 版：引擎跑在 Orbit42.exe 裡（取代 ShoWorkAgent），引擎起來後 onLaunch 開 Orbit42 主視窗（Mac ShoWorkAgentMain.run(onLaunch:) 的對應）
+    internal static int RunEmbedded(Action onLaunch)
+    {
+        HandoverClear.Start();
+        return RunAgent(Array.Empty<string>(), onLaunch);
+    }
+
+    /// 螢幕外測試（ORBIT_OFFSCREEN）：只開視窗，不開引擎、不碰正在跑的 ShoWorkAgent（Mac AgentOptions.testOnly）。要帶 --board-window（戰情中心測試模式：不送出、不出聲）
+    internal static int RunEmbeddedTest(Action onLaunch)
+    {
+        CatchUiErrors(boardOnly: true);
+        ApplicationConfiguration.Initialize();
+        var ui = new Control();
+        ui.CreateControl();
+        ui.BeginInvoke(onLaunch);
+        Application.Run();
+        return 0;
+    }
+
+    static int RunAgent(string[] args, Action? onLaunch = null)
     {
         // 重新載入 starts a new agent that waits for the old one to let go of the pipe
         if (args.Length >= 2 && args[0] == "--after" && int.TryParse(args[1], out var old))
@@ -198,6 +217,7 @@ static class Program
                 Application.Exit();
             },
             quit: () => { engine.Stop(); Application.Exit(); });
+        if (onLaunch != null) ui.BeginInvoke(onLaunch);
         // W2/W3 wiring: the settings file owns 自動排版; the tray menu and the settings page both change it there
         var settings = GlowSettings.Shared;
         Arranger.AutoEnabled = settings.General.AutoArrange;

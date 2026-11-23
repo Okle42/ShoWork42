@@ -73,7 +73,9 @@ sealed class SphereHost : IDisposable
                 if (!e.IsSuccess && !ready && e.WebErrorStatus != CoreWebView2WebErrorStatus.OperationCanceled) Fail($"sphere.html 載入失敗：{e.WebErrorStatus}");
             };
             Log.Note($"SPHERE start runtime={OfficeHost.RuntimeVersion} folder={folder} test={testMode}");
-            core.Navigate($"https://{HostName}/sphere.html");
+            // 11-23 Orbit42：多帶 ?orbit=1（顯示 Orbit42 才有的按鈕：＋新衛星、全螢幕、帳號）
+            if (OrbitEmbed.Active) OrbitEmbed.Sphere = this;
+            core.Navigate(OrbitEmbed.Active ? $"https://{HostName}/sphere.html?orbit=1" : $"https://{HostName}/sphere.html");
         }
         catch (Exception x) { Fail($"WebView2 init failed: {x.GetType().Name} {x.Message}"); }
     }
@@ -125,6 +127,16 @@ sealed class SphereHost : IDisposable
                 case "mini":
                     Toast("Windows 版還沒有桌面常駐小球。");
                     PushPrefs();
+                    return;
+                // 11-23 Orbit42（Mac SphereWebScene 同名三個）：Orbit42 自己的按鈕、＋新衛星、球體換深淺時衛星跟著換
+                case "orbit" when OrbitEmbed.Active:
+                    OrbitEmbed.Command?.Invoke(Str(m, "cmd") ?? "");
+                    return;
+                case "newSatellite" when OrbitEmbed.Active:
+                    OrbitEmbed.NewSatellite?.Invoke(Str(m, "brain") ?? "claude");
+                    return;
+                case "theme" when OrbitEmbed.Active:
+                    OrbitEmbed.Command?.Invoke("theme:" + (Str(m, "name") ?? "dark"));
                     return;
                 case null:
                     return;
@@ -211,6 +223,14 @@ sealed class SphereHost : IDisposable
         var a = string.Join(",", args.Select(x => x?.ToJsonString() ?? "null"));
         try { _ = view.CoreWebView2.ExecuteScriptAsync($"{fn} && {fn}({a})"); }
         catch (Exception x) { Log.Note($"SPHERE call {fn} failed: {x.Message}"); }
+    }
+
+    /// 跑一段 JS 拿結果（ExecuteScriptAsync 回的是 JSON 編碼；字串會帶引號）。沒好或失敗回 null
+    public async Task<string?> Eval(string js)
+    {
+        if (!Ready || view.CoreWebView2 == null) return null;
+        try { return await view.CoreWebView2.ExecuteScriptAsync(js); }
+        catch (Exception x) { Log.Note($"SPHERE eval failed: {x.Message}"); return null; }
     }
 
     /// 推資料（內容沒變就不推）
