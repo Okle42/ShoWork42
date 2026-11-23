@@ -32,6 +32,11 @@ public enum SphereEmbed {
     public static var newSatellite: ((String) -> Void)?
     /// 宿主自己的指令（球體 ?orbit=1 才有的按鈕，例如 "fullscreen"）
     public static var command: ((String) -> Void)?
+    /// 11-23 Orbit42 iPhone App：球體最新一份 karaUpdate 資料（手機版球體用同一份）
+    public internal(set) static var latestSphere: Data?
+    /// 11-23 Orbit42 iPhone App：衛星清單（JSON 陣列）與某顆衛星的終端機輸出（從第 from 個位元組起；JSON {total, from, data(base64)}）。Orbit42 設定
+    public static var remoteSats: (() -> Data)?
+    public static var remoteScreen: ((String, Int) -> Data?)?
 
     private static var hosts: [SphereWebHost] = []
 

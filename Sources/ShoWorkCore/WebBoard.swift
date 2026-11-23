@@ -405,6 +405,8 @@ extension WebStore {
 
 public enum WebRouter {
     public static let tokenHeader = "x-showork-token"
+    /// iPhone App 的唯讀端點：/api/sphere（球體資料）、/api/sats（衛星清單）、/api/sat?id=&from=（衛星終端機輸出）
+    public static let readPaths: Set<String> = ["/api/sphere", "/api/sats", "/api/sat"]
 
     /// - Parameters:
     ///   - peer: 連線端 IP（不是 Tailscale 段就 403）
@@ -417,7 +419,8 @@ public enum WebRouter {
                               limiter: inout WebRateLimiter,
                               snapshot: () -> Data,
                               perform: (WebAction) -> Result<String, CardError>,
-                              audit: (WebAuditEntry) -> Void = { _ in }) -> WebResponse {
+                              audit: (WebAuditEntry) -> Void = { _ in },
+                              reads: (String, [String: String]) -> Data? = { _, _ in nil }) -> WebResponse {
         guard let peer, WebBind.isTailscale(peer) else { return .json(403, ["error": "只接受 Tailscale 連線"]) }
         guard peer != localIP else { return .json(403, ["error": "不接受 Mac mini 自己連自己"]) }
         guard token != nil else { return .json(403, ["error": "還沒設定 token（showork web enable）"]) }
@@ -429,6 +432,11 @@ public enum WebRouter {
         case ("GET", "/api/board"):
             guard WebToken.matches(r.headers[tokenHeader], token) else { return .json(403, ["error": "token 不對"]) }
             return WebResponse(200, "application/json; charset=utf-8", snapshot())
+        // 11-23 Orbit42 iPhone App：唯讀資料（球體、衛星清單、衛星終端機畫面）。跟 /api/board 一樣要 token 標頭；沒有就 404
+        case ("GET", _) where WebRouter.readPaths.contains(r.path):
+            guard WebToken.matches(r.headers[tokenHeader], token) else { return .json(403, ["error": "token 不對"]) }
+            guard let d = reads(r.path, r.query) else { return .json(404, ["error": "沒有資料"]) }
+            return WebResponse(200, "application/json; charset=utf-8", d)
         case ("POST", _) where isAction:
             func done(_ resp: WebResponse, _ a: WebAction?, _ msg: String) -> WebResponse {
                 audit(WebAuditEntry(at: now, peer: peer, action: a?.name ?? r.path, target: a?.target, text: a?.text, status: resp.status, result: msg))
@@ -447,6 +455,8 @@ public enum WebRouter {
             case .failure(let e): return done(.json(409, ["error": e.message]), a, e.message)
             }
         case (_, "/"), (_, "/index.html"), (_, "/api/board"):
+            return .json(405, ["error": "方法不對"])
+        case (_, _) where WebRouter.readPaths.contains(r.path):
             return .json(405, ["error": "方法不對"])
         case (_, _) where isAction:
             return .json(405, ["error": "方法不對"])

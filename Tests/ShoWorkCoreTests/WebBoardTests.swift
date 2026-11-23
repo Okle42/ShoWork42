@@ -269,4 +269,32 @@ struct WebBoardTests {
         #expect(h.contains("X-ShoWork-Token"))
         for p in WebAction.paths { #expect(h.contains("\"\(p)\""), "頁面有用到 \(p)") }
     }
+
+    // MARK: iPhone App 唯讀端點（11-23）
+
+    func read(_ r: WebRequest, peer p: String? = "100.77.57.35", data: Data? = Data("{\"x\":1}".utf8)) -> (WebResponse, [String]) {
+        var limiter = WebRateLimiter(), asked: [String] = []
+        let resp = WebRouter.handle(r, peer: p, localIP: mini, token: tok, page: Data("<html>".utf8), now: t0, limiter: &limiter,
+                                    snapshot: { Data("{}".utf8) }, perform: { _ in .success("ok") },
+                                    reads: { path, q in asked.append(path + (q["id"].map { "#" + $0 } ?? "") + (q["from"].map { "@" + $0 } ?? "")); return data })
+        return (resp, asked)
+    }
+
+    @Test("唯讀端點：要 token 標頭、只收 GET、非 Tailscale 拒絕；沒資料回 404；有資料原樣回")
+    func readEndpoints() {
+        for path in ["/api/sphere", "/api/sats", "/api/sat?id=ab12&from=40"] {
+            let (ok, asked) = read(req("GET", path, token: tok))
+            #expect(ok.status == 200, "\(path)")
+            #expect(ok.body == Data("{\"x\":1}".utf8))
+            #expect(asked.count == 1)
+            #expect(read(req("GET", path)).0.status == 403, "沒 token \(path)")
+            #expect(read(req("GET", path, token: String(repeating: "cd", count: 32))).0.status == 403, "token 錯 \(path)")
+            #expect(read(req("GET", path, token: tok), peer: "192.168.1.5").0.status == 403, "區網 \(path)")
+            #expect(read(req("GET", path, token: tok), peer: mini).0.status == 403, "自己連自己 \(path)")
+            #expect(read(req("POST", path, token: tok, body: "{}")).0.status == 405, "POST \(path)")
+            #expect(read(req("GET", path, token: tok), data: nil).0.status == 404, "沒資料 \(path)")
+        }
+        #expect(read(req("GET", "/api/sat?id=ab12&from=40", token: tok)).1 == ["/api/sat#ab12@40"])
+        #expect(read(req("GET", "/api/other", token: tok)).0.status == 404)
+    }
 }

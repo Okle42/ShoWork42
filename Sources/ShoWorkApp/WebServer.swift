@@ -124,6 +124,14 @@ final class WebServer {
                          audit: { [store] e in
                              store.audit(e)
                              NSLog("ShoWork web: \(e.action) \(e.target ?? "-") from \(e.peer) → \(e.status)")
+                         },
+                         reads: { path, q in
+                             switch path {
+                             case "/api/sphere": return SphereEmbed.latestSphere
+                             case "/api/sats": return SphereEmbed.remoteSats?() ?? Data("[]".utf8)
+                             case "/api/sat": return q["id"].flatMap { id in SphereEmbed.remoteScreen?(id, Int(q["from"] ?? "") ?? 0) }
+                             default: return nil
+                             }
                          })
     }
 

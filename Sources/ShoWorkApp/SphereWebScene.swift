@@ -344,6 +344,7 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
         let s = String(decoding: d, as: UTF8.self)
         guard s != sent else { return }
         sent = s
+        SphereEmbed.latestSphere = d                   // 11-23 iPhone App：GET /api/sphere 給同一份
         if ProcessInfo.processInfo.environment["SHOWORK_TEST_SPHERE_LOG"] != nil { print("sphere push", s.prefix(160)); fflush(stdout) }
         web.evaluateJavaScript("window.karaUpdate && window.karaUpdate(\(s))")
     }
