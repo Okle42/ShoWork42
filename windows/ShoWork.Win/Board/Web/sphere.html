@@ -2097,7 +2097,7 @@ if (ORBIT) {
   // 11-23 Keng（主畫面整頓）：Orbit42 工具列只留 ＋新衛星、全螢幕、⋯、深淺、語音；早報／收工／時間軸／自動排版／聲音收進「⋯」，桌面版用不到
   for (const id of ["bBrief", "bWrap", "bTl", "bMini", "bAuto"]) $(id).style.display = "none";
   document.body.classList.add("orbitMode");
-  $("brandTab").innerHTML = "ORBIT<b>42</b>";   // 11-23 Keng：Orbit42 裡左上角品牌改成 ORBIT42
+  $("brandTab").innerHTML = 'OKLE<b>42</b> <span class="dim">· ORBIT<b>42</b></span>';   // 11-23 Keng：Orbit42 裡左上角＝OKLE42 署名＋ORBIT42（署名不能拿掉）
   $("bPanels").title = "面板開關、早報、收工、時間軸、自動排版、播報聲音";
   $("bFull").hidden = false; $("bFull").onclick = () => post({ action: "orbit", cmd: "fullscreen" });
   const b = $("bNewSat"); b.hidden = false;
