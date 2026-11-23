@@ -1814,10 +1814,16 @@ if (ORBIT) {
   const b = $("bNewSat"); b.hidden = false;
   const m = document.createElement("div"); m.id = "satMenu"; m.setAttribute("role", "menu");
   m.innerHTML = [["claude", "Claude", "Claude Code"], ["gemini", "Gemini", "Antigravity CLI"], ["codex", "ChatGPT", "Codex CLI"]]
-    .map(([k, n, d]) => `<div class="mi" data-brain="${k}"><span>${n}</span><small>${d}</small></div>`).join("");
+    .map(([k, n, d]) => `<div class="mi" data-brain="${k}"><span>${n}</span><small>${d}</small></div>`).join("")
+    + `<div class="mi" data-brain="accounts" style="border-top:1px solid var(--line);margin-top:4px"><span>帳號⋯</span><small>登入／換帳號</small></div>`;
+  // Orbit42 登入畫面按「進入」後告訴球體哪些大腦登入了：沒登入的灰掉（點了改開帳號頁）
+  window.orbitBrains = ids => { for (const mi of m.querySelectorAll("[data-brain]")) { const k = mi.dataset.brain; if (k === "accounts") continue;
+    const on = ids.includes(k); mi.style.opacity = on ? "" : ".45"; mi.querySelector("small").textContent = on ? mi.dataset.d : "還沒登入"; mi.dataset.off = on ? "" : "1"; } };
+  for (const mi of m.querySelectorAll("[data-brain]")) mi.dataset.d = mi.querySelector("small").textContent;
   document.body.appendChild(m);
   b.onclick = e => { e.stopPropagation(); const r = b.getBoundingClientRect(); m.style.top = (r.bottom + 6) + "px"; m.style.left = Math.max(8, r.left - 60) + "px"; m.classList.toggle("on"); };
-  m.onclick = e => { const mi = e.target.closest("[data-brain]"); if (!mi) return; m.classList.remove("on"); post({ action: "newSatellite", brain: mi.dataset.brain }); };
+  m.onclick = e => { const mi = e.target.closest("[data-brain]"); if (!mi) return; m.classList.remove("on");
+    post({ action: "newSatellite", brain: mi.dataset.off ? "accounts" : mi.dataset.brain }); };   // brain "accounts"＝打開 Orbit42 帳號頁
   document.addEventListener("click", () => m.classList.remove("on"));
 }
 $("bBrief").onclick = () => { announce(briefText()); post({ action: "audit" }); };
