@@ -547,6 +547,42 @@ root.add(core);
 // 2. 三角面殼：每個面縮小成一片「圓角」小三角形（11-22 Keng：KARA 的三角是導圓角，尖角太硬）
 //    每個角用二次貝茲曲線（控制點＝原本的尖角）取 6 點；約四分之一的面填亮一點（KARA 有亮有暗、不是一片均勻）
 //    （11-22 Keng 不要六角形外殼：原本的六角網格外殼已拿掉）
+/* 11-23 Keng（決策板選 B 終端機等寬＋「時間要在球心內部、增加立體感」）：Orbit42 球心時鐘是 3D 場景裡的一片面板，
+   掛在 root 底下跟著球一起晃（有透視）；先畫且寫深度 ⇒ 後半球被它擋住、前半球的網格與三角形蓋在它前面。球體本身不動。 */
+const orbClock = (() => {
+  if (!ORBIT) return null;
+  const W = 1024, H = 340, cv = document.createElement("canvas"); cv.width = W; cv.height = H;
+  const x = cv.getContext("2d"), tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1.62, 1.62 * H / W),
+    new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: true, alphaTest: 0.04, side: THREE.DoubleSide }));
+  mesh.renderOrder = -10; root.add(mesh);
+  const pad = n => String(n).padStart(2, "0");
+  let key = "";
+  return function tick() {
+    const d = new Date(), on = d.getMilliseconds() < 500, k = d.getTime() / 500 | 0;
+    if (k === key) return; key = k;
+    const cs = getComputedStyle(document.documentElement), v = n => cs.getPropertyValue(n).trim();
+    x.clearRect(0, 0, W, H);
+    const r = 34, bx = 12, by = 12, bw = W - 24, bh = H - 24;
+    x.beginPath(); x.roundRect(bx, by, bw, bh, r);
+    x.fillStyle = v("--panel") || "rgba(20,20,21,.9)"; x.fill();
+    x.lineWidth = 3; x.strokeStyle = v("--line") || "rgba(255,255,255,.14)"; x.stroke();
+    const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}:`, ss = pad(d.getSeconds());
+    x.font = "500 168px ui-monospace, Menlo, monospace"; x.textBaseline = "alphabetic";
+    const wHM = x.measureText(hm).width, wSS = x.measureText(ss).width, cw = 52, gap = 14;
+    let tx = (W - (wHM + wSS + gap + cw)) / 2; const ty = 205;
+    x.fillStyle = v("--ink") || "#f2f2f2"; x.fillText(hm, tx, ty); tx += wHM;
+    if (d.getSeconds() === 42) x.fillStyle = v("--gold") || "#d4af37";      // 11-23 Keng：秒數平常白（同時:分），跳到 42 那一秒才變金色
+    x.fillText(ss, tx, ty); tx += wSS + gap;
+    if (on) { x.fillStyle = v("--acc") || "#ff3b30"; x.fillRect(tx, ty - 128, cw, 140); }
+    x.font = "40px ui-monospace, Menlo, monospace"; x.fillStyle = v("--ink-dim") || "rgba(242,242,242,.56)";
+    if ("letterSpacing" in x) x.letterSpacing = "5px";
+    x.textAlign = "center"; x.fillText(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} · TPE`, W / 2, 282);
+    x.textAlign = "left"; if ("letterSpacing" in x) x.letterSpacing = "0px";
+    tex.needsUpdate = true;
+  };
+})();
 const shell = new THREE.Group(); root.add(shell);
 {
   const ico = new THREE.IcosahedronGeometry(1.55, 1).toNonIndexed();
@@ -1046,6 +1082,7 @@ function frame(now) {
   root.rotation.x = Math.sin(t * 0.17) * 0.08;
 
   animGauges(dt, t);
+  if (orbClock) orbClock();
   renderer.render(scene, camera);
   linkFrame();
   perf.n++; perf.ms += performance.now() - now;
