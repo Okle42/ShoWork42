@@ -1515,9 +1515,9 @@ const queue = []; let talkingNow = false;
 function announce(text, extra = {}) { if (window.__said) window.__said.push(text);    // 測試：window.__said = [] 就記下每句播報
   if (queue.length < 6) queue.push({ text, ...extra }); else if (extra.banner) showBanner(extra.banner); pump(); }
 async function pump() {
-  if (talkingNow || demoRunning || listening) return;
+  if (talkingNow || demoRunning || listening || askTyping()) return;
   talkingNow = true;
-  while (queue.length) {
+  while (queue.length && !askTyping()) {      // 11-23：你在答案卡補充框打字／講話時先停，離開輸入框再接著唸（askHold）
     const q = queue.shift();
     $("capQ").textContent = queue.length ? `+${queue.length}` : "";
     if (q.banner) showBanner(q.banner);
@@ -2160,13 +2160,22 @@ function renderAsk() {
     snoozed = null;
   }
   $("askDot").classList.remove("on");
-  let i = list.findIndex(c => c.sessionId === askSid); if (i < 0) i = 0;
+  let i = list.findIndex(c => c.sessionId === askSid);
+  // 11-23 Keng「語音輸入常被打斷」：別的 session 發新卡（件數變）、列順序變、同一題更新，都會讓 sig 變 ⇒ 整張卡重畫、補充框被換掉，
+  // macOS 聽寫就停了。正在補充框打字／講話時一律不重畫：只更新等待時間和「幾之幾」，等離開輸入框再補畫（askHold）
+  if (i >= 0 && askTyping() && card.classList.contains("on")) {
+    card.dataset.stale = "1";
+    const ag = card.querySelector(".ago"); if (ag) ag.textContent = agoText(list[i].ago);
+    const nv = card.querySelector(".nav"); if (nv && nv.childNodes[1]) nv.childNodes[1].textContent = `${i + 1}/${list.length}`;
+    return;
+  }
+  if (i < 0) i = 0;
   const c = list[i]; askSid = c.sessionId;
   const sig = askKey(c) + "#" + i + "/" + list.length;
   if (card.dataset.sig === sig && card.classList.contains("on")) {     // 沒變就不重畫（不打斷正在打的字），只更新等待時間
     const ag = card.querySelector(".ago"); if (ag) ag.textContent = agoText(c.ago); return;
   }
-  card.dataset.sig = sig;
+  card.dataset.sig = sig; card.dataset.stale = "";
   const ta0 = card.querySelector(".free textarea"), hadFocus = ta0 && document.activeElement === ta0, sel0 = hadFocus ? [ta0.selectionStart, ta0.selectionEnd] : null;
   const p = c.permit;
   // 每種卡片都用同款大按鈕（2 欄、數字鍵）；只有 Claude 自己標「（建議）」／(Recommended) 的才有建議框和 Enter
@@ -2221,6 +2230,7 @@ function placeAsk(st) {
   if (!ORBIT) return;
   const ac = $("askCard"), rows = $("teamRows");
   if (!ac.classList.contains("on")) { if (ac.parentNode === rows) document.body.appendChild(ac); return; }
+  if (ac.parentNode === rows && askTyping()) { ac.dataset.stale = "1"; return; }     // 打字／講話中不搬（搬動＝輸入框離開文件，聽寫會停），離開輸入框再搬
   // 11-23 Keng「你開在哪裡？我看不到」：戰情卡被收起來時答案卡跟著看不到 ⇒ 每個新問題出現時自動把戰情卡打開（同一題你再收起來就不硬開）
   try { if (hidden.has("cardTeam") && askOpenedFor !== ac.dataset.sig) { askOpenedFor = ac.dataset.sig; setPanel("cardTeam", true); } } catch {}   // hidden 在檔尾才宣告，載入途中呼叫不會炸
   const i = (data.team || []).slice(0, 6).findIndex(c => c.sessionId === askSid);
@@ -2233,6 +2243,20 @@ function placeAsk(st) {
   if (fresh) ac.scrollIntoView({ block: "nearest" });
 }
 { const inner = renderAsk; renderAsk = function () { inner(); placeAsk(); }; }
+/* 11-23 Keng「答案卡補充框語音輸入常被打斷」：補充框有焦點＝正在打字或講話（聽寫）。這段時間：
+   ①不重畫、不搬答案卡（上面 renderAsk／placeAsk）②智能體不開口（喇叭的聲音會被聽寫收進去，也可能打斷聽寫）：
+   一點進去就停掉正在唸的那句，之後的播報排隊；離開輸入框才補畫答案卡、接著唸 */
+function askTyping() { const a = document.activeElement; return !!a && a.tagName === "TEXTAREA" && $("askCard").contains(a); }
+$("askCard").addEventListener("focusin", e => { if (e.target.matches(".free textarea") && talkingNow) post({ action: "stopSpeaking" }); });
+let askPtr = false;          // 按著卡片裡的按鈕（送出／選項）：補畫要等這一下點擊處理完，不然按鈕被換掉、點擊不算數
+$("askCard").addEventListener("pointerdown", () => { askPtr = true; });
+addEventListener("pointerup", () => { if (askPtr) setTimeout(() => { askPtr = false; askResume(); }, 0); }, true);
+function askResume() {
+  if (askTyping() || askPtr) return;                         // 焦點還在補充框（例如重畫後放回去）／還按著
+  if ($("askCard").dataset.stale) { $("askCard").dataset.sig = ""; renderAsk(); }
+  pump();
+}
+$("askCard").addEventListener("focusout", () => setTimeout(askResume, 0));
 if (ORBIT) $("cardTeam").insertBefore($("askDot"), $("teamRows"));
 $("askCard").addEventListener("click", e => {
   const nav = e.target.closest("[data-nav]");
@@ -2294,6 +2318,7 @@ window.karaSats = () => [...sats.values()].map(s => ({ name: s.c?.name, a: +s.or
 window.karaAnchor = (x, y) => { satAnchor = { x, y }; };
 window.karaSay = (text) => announce(text);
 window.karaToast = (text) => announce(text);
+window.karaQueue = () => ({ q: queue.length, talking: talkingNow });      // 測試：播報佇列（答案卡打字中要先停）
 let embedded = false;
 async function poll() {
   if (embedded) return;

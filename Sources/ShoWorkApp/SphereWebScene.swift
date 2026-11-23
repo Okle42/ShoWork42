@@ -652,6 +652,9 @@ final class SphereWebView: WKWebView {
                 if e.clickCount == 2 { w.zoom(nil) } else { w.performDrag(with: e) }
                 return
             }
+            // 11-23 ⌘C 複製不了：選了智能體網頁的字，鍵盤焦點還留在衛星終端機（拷貝送去終端機、選單灰掉）。
+            // 點到智能體就把焦點拿過來（視窗不在前面時的第一下也一樣）
+            if w.firstResponder !== self { w.makeFirstResponder(self) }
         }
         super.mouseDown(with: e)
     }
