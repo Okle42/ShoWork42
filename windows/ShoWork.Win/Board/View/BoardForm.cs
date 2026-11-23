@@ -556,7 +556,7 @@ sealed class BoardForm : Form
     {
         if (IsDisposed) return;
         switcher.SphereOff = true;
-        Tips.SetToolTip(switcher, "球體畫面打不開，先看卡片（" + why + "）");
+        Tips.SetToolTip(switcher, "智能體畫面打不開，先看卡片（" + why + "）");
         if (sphereOn) SetView(ViewSwitch.Cards, remember: false);
         if (sphere != null) { Controls.Remove(sphere.View); sphere.Dispose(); }
     }
@@ -1382,7 +1382,7 @@ sealed class ViewSwitch : Control
     bool towerOff, sphereOff;
     int tipSeg = -1;
     /// Mac 的 .help(…)：左格、中格、右格
-    static readonly string[] Help = { "3D 辦公室", "部門島", "球體助理" };
+    static readonly string[] Help = { "3D 辦公室", "部門島", "智能體" };
     public event Action<string>? Changed;
 
     public ViewSwitch(BoardForm owner)
@@ -1391,7 +1391,7 @@ sealed class ViewSwitch : Control
         SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
         SetStyle(ControlStyles.Selectable, false);
         Cursor = Cursors.Hand;
-        AccessibleName = "檢視：3D 辦公室／部門島／球體助理";
+        AccessibleName = "檢視：3D 辦公室／部門島／智能體";
     }
 
     float S => DeviceDpi / 96f;

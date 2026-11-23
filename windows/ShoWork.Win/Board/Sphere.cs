@@ -52,6 +52,7 @@ public static class SpherePayload
         o["runs"] = rs;
         o["heat"] = null;
         o["paused"] = false;
+        o["disks"] = SphereDisks.Read(now);          // 11-23 Orbit42 Windows：球右半邊的硬碟空間刻度環（Mac SphereDisks）
         // 隊長最後一句（網頁判斷是不是回覆剛交辦的事；Mac v4 A）
         if (captainThread?.LastOrDefault(t => t.Role == CaptainLine.RoleKind.captain) is { } cl)
             o["captain"] = new JsonObject { ["id"] = cl.Id, ["text"] = Board.Prefix(cl.Text, 400), ["at"] = cl.At is { } at ? Iso(at) : "" };
@@ -119,4 +120,42 @@ public static class SpherePayload
     }
 
     static string Iso(DateTime d) => d.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", System.Globalization.CultureInfo.InvariantCulture);
+}
+
+/// 硬碟空間（Mac SphereWebScene.swift SphereDisks 的 Windows 版）：本機固定磁碟＋外接碟，最多 4 個，15 秒讀一次
+/// 欄位跟 Mac 一樣：name（C 碟叫「內建」）、used（%）、freeGB、totalGB
+public static class SphereDisks
+{
+    static JsonArray? cache;
+    static DateTime at;
+
+    public static JsonArray Read(DateTime now)
+    {
+        if (cache != null && now - at < TimeSpan.FromSeconds(15)) return (JsonArray)cache.DeepClone();
+        var out_ = new JsonArray();
+        try
+        {
+            var sys = Path.GetPathRoot(Environment.SystemDirectory) ?? "C:\\";
+            foreach (var d in DriveInfo.GetDrives())
+            {
+                if (out_.Count >= 4) break;
+                try
+                {
+                    if (d.DriveType is not (DriveType.Fixed or DriveType.Removable) || !d.IsReady || d.TotalSize < 1_000_000_000) continue;
+                    double total = d.TotalSize, free = d.AvailableFreeSpace;
+                    bool main = string.Equals(d.RootDirectory.FullName, sys, StringComparison.OrdinalIgnoreCase);
+                    var label = main ? "內建" : string.IsNullOrWhiteSpace(d.VolumeLabel) ? d.Name.TrimEnd('\\') : d.VolumeLabel;
+                    out_.Add(new JsonObject
+                    {
+                        ["name"] = label, ["used"] = Math.Round(Math.Clamp((total - free) / total * 100, 0, 100)),
+                        ["freeGB"] = Math.Round(free / 1e9), ["totalGB"] = Math.Round(total / 1e9),
+                    });
+                }
+                catch { }
+            }
+        }
+        catch { }
+        cache = out_; at = now;
+        return (JsonArray)out_.DeepClone();
+    }
 }
