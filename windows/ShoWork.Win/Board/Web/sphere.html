@@ -84,6 +84,9 @@
   .card.on { opacity: 1; transform: none; }
   /* 11-23 Keng「外環／額度／戰情小視窗也要有衛星終端機的陰影外框，增加立體感」⇒ 跟 TermWindow 同一組（黑 45%、模糊 24、往下 8） */
   body.orbitMode .card { box-shadow: 0 8px 24px rgba(0,0,0,.45); }
+  /* 11-23 Keng「外環／額度／戰情小視窗要毛玻璃，但是不要不清楚」⇒ 底色半透明＋背後強模糊（後面的粒子／線糊成一片色塊，不干擾字）；字本身不透明不模糊 */
+  body.orbitMode .card { background: rgba(20,20,21,.58); -webkit-backdrop-filter: blur(22px) saturate(1.6); backdrop-filter: blur(22px) saturate(1.6); }
+  :root[data-theme="light"] body.orbitMode .card { background: rgba(255,255,255,.62); }
   body.orbitMode #askCard { background: var(--panel-solid); box-shadow: 0 8px 24px rgba(0,0,0,.45); }   /* 11-23 Keng「答案卡太透明會看到底下的字」⇒ 實心底 */
   .card .k { font-size: 10px; letter-spacing: .18em; color: var(--ink-dim); }
   .card .head { display: flex; justify-content: space-between; align-items: baseline; margin: 4px 0 8px; }
