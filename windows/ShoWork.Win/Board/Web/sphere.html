@@ -2561,6 +2561,7 @@ addEventListener("pointerup", () => {
 }, true);
 addEventListener("resize", () => { if (!autoOn) for (const id of PANELS) place(id); drawLinks(); });
 $("bAuto").onclick = () => {
+  if (ORBIT) post({ action: "orbit", cmd: "arrangeSats" });     // 11-23 Keng：自動排版時衛星終端機也沿斜對角排開（Orbit42 排原生小視窗）
   if (autoOn) return freezeAuto();
   layout = { auto: true, cols: layout.cols, zmul: 1 }; saveLayout(); autoOn = true;
   for (const id of PANELS) { const st = $(id).style; for (const k of ["left", "top", "right", "bottom", "width", "height", "maxHeight", "transform"]) st[k] = ""; }
