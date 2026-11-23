@@ -1184,7 +1184,10 @@ function frame(now) {
   if (renderer.getPixelRatio() !== want) { renderer.setPixelRatio(want); resize(); }
   // 效能（11-22 Keng：降低耗電、提升順暢）：分頁平常也 30 張（球轉得慢，看不出差別）；
   // 有東西在動才 60 張：說話、聆聽、搜尋、彈一下、滑鼠在衛星上、橫幅／事件卡正在展開
-  const busy = state === "speaking" || state === "searching" || listening || hovered || now - bounceAt < 1600 || now - motionAt < 1200;
+  // 11-24 Keng「這個波視覺上一直不順，感覺卡」：衝擊波 1.6 秒就從 1.7 倍擴到 4.1 倍、思考時的掃描彗星也轉得快，
+  // 之前不算「有東西在動」⇒ 被降到 30 張，大圈快速移動一頓一頓 ⇒ 波或彗星看得到時也算 busy（60 張），沒了再回 30 張省電
+  const busy = state === "speaking" || state === "searching" || listening || hovered || now - bounceAt < 1600 || now - motionAt < 1200
+    || comet.visible || shocks.some(m => m.visible);
   const gap = lean || DESK || !busy ? 33.3 : 0;
   if (now - lastDraw < gap - 4) return;          // 留 4ms 誤差，避免 60Hz 螢幕上偶爾跳過一格變成頓
   lastDraw = now;
