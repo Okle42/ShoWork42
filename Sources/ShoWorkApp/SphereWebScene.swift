@@ -125,6 +125,7 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
         case "openBoard": openBoard()
         case "theme":           // 11-22 Keng：終端機（Ghostty）配色跟球體連動
             GhosttyTheme.apply(mode: str("mode") ?? "auto", now: str("name") ?? "dark", blocked: blocked)
+            SphereEmbed.command?("theme:" + (str("name") ?? "dark"))     // 11-23 Orbit42：衛星終端機、標題列跟著球體深淺換
         case "sessionInfo":     // v4 C：點衛星展開小卡
             guard let c = card(str("sessionId")) else { return say("這個 session 已經不在了。") }
             js("window.karaSessionInfo", Self.info(c))
