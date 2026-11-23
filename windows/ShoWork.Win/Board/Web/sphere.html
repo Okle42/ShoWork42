@@ -1253,9 +1253,11 @@ function radarLoop(now) {
     if (!w || !h) continue;
     if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)) { c.width = Math.round(w * dpr); c.height = Math.round(h * dpr); }
     const x = c.getContext("2d"); x.setTransform(dpr, 0, 0, dpr, 0, 0); x.clearRect(0, 0, w, h);
-    const dot = row.querySelector(".dot"), rb = row.getBoundingClientRect();
+    // 11-23 Keng：波紋改從完成度條第一格（最左邊那個 5px 淺灰方塊）發出；沒有完成度條才退回名字前的點
+    const bar = row.querySelector(".meter.seg"), dot = row.querySelector(".dot"), rb = row.getBoundingClientRect();
     let ox = 7, oy = 14;
-    if (dot) { const d = dot.getBoundingClientRect(); ox = d.left + d.width / 2 - rb.left; oy = d.top + d.height / 2 - rb.top; }
+    if (bar) { const m = bar.getBoundingClientRect(); ox = m.left + 2.5 - rb.left; oy = m.top + m.height / 2 - rb.top; }
+    else if (dot) { const d = dot.getBoundingClientRect(); ox = d.left + d.width / 2 - rb.left; oy = d.top + d.height / 2 - rb.top; }
     const maxR = Math.hypot(Math.max(ox, w - ox), Math.max(oy, h - oy)) + 8;
     for (let k = 0; k < 2; k++) {
       const p = ((now / RADAR_MS) + k * 0.5) % 1;
