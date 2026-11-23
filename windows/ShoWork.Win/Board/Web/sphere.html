@@ -132,7 +132,14 @@
   .pill.go { border-color: var(--acc-dim); }
   .pill.no { color: var(--ink-dim); }
   .pill.sm { padding: 2px 8px; font-size: 11px; }
-  #askCard .free { margin-top: 8px; display: flex; gap: 6px; }
+  #askCard .opts { flex-basis: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  #askCard .pill.opt { border-radius: 8px; padding: 9px 12px; font-size: 13px; text-align: left; line-height: 1.35; white-space: normal; border-color: var(--line); }
+  #askCard .pill.opt.rec { border-color: var(--acc); background: var(--acc-soft); }
+  #askCard .pill.opt i { display: block; font-style: normal; font-size: 10.5px; letter-spacing: .12em; color: var(--acc); margin-bottom: 2px; }
+  #askCard .free { margin-top: 8px; display: flex; gap: 6px; align-items: flex-end; }
+  #askCard .free textarea { flex: 1; min-width: 0; resize: vertical; min-height: 2.6em; max-height: 9em; background: var(--soft); color: var(--ink);
+    border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; font: inherit; font-size: 13px; line-height: 1.45; outline: none; }
+  #askCard .free textarea:focus { border-color: var(--acc-dim); }
   #askCard .free input { flex: 1; min-width: 0; background: var(--soft); color: var(--ink); border: 1px solid var(--line);
     border-radius: 14px; padding: 5px 12px; font: inherit; font-size: 12px; outline: none; }
   #askCard .free input:focus { border-color: var(--acc-dim); }
@@ -2097,7 +2104,12 @@ function renderAsk() {
     if (qs.length === 1 && !qs[0].multi) btns = qs[0].options.map(o => btn(o, { permit: "allow", answers: { [qs[0].question]: [o] } }, "go")).join("");
     else detail = `${qs.length} 題選擇題，到它的視窗回答比較清楚。`;
   } else {
-    btns = (c.options || []).map(o => btn(o, { text: o }, "go")).join("");
+    // 11-23 Keng「每次作業完跳 4 選項答案卡，有預設建議，最下面還要能打字補充」：4 個選項排 2×2 大按鈕，
+    // 建議的那個（結尾「（建議）」，沒標就第一個）加紅框＋「建議」小字；送出時去掉「（建議）」字樣
+    const opts = c.options || [], rec = Math.max(0, opts.findIndex(o => /（建議）|\(建議\)/.test(o)));
+    const clean = o => o.replace(/\s*[（(]建議[）)]\s*$/, "");
+    btns = opts.map((o, k) => `<button class="pill opt${k === rec ? " rec" : ""}" data-act='${esc(JSON.stringify({ text: clean(o) }))}'>${k === rec ? '<i>建議</i>' : ""}${esc(clean(o))}</button>`).join("");
+    if (opts.length) btns = `<div class="opts">${btns}</div>`;
     free = true;
   }
   btns += btn("跳到它的視窗", { focus: 1 }, "no");
@@ -2105,7 +2117,7 @@ function renderAsk() {
       ${list.length > 1 ? `<span class="nav"><button class="pill sm" data-nav="-1">‹</button>${i + 1}/${list.length}<button class="pill sm" data-nav="1">›</button></span>` : ""}</div>
     <div class="q">${esc(c.ask || "在等你。")}</div>${detail ? `<div class="d">${esc(detail)}</div>` : ""}
     <div class="btns">${btns}</div>
-    ${free ? `<form class="free"><input placeholder="或自己打一句回答⋯" aria-label="自己打回答"><button class="pill">送出</button></form>` : ""}`;
+    ${free ? `<form class="free"><textarea rows="2" placeholder="補充說明（可多行；⌘Enter 送出）⋯" aria-label="自己打補充說明"></textarea><button class="pill go">送出</button></form>` : ""}`;
   card.classList.add("on");
   document.body.classList.add("asking");
 }
@@ -2120,9 +2132,12 @@ $("askCard").addEventListener("click", e => {
   else post({ action: "answer", sessionId: c.sessionId, text: a.text });
   done(c);
 });
+$("askCard").addEventListener("keydown", e => {      // 補充框：⌘Enter 送出（Enter 留給中文選字和換行）
+  if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && e.target.matches(".free textarea")) { e.preventDefault(); e.target.form.requestSubmit(); }
+});
 $("askCard").addEventListener("submit", e => {
   e.preventDefault();
-  const v = e.target.querySelector("input").value.trim(); if (!v) return;
+  const v = e.target.querySelector("textarea, input").value.trim(); if (!v) return;
   const c = (data.team || []).find(x => x.sessionId === askSid); if (!c) return;
   post({ action: "answer", sessionId: c.sessionId, text: v }); done(c);
 });
