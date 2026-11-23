@@ -88,10 +88,18 @@ final class SphereAudio {
         engine.attach(player)
         let mixer = engine.mainMixerNode
         let fmt = mixer.outputFormat(forBus: 0)
-        mixer.installTap(onBus: 0, bufferSize: 1024, format: fmt) { [weak self] buf, _ in
-            guard let self, let ch = buf.floatChannelData?[0] else { return }
-            let r = self.spectrum.analyze(ch, count: Int(buf.frameLength), sampleRate: fmt.sampleRate)
-            self.lock.lock(); self.latest = r; self.lock.unlock()
+        // 11-23：tap 在音訊執行緒上跑。閉包寫在 @MainActor 類別裡會被當成主執行緒專用（Orbit42 debug 版一直報 data race）
+        // ⇒ 用 nonisolated 的工廠做閉包，只碰分析器、鎖和一個存結果的盒子（都不屬於主執行緒）
+        mixer.installTap(onBus: 0, bufferSize: 1024, format: fmt, block: Self.tapBlock(spectrum: spectrum, lock: lock, rate: fmt.sampleRate) { [weak self] r in self?.latest = r })
+    }
+
+    nonisolated private static func tapBlock(spectrum: SphereSpectrum, lock: NSLock, rate: Double,
+                                             store: @escaping @Sendable ((bands: [Float], rms: Float)) -> Void) -> AVAudioNodeTapBlock {
+        nonisolated(unsafe) let spectrum = spectrum
+        return { buf, _ in
+            guard let ch = buf.floatChannelData?[0] else { return }
+            let r = spectrum.analyze(ch, count: Int(buf.frameLength), sampleRate: rate)
+            lock.lock(); store(r); lock.unlock()
         }
     }
 
