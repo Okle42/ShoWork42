@@ -5,14 +5,16 @@ export const PRESETS = {
   // Ghostty 的 Okle42-Dark／Okle42-Light 主題把 1＝紅、7＝灰、8＝暗灰、15＝最強的字（深色白、淺色近黑）定好了，
   // 所以終端機切深淺時這裡自動跟著換，不用知道現在是哪個模式。紅只給要注意的地方（重點符號、指令字、刪除行）。
   okle42: {
-    accent: 'red', heading: 'whiteBright', tableHeader: 'whiteBright', strong: 'whiteBright', emphasis: 'white',
-    inlineCode: 'white', codeText: 'whiteBright', codeCommand: 'red', codeFlag: 'white', codeString: 'white',
-    codeComment: 'blackBright', link: 'redBright', path: 'white', number: 'whiteBright', quote: 'white',
-    rule: 'blackBright', tableRule: 'blackBright', bullet: 'red', diagram: 'white', diagramText: 'whiteBright',
-    diffAdded: 'green', diffRemoved: 'red',
-    // 11-23 Keng：對話框（你的提問框、Claude 的回覆框、提示框）也走黑白灰紅，終端機深淺切換時跟著變
-    promptBorder: 'white', promptText: 'whiteBright', replyBorder: 'red',
-    alertNote: 'white', alertTip: 'white', alertImportant: 'whiteBright', alertWarning: 'red', alertCaution: 'redBright',
+    // 11-23 改：ANSI 色名（white、red…）會被 Claude Code 換成固定的純白／純紅，不會跟著終端機深淺變
+    // （淺色背景上你送出的字變成白字看不到）⇒ 改用 Claude Code 的主題鍵：text／subtle／inactive／error…
+    // 這些跟著使用者的 Claude Code 主題（設成「自動」就跟終端機深淺）走。黑白灰紅：字＝text、灰＝subtle／inactive、紅＝error
+    accent: 'error', heading: 'text', tableHeader: 'text', strong: 'text', emphasis: 'subtle',
+    inlineCode: 'subtle', codeText: 'text', codeCommand: 'error', codeFlag: 'subtle', codeString: 'subtle',
+    codeComment: 'inactive', link: 'error', path: 'subtle', number: 'text', quote: 'subtle',
+    rule: 'inactive', tableRule: 'inactive', bullet: 'error', diagram: 'subtle', diagramText: 'text',
+    diffAdded: 'diffAdded', diffRemoved: 'diffRemoved',
+    promptBorder: 'subtle', promptText: 'text', replyBorder: 'error',
+    alertNote: 'subtle', alertTip: 'subtle', alertImportant: 'text', alertWarning: 'error', alertCaution: 'error',
   },
   'catppuccin-mocha': {
     accent: '#cba6f7', heading: '#f9e2af', tableHeader: '#f9e2af', strong: '#ffffff', emphasis: '#f5c2e7',
