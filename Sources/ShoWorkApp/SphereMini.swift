@@ -277,14 +277,26 @@ enum DeskChrome {
 
 /// 本機語音辨識（台灣中文）：麥克風 → SFSpeechRecognizer，中間結果一直回報；finish() 收尾拿最後一句。
 /// 不存音檔、能本機辨識就強制本機（requiresOnDeviceRecognition）；音訊不離開這台 Mac。
+///
+/// 11-23 T1123114256 Keng「按住講話一停頓，前面的字就被刪掉，最後只送出最後一句」：
+/// 本機辨識在停頓後會開新的一段，bestTranscription 只剩「這一段」，之前直接拿它蓋掉 ⇒ 前面全丟。
+/// 現在：①偵測到新的一段（時間戳往後跳、或字變短且開頭不同）就把上一段收進 committed；
+/// ②辨識器在停頓時直接給 isFinal／沒聽到聲音的錯誤 ⇒ 收進 committed、馬上接一個新的辨識繼續聽；
+/// ③放開（finish）才整段送出；中間每次回報的都是「按住以來的全部文字」，畫面上看得到完整內容。
+/// 測試：環境變數 SHOWORK_TEST_LISTEN_FILE＝音檔路徑 ⇒ 不開麥克風，照真實速度把音檔餵給辨識器，播完自動 finish。
 final class SphereListener: @unchecked Sendable {
     typealias Report = @Sendable (_ text: String, _ final: Bool, _ error: String?) -> Void
     private let report: Report
     private let engine = AVAudioEngine()
+    private var recognizer: SFSpeechRecognizer?
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
-    private var last = ""
+    private var committed = ""          // 已經講完的段落（按住期間累加）
+    private var current = ""            // 目前這一段的辨識結果
+    private var currentStart: TimeInterval = -1
+    private var finishing = false
     private var done = false
+    private var generation = 0          // 每接一次新辨識 +1，舊辨識的回呼不再算數
     private let lock = NSLock()
 
     /// v5：麥克風的頻譜＋音量（聽的時候球也有聲波），約 30 次／秒
@@ -294,8 +306,11 @@ final class SphereListener: @unchecked Sendable {
 
     init(_ report: @escaping Report) { self.report = report }
 
+    static var testFile: String? { ProcessInfo.processInfo.environment["SHOWORK_TEST_LISTEN_FILE"] }
+
     func start() {
         SFSpeechRecognizer.requestAuthorization { st in
+            if Self.testFile != nil { print("listen auth \(st.rawValue)"); fflush(stdout) }
             guard st == .authorized else {
                 self.report("", true, st == .denied || st == .restricted
                     ? "沒有語音辨識權限：到「系統設定 › 隱私權與安全性 › 語音辨識」打開 ShoWork42 戰情中心。"
@@ -306,52 +321,115 @@ final class SphereListener: @unchecked Sendable {
         }
     }
 
+    /// 兩段文字接起來
+    static func join(_ a: String, _ b: String) -> String {
+        let a = a.trimmingCharacters(in: .whitespaces), b = b.trimmingCharacters(in: .whitespaces)
+        if a.isEmpty { return b }; if b.isEmpty { return a }
+        // 段落之間是你停頓的地方 ⇒ 補一個「，」（上一段已經有標點就不補），隊長讀得出斷句
+        let l = a.unicodeScalars.last!
+        return a + (CharacterSet.punctuationCharacters.contains(l) ? "" : "，") + b
+    }
+
+    /// 新結果是不是「下一段」（辨識器在停頓後重新開始）而不是同一段的修正
+    static func isNewSegment(prev: String, prevStart: TimeInterval, new: String, newStart: TimeInterval) -> Bool {
+        if prev.isEmpty || new.isEmpty { return false }
+        if prevStart > 0, newStart > prevStart + 0.6 { return true }
+        let common = zip(prev, new).prefix { $0 == $1 }.count
+        // 實測（11-23，macOS 本機辨識）：停頓後同一個辨識的文字會從頭來（「第一段…多少」→「第」），時間戳全是 0
+        return (new.count < prev.count && common < 2) || Double(new.count) < Double(prev.count) * 0.6
+    }
+
+    private var full: String { Self.join(committed, current) }
+
     private func begin() {
         guard let rec = SFSpeechRecognizer(locale: Locale(identifier: "zh-TW")), rec.isAvailable else {
             return report("", true, "這台 Mac 現在不能辨識中文語音。")
         }
-        let req = SFSpeechAudioBufferRecognitionRequest()
-        req.shouldReportPartialResults = true
-        if rec.supportsOnDeviceRecognition { req.requiresOnDeviceRecognition = true }
-        request = req
+        recognizer = rec
+        newTask()
+        if let path = Self.testFile { return feed(path) }
         let input = engine.inputNode
         let fmt = input.outputFormat(forBus: 0)
         guard fmt.sampleRate > 0 else { return report("", true, "找不到麥克風。") }
-        nonisolated(unsafe) let r = req
         input.installTap(onBus: 0, bufferSize: 1024, format: fmt) { [weak self] buf, _ in
-            r.append(buf)
-            guard let self, let cb = self.onLevel, let ch = buf.floatChannelData?[0], Date().timeIntervalSince(self.lastLevel) > 0.03 else { return }
+            guard let self else { return }
+            self.lock.lock(); let r = self.request; self.lock.unlock()
+            r?.append(buf)
+            guard let cb = self.onLevel, let ch = buf.floatChannelData?[0], Date().timeIntervalSince(self.lastLevel) > 0.03 else { return }
             self.lastLevel = Date()
             let l = self.spectrum.analyze(ch, count: Int(buf.frameLength), sampleRate: fmt.sampleRate)
             cb(l.bands, l.rms)
         }
         engine.prepare()
         do { try engine.start() } catch { return report("", true, "麥克風開不起來：\(error.localizedDescription)") }
-        task = rec.recognitionTask(with: req) { [weak self] res, err in
-            guard let self else { return }
-            self.lock.lock()
-            if self.done { self.lock.unlock(); return }
-            if let res { self.last = res.bestTranscription.formattedString }
-            let final = res?.isFinal == true || err != nil
-            if final { self.done = true }
-            let text = self.last
-            self.lock.unlock()
-            if final { self.teardown() }
-            self.report(text, final, nil)
+    }
+
+    /// 開一個新的辨識（第一次，或上一個在停頓時自己結束了）
+    private func newTask() {
+        guard let rec = recognizer else { return }
+        let req = SFSpeechAudioBufferRecognitionRequest()
+        req.shouldReportPartialResults = true
+        if rec.supportsOnDeviceRecognition { req.requiresOnDeviceRecognition = true }
+        lock.lock(); generation += 1; let gen = generation; request = req; current = ""; currentStart = -1; lock.unlock()
+        task = rec.recognitionTask(with: req) { [weak self] res, err in self?.handle(res, err, gen) }
+    }
+
+    private func handle(_ res: SFSpeechRecognitionResult?, _ err: Error?, _ gen: Int) {
+        lock.lock()
+        if done || gen != generation { lock.unlock(); return }
+        if let res {
+            let t = res.bestTranscription.formattedString
+            let st = res.bestTranscription.segments.first?.timestamp ?? 0
+            if Self.testFile != nil { print("raw gen=\(gen) st=\(String(format: "%.1f", st)) final=\(res.isFinal) n=\(t.count) new=\(Self.isNewSegment(prev: current, prevStart: currentStart, new: t, newStart: st)) \(String(t.prefix(14)))"); fflush(stdout) }
+            if Self.isNewSegment(prev: current, prevStart: currentStart, new: t, newStart: st) {
+                committed = Self.join(committed, current)
+            }
+            current = t; currentStart = st
+        }
+        let ended = res?.isFinal == true || err != nil
+        if Self.testFile != nil, let err { print("raw err \(err)"); fflush(stdout) }
+        if ended && !finishing {
+            // 按住中、辨識器自己在停頓處收尾（或「沒聽到聲音」）：這段收進去，接一個新的繼續聽
+            committed = full; current = ""
+            let text = committed
+            lock.unlock()
+            report(text, false, nil)
+            DispatchQueue.main.async { self.newTask() }
+            return
+        }
+        if ended { done = true }
+        let text = full
+        lock.unlock()
+        if ended { teardown() }
+        report(text, ended, nil)
+    }
+
+    /// 測試：照真實速度把音檔餵給目前的辨識，播完放開
+    private func feed(_ path: String) {
+        DispatchQueue.global().async { [weak self] in
+            guard let self, let f = try? AVAudioFile(forReading: URL(fileURLWithPath: path)) else { return }
+            let fmt = f.processingFormat, chunk: AVAudioFrameCount = 1024
+            while true {
+                guard let buf = AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: chunk), (try? f.read(into: buf, frameCount: chunk)) != nil, buf.frameLength > 0 else { break }
+                self.lock.lock(); let r = self.request; self.lock.unlock()
+                r?.append(buf)
+                Thread.sleep(forTimeInterval: Double(buf.frameLength) / fmt.sampleRate)
+            }
+            self.finish()
         }
     }
 
     /// 放開球：停止收音，等辨識器給最後結果（最多 2 秒）
     func finish() {
-        engine.inputNode.removeTap(onBus: 0)
-        engine.stop()
+        lock.lock(); finishing = true; lock.unlock()
+        if engine.isRunning { engine.inputNode.removeTap(onBus: 0); engine.stop() }
         request?.endAudio()
         DispatchQueue.global().asyncAfter(deadline: .now() + 2) { [weak self] in
             guard let self else { return }
             self.lock.lock()
             if self.done { self.lock.unlock(); return }
             self.done = true
-            let text = self.last
+            let text = self.full
             self.lock.unlock()
             self.task?.cancel()
             self.report(text, true, nil)

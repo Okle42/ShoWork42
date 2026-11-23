@@ -215,8 +215,9 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
     // MARK: 按住球講話（v3 #2）：本機即時辨識成文字，網頁顯示、放開後交給隊長
 
     private func startListening() {
+        if SphereListener.testFile != nil { print("listen start blocked=\(blocked)"); fflush(stdout) }
         listener?.stop()
-        if blocked {
+        if blocked && SphereListener.testFile == nil {
             // 測試不碰麥克風：假裝聽到一句
             let words = ["幫我", "幫我看一下", "幫我看一下 Alex", "幫我看一下 Alex 的進度"]
             for (i, w) in words.enumerated() {
@@ -229,7 +230,8 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     guard let self else { return }
-                    if let err { self.js("window.karaHeard", "", true); self.say(err); return }
+                    if let err { if SphereListener.testFile != nil { print("heard error \(err)"); fflush(stdout) }; self.js("window.karaHeard", "", true); self.say(err); return }
+                    if SphereListener.testFile != nil { print("heard final=\(final) \(text)"); fflush(stdout) }
                     self.js("window.karaHeard", text, final)
                 }
             }
