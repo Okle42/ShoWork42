@@ -288,10 +288,7 @@
   /* 11-23 Keng「波浪低畫質」：原本是 640px 放射漸層用 transform 放大（點陣圖被拉糊）、環線只有 0.8% 寬（次像素、鋸齒）
      ⇒ 改成 canvas 依螢幕解析度逐格重畫：抗鋸齒細環線＋後面一段柔和的拖尾（radarLoop） */
   .row.trow.live > canvas.radar { position: absolute; inset: 0; width: 100%; height: 100%; z-index: -1; pointer-events: none; }
-  .row.trow.live .dot { position: relative; }
-  .row.trow.live .dot::after { content: ""; position: absolute; inset: -2px; border-radius: 50%; border: 1px solid var(--acc); animation: ping 1.3s ease-out infinite; }
-  @keyframes ping { 0% { transform: scale(.6); opacity: .9; } 70%, 100% { transform: scale(3); opacity: 0; } }
-  @media (prefers-reduced-motion: reduce) { .row.trow.live .dot::after { animation: none; } }
+  /* 11-23 Keng：訊號已改由完成度條第一格發出（radarLoop），名字前的點不再另外閃紅圈／縮放 */
   .trow .dot { box-shadow: 0 0 6px var(--c); }
   .trow .dot.pulse { animation: dpulse 1.2s ease-in-out infinite; }
   @keyframes dpulse { 50% { transform: scale(1.7); opacity: .55; } }
@@ -1553,7 +1550,7 @@ function renderTeam() {
     const col = ST_COL[c.status] || "var(--done)", changed = lastSt.has(c.sessionId) && lastSt.get(c.sessionId) !== c.status;
     const sub = [esc(c.status || ""), c.ctx != null ? `<span class="${c.ctx >= 80 ? "hi" : ""}">記憶 ${c.ctx}%</span>` : "", c.ago != null ? (c.ago < 1 ? "剛剛" : c.ago < 60 ? `${c.ago} 分鐘前` : `${Math.floor(c.ago / 60)} 小時前`) : ""].filter(Boolean).join(" · ");
     return `<div class="row trow${c.status === "進行中" ? " live" : ""}${c.sessionId ? " link" : ""}${changed ? " flash" : ""}" data-i="${i}" title="${c.sessionId ? "點一下跳到這個 session" : ""}">
-      <span class="dot${c.status === "需要你" || c.status === "進行中" ? " pulse" : ""}" style="--c:${col}"></span>
+      <span class="dot${c.status === "需要你" ? " pulse" : ""}" style="--c:${col}"></span>
       <span class="nm">${esc(c.name || "")}${c.doing ? `<small> · ${esc(c.doing)}</small>` : ""}</span><span>${c.progress != null ? c.progress + "%" : ""}</span>
       <div class="meter seg ramp" title="完成度 ${c.progress != null ? c.progress + "%" : "還沒回報"}"><b style="--p:${Math.max(0, Math.min(100, c.progress ?? 0))}%"></b></div>
       <div class="sub">${sub}</div></div>`;
