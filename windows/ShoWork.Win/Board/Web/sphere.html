@@ -2505,7 +2505,11 @@ canvas.addEventListener("pointerdown", e => {
   }
   const gk = gaugeAt(e); if (gk) { openPanelFor(gk); return; }
   closeSat();
-  if (!ballAt(e)) return;                         // 空白處：只關掉衛星小卡，不唸、不聽
+  if (!ballAt(e)) {                               // 空白處：關掉衛星小卡，不唸、不聽
+    // 11-24 Keng：Orbit42 裡點空白處 ⇒ 衛星終端機小視窗全部收下去、露出智能體（要說話就能直接點球）
+    if (ORBIT) post({ action: "orbit", cmd: "hideSats" });
+    return;
+  }
   holdTimer = setTimeout(() => { holdTimer = null; startListen(); }, 380);
 });
 addEventListener("pointerup", () => {
