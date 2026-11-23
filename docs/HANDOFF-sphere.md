@@ -1,5 +1,9 @@
 # 球體助理（戰情中心第四個分頁）交接
 
+> **11-23 上午起主線在 Orbit42**：先讀 `~/github-repos/Orbit42/docs/HANDOFF.md`（現況、測試、坑、下一步）。
+> 這個 worktree 的 ShoWork42 是 Orbit42 的引擎與球體（ShoWorkApp 函式庫），改球體／引擎仍在這裡改、推 main，Orbit42 再 `swift package update`。
+
+
 最後更新：2026-11-22 下午（Bella，球體外圍量表、命名、背景 session 清理）
 分支：`bella/sphere-tab`，worktree：`~/github-repos/_wt-ShoWork42-sphere`。已推 main（11-22 晚 Keng 指示「推 main」）。
 本機已安裝：c4b5401（`board/installed.json`）。
