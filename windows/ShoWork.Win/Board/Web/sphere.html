@@ -2574,6 +2574,8 @@ function satArea() {
   const bottom = Math.min(H - 16, $("state").getBoundingClientRect().top - GAP);
   return [l, top, Math.max(200, r - l), Math.max(200, bottom - top)].map(Math.round);
 }
+// 11-23：Orbit42 開／關衛星時來問「現在要不要自動重排、排在哪」（自動排版關著＝null，Keng 手動擺的位置不動）
+window.karaSatArea = () => autoOn ? satArea() : null;
 $("bAuto").onclick = () => {
   if (ORBIT) setTimeout(() => post({ action: "orbit", cmd: "arrangeSats:" + satArea().join(",") }), 60);     // 11-23 Keng：自動排版時衛星終端機也沿斜對角排開（Orbit42 排原生小視窗）
   if (autoOn) return freezeAuto();
