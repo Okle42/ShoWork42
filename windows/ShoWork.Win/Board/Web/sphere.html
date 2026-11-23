@@ -1346,9 +1346,20 @@ function animFx(dt, t) {
     if (k >= 1) { m.userData.t = -1; m.material.opacity = 0; m.visible = false; continue; }
     m.visible = true;
     // 11-22 Keng：邊擴散邊變色（跟量表同一組 白→灰→黑→紅），擴到最外圈是紅的，最後一段才淡掉
-    m.scale.setScalar(1.7 + k * 2.4);
-    fxRampColor(Math.min(1, k / 0.8), m.material.color);
-    m.material.uniforms.uOpacity.value = k < 0.8 ? 0.85 : 0.85 * (1 - k) / 0.2;
+    // 11-24 Keng「衝擊波最末端應該要是彈出，而不是突然消失，提升質感」：分兩段——
+    // 擴散（前 78%）：1.7→3.9 倍、先快後慢（ease-out，像真的漣漪）；彈出（後 22%）：再往外炸開 0.7 倍（ease-out），
+    // 亮度先閃到 1.0 再用平滑曲線收掉（不是直線變淡），尾巴才不會像被剪掉
+    const POP = 0.78, eo = x => 1 - Math.pow(1 - x, 3);
+    if (k < POP) {
+      m.scale.setScalar(1.7 + eo(k / POP) * 2.2);
+      m.material.uniforms.uOpacity.value = 0.85;
+    } else {
+      const p = (k - POP) / (1 - POP);
+      m.scale.setScalar(3.9 + eo(p) * 0.7);
+      const flash = p < 0.18 ? 0.85 + 0.15 * Math.sin(p / 0.18 * Math.PI / 2) : 1.0;
+      m.material.uniforms.uOpacity.value = flash * Math.pow(1 - Math.max(0, p - 0.18) / 0.82, 2);
+    }
+    fxRampColor(Math.min(1, k / POP), m.material.color);
   }
 }
 const rgb3 = c => `${Math.round(c.r * 255)},${Math.round(c.g * 255)},${Math.round(c.b * 255)}`;
