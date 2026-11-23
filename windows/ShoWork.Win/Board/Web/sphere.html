@@ -2908,11 +2908,6 @@ window.karaTheme = m => { themeMode = m; applyTheme(); };      // 測試用
 
 setState("idle"); render(); renderVoice(); show("cardUsage", true); applyTheme();
 if (new URLSearchParams(location.search).has("demo")) setTimeout(demo, 600);
-post({ action: "ready" });
-sendVol();                 // 原生端播報音量（存在 localStorage，每次載入告訴它）
-</script>
-</body>
-</html>
 // 11-23 Orbit42 iPhone App（?phone）：手機只能看和回答答案卡 ⇒ ＋新衛星、全螢幕不顯示
 if (new URLSearchParams(location.search).has("phone")) {
   document.body.classList.add("phone");
@@ -2926,3 +2921,8 @@ if (new URLSearchParams(location.search).has("phone")) {
     body.phone #cardTeam .x, body.phone #cardTeam .grip { display: none !important; }`;
   document.head.appendChild(st);
 }
+post({ action: "ready" });
+sendVol();                 // 原生端播報音量（存在 localStorage，每次載入告訴它）
+</script>
+</body>
+</html>
