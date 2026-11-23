@@ -1068,13 +1068,13 @@ const comet = new THREE.Mesh(new THREE.RingGeometry(2.0, 2.045, 64, 1, 0, 0.9),
 outer.add(comet);
 // 11-24 Keng「擴散的波要從內圈到外圈有漸層，不是銳利的硬線條」：原本 1→1.018 的細實心環，
 // 改成 SHOCK_IN→1 的帶子，著色器依半徑算透明度：內緣 0 → 靠外緣 88% 處最亮 → 最外緣柔和收到 0（前緣軟、後面拖淡尾）
-const SHOCK_IN = 0.91;            // 11-24 Keng「太粗，寬度縮一半」：0.82→0.91（帶寬 0.18→0.09）
+const SHOCK_IN = 0.955;           // 11-24 Keng「太粗」兩次各縮一半：0.82→0.91→0.955（帶寬 0.18→0.09→0.045）
 const shocks = [0, 1, 2].map(() => {
   const mat = new THREE.ShaderMaterial({
     uniforms: { uColor: { value: ALERT.clone() }, uOpacity: { value: 0 } },
     vertexShader: `varying float vR; void main() { vR = length(position.xy); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
     fragmentShader: `uniform vec3 uColor; uniform float uOpacity; varying float vR;
-      void main() { float x = clamp((vR - ${SHOCK_IN.toFixed(2)}) / ${(1 - SHOCK_IN).toFixed(2)}, 0.0, 1.0);
+      void main() { float x = clamp((vR - ${SHOCK_IN.toFixed(3)}) / ${(1 - SHOCK_IN).toFixed(3)}, 0.0, 1.0);
         float a = pow(smoothstep(0.0, 0.88, x), 1.6) * (1.0 - smoothstep(0.88, 1.0, x));
         gl_FragColor = vec4(uColor, a * uOpacity);
         #include <colorspace_fragment>
