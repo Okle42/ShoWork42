@@ -96,6 +96,8 @@
   body.orbitMode #teamRows > #askCard .foot { flex-wrap: wrap; row-gap: 4px; }   /* 戰情卡只有 310px：提示和連結放不下就換行，不撐出橫捲軸 */
   body.orbitMode #cardTeam > #askDot { position: static; transform: none; width: 100%; margin: 4px 0 6px; justify-content: center; }
   body.orbitMode.stack.asking #cardTeam { opacity: 1; pointer-events: auto; }
+  /* Xena3 驗收：戰情卡有高度上限，答案卡展開時第 4 個選項／補充框／送出被切掉 ⇒ 有答案卡時暫時放寬到幾乎整個畫面高（答完恢復；手動拉過的高度也暫時讓開） */
+  body.orbitMode.asking #cardTeam { max-height: calc(100vh - 140px) !important; height: auto !important; }
   .card .k { font-size: 10px; letter-spacing: .18em; color: var(--ink-dim); }
   .card .head { display: flex; justify-content: space-between; align-items: baseline; margin: 4px 0 8px; }
   .card .head span { font-size: 14px; letter-spacing: .06em; }
@@ -1586,7 +1588,7 @@ function renderTeam() {
   const askSt = parkAsk();          // 11-23 Orbit42：答案卡展開在戰情列裡，重畫列前先停到 body、畫完 placeAsk 放回去（保留補充框游標）
   $("teamRows").innerHTML = team.slice(0, 6).map((c, i) => {
     const col = ST_COL[c.status] || "var(--done)", changed = lastSt.has(c.sessionId) && lastSt.get(c.sessionId) !== c.status;
-    const sub = [esc(c.status || ""), c.ctx != null ? `<span class="${c.ctx >= 80 ? "hi" : ""}">記憶 ${c.ctx}%</span>` : "", c.ago != null ? (c.ago < 1 ? "剛剛" : c.ago < 60 ? `${c.ago} 分鐘前` : `${Math.floor(c.ago / 60)} 小時前`) : ""].filter(Boolean).join(" · ");
+    const sub = [esc(c.status === "卡住" && /等外部/.test(c.reason || "") ? "等待中" : c.status || ""), c.ctx != null ? `<span class="${c.ctx >= 80 ? "hi" : ""}">記憶 ${c.ctx}%</span>` : "", c.ago != null ? (c.ago < 1 ? "剛剛" : c.ago < 60 ? `${c.ago} 分鐘前` : `${Math.floor(c.ago / 60)} 小時前`) : ""].filter(Boolean).join(" · ");
     return `<div class="row trow${c.status === "進行中" ? " live" : c.status === "卡住" ? " live wait" : ""}${c.sessionId ? " link" : ""}${changed ? " flash" : ""}" data-i="${i}" title="${c.sessionId ? "點一下跳到這個 session" : ""}">
       <span class="dot${c.status === "需要你" ? " pulse" : ""}" style="--c:${col}"></span>
       <span class="nm">${esc(c.name || "")}${c.doing ? `<small> · ${esc(c.doing)}</small>` : ""}</span><span>${c.progress != null ? c.progress + "%" : ""}</span>
@@ -2141,7 +2143,7 @@ function renderAsk() {
     const ag = card.querySelector(".ago"); if (ag) ag.textContent = agoText(c.ago); return;
   }
   card.dataset.sig = sig;
-  const ta0 = card.querySelector(".free textarea"), hadFocus = ta0 && document.activeElement === ta0;
+  const ta0 = card.querySelector(".free textarea"), hadFocus = ta0 && document.activeElement === ta0, sel0 = hadFocus ? [ta0.selectionStart, ta0.selectionEnd] : null;
   const p = c.permit;
   // 每種卡片都用同款大按鈕（2 欄、數字鍵）；只有 Claude 自己標「（建議）」／(Recommended) 的才有建議框和 Enter
   const grid = items => `<div class="opts">${items.map((o, k) => `<button class="pill opt${o.rec ? " rec" : ""}"${o.rec ? " data-rec" : ""} data-k="${k + 1}" data-label="${esc(o.label)}" data-act='${esc(JSON.stringify(o.act))}'>${o.rec ? '<i>建議</i>' : ""}${k < 9 ? `<b>${k + 1}</b>` : ""}${esc(o.label)}</button>`).join("")}</div>`;
@@ -2175,7 +2177,7 @@ function renderAsk() {
 ` : ""}
     <div class="foot"><span>${hint}</span><span class="links"><button class="lnk" data-snooze>Esc 稍後再答</button><button class="lnk" data-act='{"focus":1}'>跳到它的視窗 →</button></span></div>`;
   const ta = card.querySelector(".free textarea");
-  if (ta) { ta.value = drafts.get(c.sessionId) || ""; if (hadFocus) { ta.focus(); ta.selectionStart = ta.selectionEnd = ta.value.length; } }
+  if (ta) { ta.value = drafts.get(c.sessionId) || ""; if (hadFocus) { ta.focus(); const n = ta.value.length; ta.setSelectionRange(Math.min(sel0[0], n), Math.min(sel0[1], n)); } }   // Xena3 驗收：游標留在原位，不跳到最後
   card.classList.add("on");
   document.body.classList.add("asking");
 }
