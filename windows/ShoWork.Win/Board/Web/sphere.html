@@ -1266,6 +1266,7 @@ const rgb3 = c => `${Math.round(c.r * 255)},${Math.round(c.g * 255)},${Math.roun
 /* 字幕下的聲波：往左捲的音量歷史，上下對稱 */
 // 11-23 戰情卡「進行中」那一列的紅色雷達波：canvas 高解析度重畫（兩圈錯開半拍，2.6 秒一圈）
 const RADAR_MS = 2600; let radarAccFor = "", radarRGB = "255,59,48";
+function radarGrayRGB() { return document.documentElement.dataset.theme === "light" ? "120,120,124" : "170,170,176"; }
 function radarLoop(now) {
   requestAnimationFrame(radarLoop);
   if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
@@ -1277,8 +1278,9 @@ function radarLoop(now) {
     const probe = document.createElement("i"); probe.style.color = accRaw; document.body.appendChild(probe);
     radarRGB = (getComputedStyle(probe).color.match(/[\d.]+/g) || [255, 59, 48]).slice(0, 3).join(","); probe.remove(); radarAccFor = accRaw;
   }
-  const acc = `rgb(${radarRGB})`;
   for (const row of rows) {
+    // 11-23 Keng：工作中＝紅色雷達波；等待（卡住／等外部的事）＝灰色雷達波
+    const rgb = row.classList.contains("wait") ? radarGrayRGB() : radarRGB, acc = `rgb(${rgb})`;
     let c = row.querySelector(":scope > canvas.radar");
     if (!c) { c = document.createElement("canvas"); c.className = "radar"; row.prepend(c); }
     const w = row.clientWidth, h = row.clientHeight;
@@ -1299,7 +1301,7 @@ function radarLoop(now) {
       const tail = Math.max(6, r * 0.45);
       const g = x.createRadialGradient(ox, oy, Math.max(0, r - tail), ox, oy, r);
       g.addColorStop(0, "rgba(0,0,0,0)");
-      g.addColorStop(1, `rgba(${radarRGB},${(0.18 * fade).toFixed(3)})`);
+      g.addColorStop(1, `rgba(${rgb},${(0.18 * fade).toFixed(3)})`);
       x.fillStyle = g; x.beginPath(); x.arc(ox, oy, r, 0, Math.PI * 2); x.fill();
       // 環線：1.25px 抗鋸齒細線，外面再一層 4px 很淡的光暈
       x.globalAlpha = 0.18 * fade; x.strokeStyle = acc; x.lineWidth = 4; x.beginPath(); x.arc(ox, oy, r, 0, Math.PI * 2); x.stroke();
@@ -1585,7 +1587,7 @@ function renderTeam() {
   $("teamRows").innerHTML = team.slice(0, 6).map((c, i) => {
     const col = ST_COL[c.status] || "var(--done)", changed = lastSt.has(c.sessionId) && lastSt.get(c.sessionId) !== c.status;
     const sub = [esc(c.status || ""), c.ctx != null ? `<span class="${c.ctx >= 80 ? "hi" : ""}">記憶 ${c.ctx}%</span>` : "", c.ago != null ? (c.ago < 1 ? "剛剛" : c.ago < 60 ? `${c.ago} 分鐘前` : `${Math.floor(c.ago / 60)} 小時前`) : ""].filter(Boolean).join(" · ");
-    return `<div class="row trow${c.status === "進行中" ? " live" : ""}${c.sessionId ? " link" : ""}${changed ? " flash" : ""}" data-i="${i}" title="${c.sessionId ? "點一下跳到這個 session" : ""}">
+    return `<div class="row trow${c.status === "進行中" ? " live" : c.status === "卡住" ? " live wait" : ""}${c.sessionId ? " link" : ""}${changed ? " flash" : ""}" data-i="${i}" title="${c.sessionId ? "點一下跳到這個 session" : ""}">
       <span class="dot${c.status === "需要你" ? " pulse" : ""}" style="--c:${col}"></span>
       <span class="nm">${esc(c.name || "")}${c.doing ? `<small> · ${esc(c.doing)}</small>` : ""}</span><span>${c.progress != null ? c.progress + "%" : ""}</span>
       <div class="meter seg ramp" title="完成度 ${c.progress != null ? c.progress + "%" : "還沒回報"}"><b style="--p:${Math.max(0, Math.min(100, c.progress ?? 0))}%"></b></div>
