@@ -2619,6 +2619,9 @@ function autoLayout() {
         const cwS = ORBIT && layout.cw?.[side] ? Math.max(220, Math.min(layout.cw[side], W / 2 - CLEAR * upS * z * 0.6 - 2 * M)) : cw;
         let hs = ids.map(id => natH($(id), cwS));
         const nat = hs.slice();
+        // Xena3 驗收（矮視窗退步）：有答案卡時戰情卡那一欄往下用到視窗底部（側欄碰不到正中間的狀態字），不停在一般的 floor
+        const askCol = ORBIT && document.body.classList.contains("asking") && ids.includes("cardTeam");
+        const colFloor = askCol ? H - 16 : floor, room = colFloor - capB;
         const gaps = 12 * (ids.length - 1), sum = hs.reduce((a, b) => a + b, 0);
         if (sum + gaps > room) {
           // 放不下：Orbit42 有答案卡時戰情卡優先（整張答案卡要看得到），其他卡先讓位到最少 80px；其餘照比例縮
@@ -2630,7 +2633,7 @@ function autoLayout() {
           } else { const k = (room - gaps) / sum; hs = hs.map(h => Math.max(80, h * k)); }
         }
         const tot = hs.reduce((a, b) => a + b, 0) + gaps;
-        let y = Math.max(capB, Math.min(floor - tot, cy - tot / 2));
+        let y = Math.max(capB, Math.min(colFloor - tot, cy - tot / 2));
         const x = side === "l" ? M + 4 : W - M - 4 - cwS;
         ids.forEach((id, n) => { const el = $(id); put(el, x, y, cwS, hs[n] < nat[n] - 2 ? hs[n] : 0); y += hs[n] + 12; });
       }
