@@ -1590,8 +1590,7 @@ function renderTeam() {
   const team = data.team || [], cnt = {};
   for (const c of team) cnt[c.status] = (cnt[c.status] || 0) + 1;
   $("chips").innerHTML = Object.keys(ST_COL).filter(k => cnt[k]).map(k => `<span><i style="--c:${ST_COL[k]}"></i>${esc(k)} ${cnt[k]}</span>`).join("");
-  const askSt = parkAsk();          // 11-23 Orbit42：答案卡展開在戰情列裡，重畫列前先停到 body、畫完 placeAsk 放回去（保留補充框游標）
-  $("teamRows").innerHTML = team.slice(0, 6).map((c, i) => {
+  const rowsHtml = team.slice(0, 6).map((c, i) => {
     const col = ST_COL[c.status] || "var(--done)", changed = lastSt.has(c.sessionId) && lastSt.get(c.sessionId) !== c.status;
     const sub = [esc(c.status === "卡住" && /等外部/.test(c.reason || "") ? "等待中" : c.status || ""), c.ctx != null ? `<span class="${c.ctx >= 80 ? "hi" : ""}">記憶 ${c.ctx}%</span>` : "", c.ago != null ? (c.ago < 1 ? "剛剛" : c.ago < 60 ? `${c.ago} 分鐘前` : `${Math.floor(c.ago / 60)} 小時前`) : ""].filter(Boolean).join(" · ");
     return `<div class="row trow${c.status === "進行中" ? " live" : c.status === "卡住" ? " live wait" : ""}${c.sessionId ? " link" : ""}${changed ? " flash" : ""}" data-i="${i}" title="${c.sessionId ? "點一下跳到這個 session" : ""}">
@@ -1600,7 +1599,21 @@ function renderTeam() {
       <div class="meter seg ramp" title="完成度 ${c.progress != null ? c.progress + "%" : "還沒回報"}"><b style="--p:${Math.max(0, Math.min(100, c.progress ?? 0))}%"></b></div>
       <div class="sub">${sub}</div></div>`;
   }).join("") + (team.length > 6 ? `<div class="more">還有 ${team.length - 6} 個 · 點衛星看</div>` : "");
-  placeAsk(askSt);
+  // 11-23 Keng「語音輸入的字會重複」（錄影：在第二螢幕打第二螢幕打、打開鏡像打開鏡像、順便順便）：
+  // 原本每次重畫列都把答案卡拿到 body 再放回來 ⇒ 補充框離開文件一下，macOS 聽寫／注音的暫定字被打斷、留下重複。
+  // 答案卡已經在列裡 ⇒ 不動它，只換掉它前後的列（不搬它自己，輸入框不會斷）
+  const ac = $("askCard"), rowsEl = $("teamRows");
+  if (ORBIT && ac.parentNode === rowsEl) {
+    const tmp = document.createElement("div"); tmp.innerHTML = rowsHtml;
+    for (const n of [...rowsEl.children]) if (n !== ac) n.remove();
+    const nodes = [...tmp.children], at = team.slice(0, 6).findIndex(c => c.sessionId === askSid);
+    nodes.forEach((n, k) => { if (at >= 0 && k <= at) rowsEl.insertBefore(n, ac); else rowsEl.appendChild(n); });
+    placeAsk(null);                // 問的人換了位置才會真的搬（例如列的順序變了）
+  } else {
+    const askSt = parkAsk();          // 11-23 Orbit42：答案卡展開在戰情列裡，重畫列前先停到 body、畫完 placeAsk 放回去（保留補充框游標）
+    rowsEl.innerHTML = rowsHtml;
+    placeAsk(askSt);
+  }
   for (const c of team) if (c.sessionId) lastSt.set(c.sessionId, c.status);
 }
 /* v5 ② 拉線：卡片和球之間畫一條「從球邊出發、轉個角、接到卡片」的細線 */
