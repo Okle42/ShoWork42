@@ -84,6 +84,7 @@
   .card.on { opacity: 1; transform: none; }
   /* 11-23 Keng「外環／額度／戰情小視窗也要有衛星終端機的陰影外框，增加立體感」⇒ 跟 TermWindow 同一組（黑 45%、模糊 24、往下 8） */
   body.orbitMode .card { box-shadow: 0 8px 24px rgba(0,0,0,.45); }
+  body.orbitMode #askCard { background: var(--panel-solid); box-shadow: 0 8px 24px rgba(0,0,0,.45); }   /* 11-23 Keng「答案卡太透明會看到底下的字」⇒ 實心底 */
   .card .k { font-size: 10px; letter-spacing: .18em; color: var(--ink-dim); }
   .card .head { display: flex; justify-content: space-between; align-items: baseline; margin: 4px 0 8px; }
   .card .head span { font-size: 14px; letter-spacing: .06em; }
@@ -150,7 +151,15 @@
   #askCard .free input { flex: 1; min-width: 0; background: var(--soft); color: var(--ink); border: 1px solid var(--line);
     border-radius: 14px; padding: 5px 12px; font: inherit; font-size: 12px; outline: none; }
   #askCard .free input:focus { border-color: var(--acc-dim); }
-  #askCard .keys { margin-top: 6px; font-size: 10.5px; color: var(--ink-dim); letter-spacing: .04em; }
+  #askCard .foot { margin-top: 8px; display: flex; align-items: center; gap: 10px; font-size: 10.5px; color: var(--ink-dim); letter-spacing: .04em; }
+  #askCard .foot .links { margin-left: auto; display: flex; gap: 12px; white-space: nowrap; }
+  #askCard .lnk { background: none; border: 0; padding: 0; font: inherit; color: var(--ink-dim); cursor: pointer; }
+  #askCard .lnk:hover { color: var(--acc); text-decoration: underline; }
+  #askDot { position: fixed; left: 50%; bottom: 112px; transform: translateX(-50%); display: none; align-items: center; gap: 8px; z-index: 9;
+    background: var(--panel-solid, var(--panel)); color: var(--ink); border: 1px solid var(--acc-dim); border-radius: 14px; padding: 5px 14px; font: inherit; font-size: 12px; cursor: pointer; }
+  #askDot.on { display: flex; }
+  #askDot::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--acc); }
+  #askDot:hover { background: var(--acc-soft); }
   #askUndo { position: fixed; left: 50%; bottom: 112px; transform: translateX(-50%); display: none; align-items: center; gap: 10px;
     background: var(--panel-solid, var(--panel)); border: 1px solid var(--line); border-radius: 6px; padding: 7px 12px; font-size: 12px; z-index: 9; }
   #askUndo.on { display: flex; }
@@ -396,6 +405,7 @@
   #state { bottom: 98px; }
   #hint { bottom: 12px; }
   #askCard { bottom: 168px; }
+  #askDot { bottom: 168px; }
   body.stack #sysWrap:not(:empty) { display: block; }
   body.stack #cardSys, body.stack #cardCool { display: none; }
   body.stack #cardUsage, body.stack #cardTeam { top: auto; bottom: 168px; padding: 8px 10px; min-width: 0; max-height: 32%; overflow: auto;
@@ -486,6 +496,7 @@
 
 <div id="askCard" role="dialog" aria-label="等你回答"></div>
 <div id="askUndo" role="status" aria-live="polite"></div>
+<button id="askDot" aria-label="打開等你回答的卡片"></button>
 <div class="card" id="satCard" role="dialog" aria-label="session 詳情"></div>
 <div class="card" id="tlCard" role="dialog" aria-label="今日時間軸"></div>
 <div id="tip"></div>
@@ -2092,7 +2103,7 @@ $("voiceSel").onchange = e => {
 };
 
 /* ---------- v3 #1 需要你：球下方的選項面板（回答／放行），一次一件，‹ › 換下一件 ---------- */
-let askSid = null;
+let askSid = null, snoozed = null;   // snoozed：按「稍後再答」當下那幾題（sessionId|題目）
 const drafts = new Map();           // sessionId → 補充框打到一半的字（重畫答案卡時放回去，不會被清掉）
 const MAC = /Mac/.test(navigator.platform || navigator.userAgent), MOD = MAC ? "⌘" : "Ctrl";
 const agoText = m => m == null ? "" : m < 1 ? "剛剛" : m < 60 ? `等了 ${m} 分` : `等了 ${Math.floor(m / 60)} 小時`;
@@ -2101,7 +2112,15 @@ function askKey(c) { return (c.permit?.id || "") + "|" + (c.ask || ""); }
 function pending() { return (data.team || []).filter(c => c.status === "需要你" && c.sessionId && sentKey.get(c.sessionId) !== askKey(c)); }
 function renderAsk() {
   const list = pending(), card = $("askCard");
-  if (!list.length) { card.classList.remove("on"); document.body.classList.remove("asking"); askSid = null; return; }
+  if (!list.length) { card.classList.remove("on"); document.body.classList.remove("asking"); askSid = null; snoozed = null; $("askDot").classList.remove("on"); return; }
+  if (snoozed) {          // 稍後再答：收成球下的小紅點；有新的問題進來才再彈出
+    if (list.every(c => snoozed.has(c.sessionId + "|" + askKey(c)))) {
+      card.classList.remove("on"); document.body.classList.remove("asking"); card.dataset.sig = "";
+      const d = $("askDot"); d.textContent = `${list.length} 件在等你回答 · 點開`; d.classList.add("on"); return;
+    }
+    snoozed = null;
+  }
+  $("askDot").classList.remove("on");
   let i = list.findIndex(c => c.sessionId === askSid); if (i < 0) i = 0;
   const c = list[i]; askSid = c.sessionId;
   const sig = askKey(c) + "#" + i + "/" + list.length;
@@ -2110,34 +2129,38 @@ function renderAsk() {
   }
   card.dataset.sig = sig;
   const ta0 = card.querySelector(".free textarea"), hadFocus = ta0 && document.activeElement === ta0;
-  const p = c.permit, btn = (label, act, cls = "") => `<button class="pill ${cls}" data-act='${esc(JSON.stringify(act))}'>${esc(label)}</button>`;
-  let btns = "", free = false, detail = "";
+  const p = c.permit;
+  // 每種卡片都用同款大按鈕（2 欄、數字鍵）；只有 Claude 自己標「（建議）」／(Recommended) 的才有建議框和 Enter
+  const grid = items => `<div class="opts">${items.map((o, k) => `<button class="pill opt${o.rec ? " rec" : ""}"${o.rec ? " data-rec" : ""} data-k="${k + 1}" data-label="${esc(o.label)}" data-act='${esc(JSON.stringify(o.act))}'>${o.rec ? '<i>建議</i>' : ""}${k < 9 ? `<b>${k + 1}</b>` : ""}${esc(o.label)}</button>`).join("")}</div>`;
+  const isRec = o => /（建議）|\(建議\)|\(Recommended\)/i.test(o);
+  let btns = "", free = false, detail = "", n = 0, hasRec = false;
   if (p?.kind === "tool") {
     detail = p.summary || "";
-    btns = btn("允許", { permit: "allow" }, "go") + btn("一律允許", { permit: "always" }) + btn("拒絕", { permit: "deny" }, "no");
+    btns = grid([{ label: "允許", act: { permit: "allow" } }, { label: "一律允許", act: { permit: "always" } }, { label: "拒絕", act: { permit: "deny" } }]); n = 3;
   } else if (p?.kind === "plan") {
-    btns = btn("核准計畫", { permit: "allow" }, "go") + btn("退回", { permit: "deny" }, "no");
+    btns = grid([{ label: "核准計畫", act: { permit: "allow" } }, { label: "退回", act: { permit: "deny" } }]); n = 2;
   } else if (p?.kind === "ask") {
     const qs = p.questions || [];
-    if (qs.length === 1 && !qs[0].multi) btns = qs[0].options.map(o => btn(o, { permit: "allow", answers: { [qs[0].question]: [o] } }, "go")).join("");
-    else detail = `${qs.length} 題選擇題，到它的視窗回答比較清楚。`;
+    if (qs.length === 1 && !qs[0].multi) {      // 答案要跟選項原字一致，標籤不去掉 (Recommended)
+      const os = qs[0].options; n = os.length; hasRec = os.some(isRec);
+      btns = grid(os.map(o => ({ label: o, rec: isRec(o), act: { permit: "allow", answers: { [qs[0].question]: [o] } } })));
+    } else detail = `${qs.length} 題選擇題，到它的視窗回答比較清楚。`;
   } else {
-    // 11-23 Keng「每次作業完跳 4 選項答案卡，有預設建議，最下面還要能打字補充」：4 個選項排 2×2 大按鈕，
-    // 建議的那個（結尾「（建議）」，沒標就第一個）加紅框＋「建議」小字；送出時去掉「（建議）」字樣
-    const opts = c.options || [], rec = Math.max(0, opts.findIndex(o => /（建議）|\(建議\)/.test(o)));
-    const clean = o => o.replace(/\s*[（(]建議[）)]\s*$/, "");
-    btns = opts.map((o, k) => `<button class="pill opt${k === rec ? " rec" : ""}"${k === rec ? " data-rec" : ""} data-k="${k + 1}" data-act='${esc(JSON.stringify({ text: clean(o), opt: 1 }))}'>${k === rec ? '<i>建議</i>' : ""}${k < 9 ? `<b>${k + 1}</b>` : ""}${esc(clean(o))}</button>`).join("");
-    if (opts.length) btns = `<div class="opts">${btns}</div>`;
+    // 11-23 Keng「每次作業完跳 4 選項答案卡，有預設建議，最下面還要能打字補充」：建議的那個（結尾「（建議）」，沒標就第一個）紅框；送出時去掉「（建議）」
+    const opts = c.options || [], rec = Math.max(0, opts.findIndex(isRec));
+    const clean = o => o.replace(/\s*[（(](建議|Recommended)[）)]\s*$/i, "");
+    if (opts.length) { btns = grid(opts.map((o, k) => ({ label: clean(o), rec: k === rec, act: { text: clean(o), opt: 1 } }))); n = opts.length; hasRec = true; }
     free = true;
   }
-  btns += btn("跳到它的視窗", { focus: 1 }, "no");
+  const hint = [n ? `按 1–${Math.min(9, n)} 選選項` : "", hasRec ? "Enter 送建議" : "", "送出後 3 秒內可復原"].filter(Boolean).join(" · ");
   const sum = c.summary && c.reportKind !== "start" ? c.summary : "";
   card.innerHTML = `<div class="top"><span>需要你</span><span class="nm">${esc(c.name || "")}</span><span class="ago">${agoText(c.ago)}</span>
       ${list.length > 1 ? `<span class="nav"><button class="pill sm" data-nav="-1">‹</button>${i + 1}/${list.length}<button class="pill sm" data-nav="1">›</button></span>` : ""}</div>
     ${sum ? `<div class="sum">剛做完：${esc(clip(sum, 120))}</div>` : ""}<div class="q">${esc(c.ask || "在等你。")}</div>${detail ? `<div class="d">${esc(detail)}</div>` : ""}
     <div class="btns">${btns}</div>
     ${free ? `<form class="free"><textarea rows="2" placeholder="補充說明（選了選項也會一起送；可多行，${MOD}Enter 送出）⋯" aria-label="自己打補充說明"></textarea><button class="pill go">送出</button></form>
-      <div class="keys">${c.options?.length ? "按 1–" + Math.min(9, c.options.length) + " 選選項 · Enter 送建議 · " : ""}送出後 3 秒內可復原</div>` : ""}`;
+` : ""}
+    <div class="foot"><span>${hint}</span><span class="links"><button class="lnk" data-snooze>Esc 稍後再答</button><button class="lnk" data-act='{"focus":1}'>跳到它的視窗 →</button></span></div>`;
   const ta = card.querySelector(".free textarea");
   if (ta) { ta.value = drafts.get(c.sessionId) || ""; if (hadFocus) { ta.focus(); ta.selectionStart = ta.selectionEnd = ta.value.length; } }
   card.classList.add("on");
@@ -2146,11 +2169,12 @@ function renderAsk() {
 $("askCard").addEventListener("click", e => {
   const nav = e.target.closest("[data-nav]");
   if (nav) { const list = pending(); let i = list.findIndex(c => c.sessionId === askSid); askSid = list[(i + +nav.dataset.nav + list.length) % list.length]?.sessionId; renderAsk(); return; }
+  if (e.target.closest("[data-snooze]")) return snoozeAsk();
   const b = e.target.closest("[data-act]"); if (!b) return;
   const c = (data.team || []).find(x => x.sessionId === askSid); if (!c) return;
   const a = JSON.parse(b.dataset.act);
   if (a.focus) return post({ action: "focus", sessionId: c.sessionId });
-  if (a.permit) return sendLater(c, { action: "permit", sessionId: c.sessionId, permitId: c.permit?.id, decision: a.permit, answers: a.answers }, b.textContent.trim());
+  if (a.permit) return sendLater(c, { action: "permit", sessionId: c.sessionId, permitId: c.permit?.id, decision: a.permit, answers: a.answers }, b.dataset.label || b.textContent.trim());
   const extra = (drafts.get(c.sessionId) || "").trim();          // 選項＋補充：補充框有字就一起送
   sendLater(c, { action: "answer", sessionId: c.sessionId, text: extra ? a.text + "\n補充：" + extra : a.text }, a.text + (extra ? "（＋補充）" : ""));
 });
@@ -2166,6 +2190,8 @@ $("askCard").addEventListener("submit", e => {
 });
 // 送出先等 3 秒，期間可按「復原」收回（按錯不用跳去終端機補救）；卡片先收起，下一件馬上接上
 let undoQ = null;
+function snoozeAsk() { snoozed = new Set(pending().map(c => c.sessionId + "|" + askKey(c))); renderAsk(); }
+$("askDot").addEventListener("click", () => { snoozed = null; $("askCard").dataset.sig = ""; renderAsk(); });
 function flushUndo() { if (!undoQ) return; clearTimeout(undoQ.t); post(undoQ.msg); undoQ = null; $("askUndo").classList.remove("on"); }
 function sendLater(c, msg, label) {
   flushUndo();
@@ -2186,6 +2212,7 @@ window.addEventListener("beforeunload", flushUndo);
 // 鍵盤：1–9 選選項、Enter 送建議的那個（游標在輸入框裡時不攔，留給打字和中文選字）
 document.addEventListener("keydown", e => {
   const card = $("askCard"); if (!card.classList.contains("on") || e.isComposing || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.key === "Escape") { e.preventDefault(); return snoozeAsk(); }     // 補充框裡按 Esc 也算（打的字會留著）
   if (e.target.closest && e.target.closest("textarea, input, select, [contenteditable]")) return;
   let b = null;
   if (/^[1-9]$/.test(e.key)) b = card.querySelector(`.pill.opt[data-k="${e.key}"]`);
