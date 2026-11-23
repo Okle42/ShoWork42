@@ -410,6 +410,7 @@
 <svg id="deskGrip" viewBox="0 0 18 18" aria-label="拖曳縮放"><path d="M16 7 7 16M16 11.5 11.5 16" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
 <div id="tools">
   <button class="pill sm on" id="bNewSat" title="開一顆新衛星（新的 AI 工作者，Orbit42）" hidden>＋ 新衛星</button>
+  <button class="pill sm" id="bFull" title="全螢幕桌面模式（⌃⌘F）" hidden>⛶</button>
   <button class="pill sm" id="bBrief" title="唸一次早報（今天的狀況與額度）">早報</button>
   <button class="pill sm" id="bWrap" title="唸收工總結（今天做完什麼、還剩什麼）">收工</button>
   <button class="pill sm" id="bTl" title="今天每個 session 的狀態變化">時間<span class="wide">軸</span></button>
@@ -1811,6 +1812,7 @@ function brief() {
 }
 // 11-23 Orbit42：＋ 新衛星（選大腦）
 if (ORBIT) {
+  $("bFull").hidden = false; $("bFull").onclick = () => post({ action: "orbit", cmd: "fullscreen" });
   const b = $("bNewSat"); b.hidden = false;
   const m = document.createElement("div"); m.id = "satMenu"; m.setAttribute("role", "menu");
   m.innerHTML = [["claude", "Claude", "Claude Code"], ["gemini", "Gemini", "Antigravity CLI"], ["codex", "ChatGPT", "Codex CLI"]]

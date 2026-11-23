@@ -30,6 +30,8 @@ public enum SphereEmbed {
     public static var openSession: ((SessionRef) -> Bool)?
     /// 球體工具列「＋ 新衛星」（brain：claude／gemini／codex）
     public static var newSatellite: ((String) -> Void)?
+    /// 宿主自己的指令（球體 ?orbit=1 才有的按鈕，例如 "fullscreen"）
+    public static var command: ((String) -> Void)?
 
     private static var hosts: [SphereWebHost] = []
 

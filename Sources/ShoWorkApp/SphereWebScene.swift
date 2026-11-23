@@ -129,6 +129,8 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
             js("window.karaSessionInfo", Self.info(c))
         case "timeline":        // v4 E：今日時間軸
             js("window.karaTimeline", SphereWatch.todayTimeline())
+        case "orbit":           // 11-23 Orbit42 自己的按鈕（全螢幕桌面…）
+            SphereEmbed.command?(str("cmd") ?? "")
         case "newSatellite":    // 11-23 Orbit42：球體工具列「＋ 新衛星」
             SphereEmbed.newSatellite?(str("brain") ?? "claude")
         case "audit":           // 11-22 Keng：自檢原子環——開工（早報）／收工各跑一次，自檢卡也能手動重跑／送出
