@@ -68,6 +68,14 @@
   #caption .bar b { display: block; height: 100%; width: 0; background: var(--acc); transition: width .25s; }
 
   /* 資訊小卡 */
+  /* 11-23 Keng 過場動畫：進入時球從遠處拉近、面板依序淡入；離開（回帳號頁）時反過來 */
+  #gl { transition: opacity 1.1s ease; }
+  .card, #tools, #brandTab, #deskBar, svg#links, #caption, #status { transition: opacity .55s ease, transform .55s cubic-bezier(.2,.8,.2,1); }
+  body.cineGL #gl { opacity: 0; }
+  body.cineNoAnim *, body.cineNoAnim #gl { transition: none !important; }
+  body.cineHide .card, body.cineHide #tools, body.cineHide #brandTab, body.cineHide #deskBar, body.cineHide svg#links, body.cineHide #caption, body.cineHide #status { opacity: 0 !important; transform: translateY(8px) scale(.985); }
+  body.cineStagger #cardTeam, body.cineStagger #cardSys { transition-delay: .12s; }
+  body.cineStagger svg#links, body.cineStagger #caption { transition-delay: .24s; }
   .card { position: fixed; background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
     padding: 10px 12px; min-width: 200px;
     opacity: 0; transform: translateY(6px) scale(.98); transition: opacity .35s, transform .35s; pointer-events: none; }
@@ -878,6 +886,21 @@ const shocks = [0, 1, 2].map(() => {
 });
 let shockNext = 0;
 
+// 11-23 過場動畫（Orbit42 登入 → 進入：球從遠處拉近打開；回帳號頁：球拉遠消失）
+let cine = null;
+window.karaIntro = () => {
+  const b = document.body;
+  b.classList.add("cineNoAnim", "cineGL", "cineHide"); void b.offsetWidth; b.classList.remove("cineNoAnim");   // 先瞬間藏起來
+  cine = { from: 7, to: 1, t0: performance.now(), dur: 1700, spin: 0.9, done: () => {} };
+  requestAnimationFrame(() => b.classList.remove("cineGL"));                     // 球從遠處淡入並拉近
+  setTimeout(() => { b.classList.add("cineStagger"); b.classList.remove("cineHide"); }, 850);   // 面板晚一點依序出現
+  setTimeout(() => b.classList.remove("cineStagger"), 1800);
+};
+window.karaOutro = () => {
+  document.body.classList.add("cineHide", "cineGL");
+  cine = { from: 1, to: 6, t0: performance.now(), dur: 900, spin: -0.5, done: null };
+};
+
 // 滾輪縮放球體（11-22 Keng）：0.45–2 倍，記在 localStorage sphere.zoom.tab／desk
 const ZKEY = "sphere.zoom." + (DESK ? "desk" : "tab");
 let zoom = 1, camZ = 10.5;
@@ -937,6 +960,13 @@ function frame(now) {
   if (Math.abs(zoomCur - zoom) > 0.0005) {
     zoomCur += (zoom - zoomCur) * Math.min(1, dt * 10);
     camera.position.z = camZ / zoomCur; drawLinks(); if (popEl.classList.contains("on")) drawPopLink(); motionAt = now;
+  }
+  if (cine) {                                     // 過場：鏡頭距離倍數從 from 漸到 to（緩入緩出）
+    const k = Math.min(1, (now - cine.t0) / cine.dur), e = k < .5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
+    camera.position.z = camZ / zoomCur * (cine.from + (cine.to - cine.from) * e);
+    root.rotation.z = (1 - e) * cine.spin;      // 拉近時帶一點旋轉，像從遠處飛進來
+    motionAt = now; drawLinks();
+    if (k >= 1) { const done = cine.done; cine = null; root.rotation.z = 0; camera.position.z = camZ / zoomCur * (done ? 1 : camera.position.z / (camZ / zoomCur)); done?.(); }
   }
   for (const k in cur) cur[k] += (tgt[k] - cur[k]) * Math.min(1, dt * 3);
   accentFade.step();
