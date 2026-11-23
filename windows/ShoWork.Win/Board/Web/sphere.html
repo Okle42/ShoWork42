@@ -74,7 +74,7 @@
   body.cineGL #gl { opacity: 0; }
   body.cineNoAnim *, body.cineNoAnim #gl { transition: none !important; }
   body.cineHide .card, body.cineHide #tools, body.cineHide #brandTab, body.cineHide #deskBar, body.cineHide svg#links, body.cineHide #caption, body.cineHide #status { opacity: 0 !important; transform: translateY(8px) scale(.985); }
-  body.cineStagger #cardTeam, body.cineStagger #cardSys { transition-delay: .12s; }
+  body.cineStagger #cardTeam, body.cineStagger #cardSys, body.cineStagger #cardCool { transition-delay: .12s; }
   body.cineStagger svg#links, body.cineStagger #caption { transition-delay: .24s; }
   .card { position: fixed; background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
     padding: 10px 12px; min-width: 200px;
@@ -242,7 +242,8 @@
   .pop .ln { font-size: 12px; line-height: 1.5; padding: 4px 0; border-top: 1px solid var(--line); }
   .pop .ln .t { color: var(--ink-dim); font-size: 10px; letter-spacing: .12em; margin-right: 6px; }
   /* ③ 額度儀表 */
-  #cardUsage, #cardSys { width: var(--cw); }
+  #cardUsage, #cardSys, #cardCool { width: var(--cw); }
+  #cardCool { right: 24px; bottom: 150px; }
   .donut { width: 40px; height: 40px; transform: rotate(-90deg); }
   .donut circle { fill: none; stroke-width: 3.2; }
   .donut .tr { stroke: var(--line); }
@@ -347,7 +348,7 @@
   #hint { bottom: 12px; }
   #askCard { bottom: 168px; }
   body.stack #sysWrap:not(:empty) { display: block; }
-  body.stack #cardSys { display: none; }
+  body.stack #cardSys, body.stack #cardCool { display: none; }
   body.stack #cardUsage, body.stack #cardTeam { top: auto; bottom: 168px; padding: 8px 10px; min-width: 0; max-height: 32%; overflow: auto;
     width: min(380px, calc(50% - 20px)); }
   body.stack #cardUsage { left: 12px; } body.stack #cardTeam { right: 12px; }
@@ -401,8 +402,14 @@
 </div>
 
 <div class="card" id="cardSys">
-  <div class="k">外環 · 溫度／硬碟／背景工作</div>
+  <div class="k">外環 · 硬碟／背景工作／自檢</div>
   <div id="sysRows"></div>
+</div>
+
+<!-- 11-23 Keng：溫度、風扇、時脈、吃 CPU 的程式自己一張小卡（原本擠在外環卡裡） -->
+<div class="card" id="cardCool">
+  <div class="k">散熱 · 溫度／風扇／時脈</div>
+  <div id="coolRows"></div>
 </div>
 
 <div id="askCard" role="dialog" aria-label="等你回答"></div>
@@ -1391,7 +1398,7 @@ function drawLinks() {
   if (!autoOn && !moved("cardSys")) $("cardSys").style.top = !document.body.classList.contains("stack") && u.height && !moved("cardUsage") ? Math.round(u.bottom + 12) + "px" : "";
   // 卡片位置在事件時量一次（拖、縮放、顯示／隱藏），每格只算目標點（球在轉）
   const stackAsk = document.body.classList.contains("stack") && document.body.classList.contains("asking");
-  for (const id of ["cardUsage", "cardTeam", "cardSys"]) {
+  for (const id of ["cardUsage", "cardTeam", "cardSys", "cardCool"]) {
     const el = $(id);
     linkRect[id] = el.classList.contains("on") && getComputedStyle(el).display !== "none" && !stackAsk ? el.getBoundingClientRect() : null;
   }
@@ -1432,7 +1439,7 @@ function targetOf(key) {
 }
 /* 11-22 Keng「SD128B 標籤避開戰情卡」：標籤框跟任何一張開著的卡片重疊 ⇒ 改放到尖端另一側；兩邊都撞就往上下找空位 */
 function avoidCards() {
-  const cards = ["cardUsage", "cardTeam", "cardSys"].map(id => linkRect[id]).filter(Boolean);
+  const cards = ["cardUsage", "cardTeam", "cardSys", "cardCool"].map(id => linkRect[id]).filter(Boolean);
   // 11-23 Keng：硬碟尖端轉到 12 點方向時標籤被工具列蓋住／跑出畫面上緣 ⇒ 工具列（含上面整條）也當障礙物
   const bar = (DESK ? $("deskBar") : $("tools"))?.getBoundingClientRect();
   cards.push({ left: -1e4, right: 1e4, top: -1e4, bottom: Math.max(bar?.bottom || 0, 0) + 4 });
@@ -1544,7 +1551,7 @@ function satMarks() {
 function ballEdge(rect) { const { cx, cy, r } = sphereScreen(), x = rect.left + rect.width / 2, y = rect.top + rect.height / 2, a = Math.atan2(y - cy, x - cx); return { x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r }; }
 $("lt_cardUsage").addEventListener("click", () => openPanelFor("cardUsage"));
 $("lt_g7").addEventListener("click", () => openPanelFor("cardUsage"));
-$("lt_cardSys").addEventListener("click", () => openPanelFor("cardSys"));
+$("lt_cardSys").addEventListener("click", () => openPanelFor("cardCool"));      // 溫度尖端 → 散熱卡
 for (let i = 0; i < 4; i++) $("lt_disk" + i).addEventListener("click", () => openPanelFor("cardSys"));
 $("teamRows").addEventListener("mouseover", e => { const row = e.target.closest(".row"); const c = row && (data.team || [])[+row.dataset.i]; rowSid = c?.sessionId || null; });
 $("teamRows").addEventListener("mouseleave", () => { rowSid = null; });
@@ -1662,6 +1669,20 @@ function auditRows() {
 function renderSys() {
   const rows = [];
   for (const r of data.runs || []) rows.push(`<div class="row"><span class="t">RUN</span><span>${esc(clip((r.name ? r.name + " · " : "") + (r.label || "背景工作"), 22))}${r.eta ? " · 剩 " + esc(r.eta) : ""}</span><span>${Math.round(r.fraction * 100)}%</span><div class="meter"><b style="width:${Math.round(r.fraction * 100)}%"></b></div></div>`);
+  for (const d of data.disks || []) {
+    const col = d.used >= 95 ? "var(--bad)" : d.used >= 85 ? "var(--warn)" : "var(--ink)";
+    rows.push(`<div class="row"><span class="t">DISK</span><span>${esc(d.name)} · 剩 ${d.freeGB} GB</span><span>${Math.round(d.used)}%</span><div class="meter seg"><b style="width:${d.used}%;background-color:${col}"></b></div></div>`);
+  }
+  rows.push(...auditRows());
+  syncAudit();
+  $("sysRows").innerHTML = rows.join("");
+  const cool = renderCool();
+  $("sysWrap").innerHTML = [...cool, ...rows].join("");          // 疊排（窄）時散熱＋外環併進額度卡
+  show("cardSys", rows.length > 0);
+}
+/* 11-23：散熱小卡（溫度、風扇＋模式鈕、時脈／降頻、吃 CPU 前三名） */
+function renderCool() {
+  const rows = [];
   const h = data.heat;
   if (h?.temp != null) {
     const lv = { ok: "正常", warm: "偏熱", hot: "很熱", critical: "過熱" }[h.level] || h.level;
@@ -1679,17 +1700,11 @@ function renderSys() {
     rows.push(`<div class="row"><span class="t">CLK</span><span title="${cool.maxToday ? `今天最高 ${cool.maxToday}°C` : ""}">P 核 ${((cool.pcoreMHz || 0) / 1000).toFixed(1)}GHz · GPU ${Math.round(cool.gpuMax || 0)}°C</span><span${thr ? ' style="color:var(--bad)"' : ""}>${thr ? "降頻" : "全速"}</span></div>`);
     if ((cool.top || []).length) rows.push(`<div class="row atip"><span class="t">CPU</span><span>${cool.top.map(p => `${esc(clip(p.name, 18))} ${p.cpu}%`).join(" · ")}</span></div>`);
   }
-  for (const d of data.disks || []) {
-    const col = d.used >= 95 ? "var(--bad)" : d.used >= 85 ? "var(--warn)" : "var(--ink)";
-    rows.push(`<div class="row"><span class="t">DISK</span><span>${esc(d.name)} · 剩 ${d.freeGB} GB</span><span>${Math.round(d.used)}%</span><div class="meter seg"><b style="width:${d.used}%;background-color:${col}"></b></div></div>`);
-  }
-  rows.push(...auditRows());
-  syncAudit();
-  $("sysRows").innerHTML = rows.join("");
-  $("sysWrap").innerHTML = rows.join("");          // 疊排時外環卡併進額度卡
-  show("cardSys", rows.length > 0);
+  $("coolRows").innerHTML = rows.join("");
+  show("cardCool", rows.length > 0);
+  return rows;
 }
-for (const id of ["sysRows", "sysWrap"]) $(id).addEventListener("click", e => {
+for (const id of ["sysRows", "sysWrap", "coolRows"]) $(id).addEventListener("click", e => {
   const fb = e.target.closest("[data-fan]");
   if (fb) { e.stopPropagation(); post({ action: "coolFan", mode: fb.dataset.fan }); return; }
   const b = e.target.closest("[data-audit]"); if (!b || b.disabled) return;
@@ -1971,7 +1986,7 @@ function gaugeAt(e) {
   mouse.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
   ray.setFromCamera(mouse, camera);
   const hit = ray.intersectObjects([g5.hit, g7.hit, gHeat.hit, ...gDisks.map(g => g.hit), auditRing.mesh].filter(m => m?.visible), false)[0];
-  return !hit ? null : hit.object === g5.hit || hit.object === g7.hit ? "cardUsage" : "cardSys";      // 溫度、硬碟、自檢環 → 外環卡
+  return !hit ? null : hit.object === g5.hit || hit.object === g7.hit ? "cardUsage" : hit.object === gHeat.hit ? "cardCool" : "cardSys";      // 溫度 → 散熱卡；硬碟、自檢環 → 外環卡
 }
 /** 打開那個小視窗（已經開著就閃一下讓你看到在哪） */
 function openPanelFor(id) {
@@ -2181,7 +2196,7 @@ $("demo").onclick = demo;
 addEventListener("keydown", e => { if (e.code === "Space" && !embedded) { e.preventDefault(); demo(); } });
 
 /* ---------- 11-22 面板拖移／調大小（Keng：每個視窗都要能拖、能調）---------- */
-const PANELS = ["cardUsage", "cardTeam", "cardSys", "askCard"];        // 字幕固定在底部狀態字下面，不拖
+const PANELS = ["cardUsage", "cardTeam", "cardSys", "cardCool", "askCard"];        // 字幕固定在底部狀態字下面，不拖
 const LKEY = "sphere.layout." + (DESK ? "desk" : "tab");
 var layout = {};
 try { layout = JSON.parse(localStorage.getItem(LKEY) || "{}") || {}; } catch {}
@@ -2229,7 +2244,7 @@ function put(el, x, y, w, h) {
 }
 let autoBusy = false;
 // 欄位：哪張卡在左欄、哪張在右欄、上下順序（自動排版時拖卡片＝改這個，放開就吸附整理）
-const DEF_COLS = { l: ["cardUsage", "cardSys"], r: ["cardTeam"] };
+const DEF_COLS = { l: ["cardUsage", "cardSys"], r: ["cardTeam", "cardCool"] };
 let autoLift = 0;
 function autoLayout() {
   if (autoBusy) return; autoBusy = true;
@@ -2238,6 +2253,7 @@ function autoLayout() {
     for (const k of ["left", "top", "right", "bottom", "width", "height", "maxHeight", "transform"]) $("askCard").style[k] = "";
     const capB = topMin() + 48, floor = H - 150, room = floor - capB;       // 工具列下面 ～ 底部狀態字＋現況那一行的上面
     const vis = id => $(id).classList.contains("off") ? false : id === "cardSys" ? $("cardSys").classList.contains("on") && $("sysRows").innerHTML !== ""
+      : id === "cardCool" ? $("cardCool").classList.contains("on") && $("coolRows").innerHTML !== ""
       : id === "cardTeam" ? $("cardTeam").classList.contains("on") : true;
     const cols = layout.cols || DEF_COLS, zmul = layout.zmul || 1;
     const zSide = W < H ? 15 : 10.5, upS = (H / 2) / (zSide * TAN20);              // 1 倍時每單位幾像素
@@ -2270,7 +2286,7 @@ function autoLayout() {
       zoom = Math.max(0.45, Math.min(2, Math.min(1.3, Math.min(cardsTop - cy - 6, W / 2 - M) / (CLEAR * upB)) * zmul));
       const w2 = Math.min(380, (W - 3 * M - 8) / 2); document.documentElement.style.setProperty("--cw", Math.round(w2) + "px");
       const ch = Math.max(120, floor - cardsTop);
-      const ids = [...cols.l, ...cols.r].filter(id => id !== "cardSys" && vis(id));       // 疊排時外環併進額度卡
+      const ids = [...cols.l, ...cols.r].filter(id => id !== "cardSys" && id !== "cardCool" && vis(id));       // 疊排時外環、散熱併進額度卡
       ids.slice(0, 2).forEach((id, n) => put($(id), n ? W - M - 4 - w2 : M + 4, cardsTop, w2, Math.min(ch, natH($(id), w2))));
     }
   } finally { autoBusy = false; }
@@ -2358,10 +2374,10 @@ renderAuto();
 if (autoOn) { resize(); drawLinks(); }
 // 卡片第一次拿到資料、「需要你」出現／消失時重排一次（外環卡、選項面板的有無會改變版面）
 let autoSig = "";
-setInterval(() => { const sig = ["cardSys", "cardTeam", "askCard"].map(i => +$(i).classList.contains("on")).join() + $("sysRows").innerHTML.length; if (sig !== autoSig) { autoSig = sig; autoSoon(); } }, 500);
+setInterval(() => { const sig = ["cardSys", "cardCool", "cardTeam", "askCard"].map(i => +$(i).classList.contains("on")).join() + $("sysRows").innerHTML.length + $("coolRows").innerHTML.length; if (sig !== autoSig) { autoSig = sig; autoSoon(); } }, 500);
 
 /* ---------- 11-22 小視窗開關（Keng） ---------- */
-const TOGGLES = [["cardUsage", "額度 · 用量"], ["cardSys", "外環 · 溫度／硬碟／背景工作"], ["cardTeam", "戰情 · SESSION"]];
+const TOGGLES = [["cardUsage", "額度 · 用量"], ["cardSys", "外環 · 硬碟／背景工作／自檢"], ["cardCool", "散熱 · 溫度／風扇／時脈"], ["cardTeam", "戰情 · SESSION"]];
 const HKEY = "sphere.hide." + (DESK ? "desk" : "tab");
 let hidden = new Set();
 try { hidden = new Set(JSON.parse(localStorage.getItem(HKEY) || "[]")); } catch {}
