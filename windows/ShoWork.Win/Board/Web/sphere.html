@@ -276,16 +276,13 @@
   .row.trow { grid-template-columns: 12px 1fr auto; align-items: center; }
   /* 11-22 Keng：進行中那一列要一眼看出在跑 ⇒ 紅色雷達波從名字前的點（原點）一圈圈往外擴散，掃過整個名牌再淡掉 */
   .row.trow.live { position: relative; overflow: hidden; isolation: isolate; }
-  .row.trow.live::before, .row.trow.live::after { content: ""; position: absolute; left: 3px; top: 14px; width: 640px; height: 640px;
-    margin: -320px 0 0 -320px; border-radius: 50%; z-index: -1; pointer-events: none; transform: scale(0);
-    background: radial-gradient(circle, transparent 0 30%, color-mix(in srgb, var(--acc) 6%, transparent) 50%, color-mix(in srgb, var(--acc) 22%, transparent) 66%, var(--acc) 69.6%, transparent 70.4%);
-    animation: radar 2.6s linear infinite; }
-  .row.trow.live::after { animation-delay: 1.3s; }
-  @keyframes radar { 0% { transform: scale(0); opacity: 1; } 75% { opacity: .8; } 100% { transform: scale(1); opacity: 0; } }
+  /* 11-23 Keng「波浪低畫質」：原本是 640px 放射漸層用 transform 放大（點陣圖被拉糊）、環線只有 0.8% 寬（次像素、鋸齒）
+     ⇒ 改成 canvas 依螢幕解析度逐格重畫：抗鋸齒細環線＋後面一段柔和的拖尾（radarLoop） */
+  .row.trow.live > canvas.radar { position: absolute; inset: 0; width: 100%; height: 100%; z-index: -1; pointer-events: none; }
   .row.trow.live .dot { position: relative; }
   .row.trow.live .dot::after { content: ""; position: absolute; inset: -2px; border-radius: 50%; border: 1px solid var(--acc); animation: ping 1.3s ease-out infinite; }
   @keyframes ping { 0% { transform: scale(.6); opacity: .9; } 70%, 100% { transform: scale(3); opacity: 0; } }
-  @media (prefers-reduced-motion: reduce) { .row.trow.live::before, .row.trow.live::after, .row.trow.live .dot::after { animation: none; } }
+  @media (prefers-reduced-motion: reduce) { .row.trow.live .dot::after { animation: none; } }
   .trow .dot { box-shadow: 0 0 6px var(--c); }
   .trow .dot.pulse { animation: dpulse 1.2s ease-in-out infinite; }
   @keyframes dpulse { 50% { transform: scale(1.7); opacity: .55; } }
@@ -1128,6 +1125,49 @@ function animFx(dt, t) {
 }
 const rgb3 = c => `${Math.round(c.r * 255)},${Math.round(c.g * 255)},${Math.round(c.b * 255)}`;
 /* 字幕下的聲波：往左捲的音量歷史，上下對稱 */
+// 11-23 戰情卡「進行中」那一列的紅色雷達波：canvas 高解析度重畫（兩圈錯開半拍，2.6 秒一圈）
+const RADAR_MS = 2600; let radarAccFor = "", radarRGB = "255,59,48";
+function radarLoop(now) {
+  requestAnimationFrame(radarLoop);
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const rows = document.querySelectorAll(".row.trow.live");
+  if (!rows.length) return;
+  const dpr = Math.min(3, devicePixelRatio || 1);
+  const accRaw = getComputedStyle(document.documentElement).getPropertyValue("--acc").trim() || "#ff3b30";
+  if (accRaw !== radarAccFor) {            // 把 --acc 換成 r,g,b（canvas 漸層要 rgba）
+    const probe = document.createElement("i"); probe.style.color = accRaw; document.body.appendChild(probe);
+    radarRGB = (getComputedStyle(probe).color.match(/[\d.]+/g) || [255, 59, 48]).slice(0, 3).join(","); probe.remove(); radarAccFor = accRaw;
+  }
+  const acc = `rgb(${radarRGB})`;
+  for (const row of rows) {
+    let c = row.querySelector(":scope > canvas.radar");
+    if (!c) { c = document.createElement("canvas"); c.className = "radar"; row.prepend(c); }
+    const w = row.clientWidth, h = row.clientHeight;
+    if (!w || !h) continue;
+    if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)) { c.width = Math.round(w * dpr); c.height = Math.round(h * dpr); }
+    const x = c.getContext("2d"); x.setTransform(dpr, 0, 0, dpr, 0, 0); x.clearRect(0, 0, w, h);
+    const dot = row.querySelector(".dot"), rb = row.getBoundingClientRect();
+    let ox = 7, oy = 14;
+    if (dot) { const d = dot.getBoundingClientRect(); ox = d.left + d.width / 2 - rb.left; oy = d.top + d.height / 2 - rb.top; }
+    const maxR = Math.hypot(Math.max(ox, w - ox), Math.max(oy, h - oy)) + 8;
+    for (let k = 0; k < 2; k++) {
+      const p = ((now / RADAR_MS) + k * 0.5) % 1;
+      const ease = 1 - Math.pow(1 - p, 2.2);                 // 一開始快、越外越慢，像水波
+      const r = 2 + ease * maxR, fade = Math.pow(1 - p, 1.4);
+      // 拖尾：環線內側一段柔和的淡紅（越靠環線越濃）
+      const tail = Math.max(6, r * 0.45);
+      const g = x.createRadialGradient(ox, oy, Math.max(0, r - tail), ox, oy, r);
+      g.addColorStop(0, "rgba(0,0,0,0)");
+      g.addColorStop(1, `rgba(${radarRGB},${(0.18 * fade).toFixed(3)})`);
+      x.fillStyle = g; x.beginPath(); x.arc(ox, oy, r, 0, Math.PI * 2); x.fill();
+      // 環線：1.25px 抗鋸齒細線，外面再一層 4px 很淡的光暈
+      x.globalAlpha = 0.18 * fade; x.strokeStyle = acc; x.lineWidth = 4; x.beginPath(); x.arc(ox, oy, r, 0, Math.PI * 2); x.stroke();
+      x.globalAlpha = 0.9 * fade; x.lineWidth = 1.25; x.beginPath(); x.arc(ox, oy, r, 0, Math.PI * 2); x.stroke();
+      x.globalAlpha = 1;
+    }
+  }
+}
+requestAnimationFrame(radarLoop);
 const capWave = document.getElementById("wave"), cw = capWave.getContext("2d");
 const waveHist = new Float32Array(96); let waveIdle = 0;
 function drawCapWave(v, mic) {
