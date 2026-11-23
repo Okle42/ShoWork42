@@ -88,6 +88,14 @@
   body.orbitMode .card { background: rgba(20,20,21,.58); -webkit-backdrop-filter: blur(22px) saturate(1.6); backdrop-filter: blur(22px) saturate(1.6); }
   :root[data-theme="light"] body.orbitMode .card { background: rgba(255,255,255,.62); }
   body.orbitMode #askCard { background: var(--panel-solid); box-shadow: 0 8px 24px rgba(0,0,0,.45); }   /* 11-23 Keng「答案卡太透明會看到底下的字」⇒ 實心底 */
+  /* 11-23 Keng：Orbit42 的答案卡改在戰情卡那一列下面展開（placeAsk 搬進 #teamRows），不再浮在球下面 */
+  body.orbitMode #teamRows > #askCard { position: static; left: auto; bottom: auto; transform: none; width: auto; margin: 2px 0 8px;
+    box-shadow: none; background: var(--soft); padding: 8px 10px 10px; transition: none; }
+  body.orbitMode #teamRows > #askCard .opts { grid-template-columns: 1fr; }
+  body.orbitMode #teamRows > #askCard { box-sizing: border-box; max-width: 100%; min-width: 0; }
+  body.orbitMode #teamRows > #askCard .foot { flex-wrap: wrap; row-gap: 4px; }   /* 戰情卡只有 310px：提示和連結放不下就換行，不撐出橫捲軸 */
+  body.orbitMode #cardTeam > #askDot { position: static; transform: none; width: 100%; margin: 4px 0 6px; justify-content: center; }
+  body.orbitMode.stack.asking #cardTeam { opacity: 1; pointer-events: auto; }
   .card .k { font-size: 10px; letter-spacing: .18em; color: var(--ink-dim); }
   .card .head { display: flex; justify-content: space-between; align-items: baseline; margin: 4px 0 8px; }
   .card .head span { font-size: 14px; letter-spacing: .06em; }
@@ -1573,6 +1581,7 @@ function renderTeam() {
   const team = data.team || [], cnt = {};
   for (const c of team) cnt[c.status] = (cnt[c.status] || 0) + 1;
   $("chips").innerHTML = Object.keys(ST_COL).filter(k => cnt[k]).map(k => `<span><i style="--c:${ST_COL[k]}"></i>${esc(k)} ${cnt[k]}</span>`).join("");
+  const askSt = parkAsk();          // 11-23 Orbit42：答案卡展開在戰情列裡，重畫列前先停到 body、畫完 placeAsk 放回去（保留補充框游標）
   $("teamRows").innerHTML = team.slice(0, 6).map((c, i) => {
     const col = ST_COL[c.status] || "var(--done)", changed = lastSt.has(c.sessionId) && lastSt.get(c.sessionId) !== c.status;
     const sub = [esc(c.status || ""), c.ctx != null ? `<span class="${c.ctx >= 80 ? "hi" : ""}">記憶 ${c.ctx}%</span>` : "", c.ago != null ? (c.ago < 1 ? "剛剛" : c.ago < 60 ? `${c.ago} 分鐘前` : `${Math.floor(c.ago / 60)} 小時前`) : ""].filter(Boolean).join(" · ");
@@ -1582,6 +1591,7 @@ function renderTeam() {
       <div class="meter seg ramp" title="完成度 ${c.progress != null ? c.progress + "%" : "還沒回報"}"><b style="--p:${Math.max(0, Math.min(100, c.progress ?? 0))}%"></b></div>
       <div class="sub">${sub}</div></div>`;
   }).join("") + (team.length > 6 ? `<div class="more">還有 ${team.length - 6} 個 · 點衛星看</div>` : "");
+  placeAsk(askSt);
   for (const c of team) if (c.sessionId) lastSt.set(c.sessionId, c.status);
 }
 /* v5 ② 拉線：卡片和球之間畫一條「從球邊出發、轉個角、接到卡片」的細線 */
@@ -2167,6 +2177,32 @@ function renderAsk() {
   card.classList.add("on");
   document.body.classList.add("asking");
 }
+/* 11-23 Keng「答案卡位置讓版面變化不太對 ⇒ 改成在戰情卡那一列直接展開回答」（只在 Orbit42）：
+   #askCard 搬進 #teamRows、插在正在問的那一列下面（不在前 6 列就放最上面）；小紅點（稍後再答）放在戰情卡標題下。
+   搬家會讓補充框失焦 ⇒ 搬之前記住游標、搬完放回去 */
+function askCaret() {
+  const a = document.activeElement;
+  return a && a.tagName === "TEXTAREA" && $("askCard").contains(a) ? [a.selectionStart, a.selectionEnd, a.scrollTop] : null;
+}
+function parkAsk() {
+  const ac = $("askCard"); if (!ORBIT || ac.parentNode !== $("teamRows")) return null;
+  const st = askCaret(); document.body.appendChild(ac); return st || "parked";
+}
+function placeAsk(st) {
+  if (!ORBIT) return;
+  const ac = $("askCard"), rows = $("teamRows");
+  if (!ac.classList.contains("on")) { if (ac.parentNode === rows) document.body.appendChild(ac); return; }
+  const i = (data.team || []).slice(0, 6).findIndex(c => c.sessionId === askSid);
+  const row = i >= 0 ? rows.querySelector(`.row[data-i="${i}"]`) : null;
+  if (ac.parentNode === rows && (row ? row.nextElementSibling === ac : rows.firstElementChild === ac)) return;
+  const fresh = !st && ac.parentNode !== rows;           // 第一次展開才捲到看得到（重畫列時不捲）
+  const caret = Array.isArray(st) ? st : askCaret();
+  if (row) row.after(ac); else rows.prepend(ac);
+  if (caret) { const ta = ac.querySelector(".free textarea"); if (ta) { ta.focus({ preventScroll: true }); ta.setSelectionRange(caret[0], caret[1]); ta.scrollTop = caret[2]; } }
+  if (fresh) ac.scrollIntoView({ block: "nearest" });
+}
+{ const inner = renderAsk; renderAsk = function () { inner(); placeAsk(); }; }
+if (ORBIT) $("cardTeam").insertBefore($("askDot"), $("teamRows"));
 $("askCard").addEventListener("click", e => {
   const nav = e.target.closest("[data-nav]");
   if (nav) { const list = pending(); let i = list.findIndex(c => c.sessionId === askSid); askSid = list[(i + +nav.dataset.nav + list.length) % list.length]?.sessionId; renderAsk(); return; }
