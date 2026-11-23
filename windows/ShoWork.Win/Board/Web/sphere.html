@@ -1066,9 +1066,22 @@ const ribHi = new THREE.Color(), ribBase = new THREE.Color();
 const comet = new THREE.Mesh(new THREE.RingGeometry(2.0, 2.045, 64, 1, 0, 0.9),
   new THREE.MeshBasicMaterial({ color: BALL, transparent: true, opacity: 0, blending: BLEND, depthWrite: false, side: THREE.DoubleSide }));
 outer.add(comet);
+// 11-24 Keng「擴散的波要從內圈到外圈有漸層，不是銳利的硬線條」：原本 1→1.018 的細實心環，
+// 改成 0.82→1 的寬帶，著色器依半徑算透明度：內緣 0 → 靠外緣 88% 處最亮 → 最外緣柔和收到 0（前緣軟、後面拖淡尾）
+const SHOCK_IN = 0.82;
 const shocks = [0, 1, 2].map(() => {
-  const m = new THREE.Mesh(new THREE.RingGeometry(1, 1.018, 128),
-    new THREE.MeshBasicMaterial({ color: ALERT, transparent: true, opacity: 0, blending: BLEND, depthWrite: false, side: THREE.DoubleSide }));
+  const mat = new THREE.ShaderMaterial({
+    uniforms: { uColor: { value: ALERT.clone() }, uOpacity: { value: 0 } },
+    vertexShader: `varying float vR; void main() { vR = length(position.xy); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    fragmentShader: `uniform vec3 uColor; uniform float uOpacity; varying float vR;
+      void main() { float x = clamp((vR - ${SHOCK_IN.toFixed(2)}) / ${(1 - SHOCK_IN).toFixed(2)}, 0.0, 1.0);
+        float a = pow(smoothstep(0.0, 0.88, x), 1.6) * (1.0 - smoothstep(0.88, 1.0, x));
+        gl_FragColor = vec4(uColor, a * uOpacity);
+        #include <colorspace_fragment>
+      }`,
+    transparent: true, blending: BLEND, depthWrite: false, side: THREE.DoubleSide });
+  mat.color = mat.uniforms.uColor.value;           // 動畫照舊寫 material.color（rampColor）
+  const m = new THREE.Mesh(new THREE.RingGeometry(SHOCK_IN, 1, 128, 6), mat);
   m.userData.t = -1; m.visible = false; outer.add(m); return m;
 });
 let shockNext = 0;
@@ -1304,7 +1317,7 @@ function animFx(dt, t) {
     // 11-22 Keng：邊擴散邊變色（跟量表同一組 白→灰→黑→紅），擴到最外圈是紅的，最後一段才淡掉
     m.scale.setScalar(1.7 + k * 2.4);
     rampColor(Math.min(1, k / 0.8), m.material.color);
-    m.material.opacity = k < 0.8 ? 0.75 : 0.75 * (1 - k) / 0.2;
+    m.material.uniforms.uOpacity.value = k < 0.8 ? 0.85 : 0.85 * (1 - k) / 0.2;
   }
 }
 const rgb3 = c => `${Math.round(c.r * 255)},${Math.round(c.g * 255)},${Math.round(c.b * 255)}`;
