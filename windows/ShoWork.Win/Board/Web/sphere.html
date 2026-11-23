@@ -936,6 +936,39 @@ const gHeat = gauge(LAYER(6), 0.055, 65, [(70 - 35) / 65, (85 - 35) / 65]);     
 const gFan = gauge(LAYER(7), 0.055, 60, [0.5, 0.85]);
 // 硬碟環（右半邊，固定不翻）：最多 4 顆，一格 1%，85% 門檻刻線、超過變紅
 const gDisks = [2, 3, 4, 5].map(k => gauge(LAYER(k), 0.055, 100, [0.85, 0.95], dAng));
+// 11-24 Keng「硬碟圈照名字對應，不要照順序」：每顆硬碟記住自己那一圈（localStorage sphere.diskSlots＝{名字: 圈號}），
+// 拔掉的那圈留空、別顆不補位；新硬碟先挑沒人用的圈，四圈都被記住才讓出最早記的那顆（不在線的）
+let diskSlotMap = (() => { try { return JSON.parse(localStorage.getItem("sphere.diskSlots") || "{}") || {}; } catch { return {}; } })();
+let diskRingsKey = "", diskRingsVal = [null, null, null, null];
+function diskRings() {
+  const disks = data.disks || [], key = disks.map(d => d.name).join("\u0001");
+  if (key === diskRingsKey) { diskRingsVal = diskRingsVal.map(x => x && (disks.find(d => d.name === x.name) || x)); return diskRingsVal; }
+  const out = [null, null, null, null], here = new Set(disks.map(d => d.name)), map = { ...diskSlotMap };
+  for (const d of disks) { const i = map[d.name]; if (i >= 0 && i < 4 && !out[i]) out[i] = d; }
+  for (const d of disks) {
+    if (out.includes(d)) continue;
+    const taken = new Set(Object.entries(map).filter(([n]) => n !== d.name).map(([, i]) => i));
+    let i = [0, 1, 2, 3].find(k => !out[k] && !taken.has(k));
+    if (i == null) { const away = Object.keys(map).find(n => !here.has(n) && !out[map[n]]); if (away != null) { i = map[away]; delete map[away]; } }
+    if (i == null) continue;          // 超過 4 顆：多的只在 DISK 卡列出
+    map[d.name] = i; out[i] = d;
+  }
+  diskSlotMap = map; diskRingsKey = key; diskRingsVal = out;
+  try { localStorage.setItem("sphere.diskSlots", JSON.stringify(map)); } catch {}
+  return out;
+}
+/** 記得、但現在不在線的硬碟（DISK 卡顯示「離線」） */
+function diskAway() { const here = new Set((data.disks || []).map(d => d.name)); return Object.keys(diskSlotMap).filter(n => !here.has(n)); }
+// 測試：window.sphereDiskTest([[名字…], …]) 依序假裝硬碟清單，回每步四圈的名字；跑完還原（不動真的記憶）
+window.sphereDiskTest = steps => {
+  const keep = { map: diskSlotMap, disks: data.disks }; diskSlotMap = {}; diskRingsKey = "\u0002";
+  const saved = (() => { try { return localStorage.getItem("sphere.diskSlots"); } catch { return null; } })();
+  const out = steps.map(names => { data.disks = names.map(n => ({ name: n, used: 10, freeGB: 1, totalGB: 2 }));
+    return diskRings().map(x => x ? x.name : "-").join(",") + (diskAway().length ? " 離線=" + diskAway().join(",") : ""); });
+  diskSlotMap = keep.map; data.disks = keep.disks; diskRingsKey = "\u0002";
+  try { saved == null ? localStorage.removeItem("sphere.diskSlots") : localStorage.setItem("sphere.diskSlots", saved); } catch {}
+  return out;
+};
 const heatDot = new THREE.Mesh(new THREE.CircleGeometry(0.05, 12), gmat(0)); outer.add(heatDot);
 const _tmpC = new THREE.Color();
 function heatCol(t) {             // 灰（≤55）→ 白（75）→ 紅（≥90）
@@ -949,7 +982,7 @@ function animGauges(dt, t) {
   gHeat.target = h?.temp == null ? null : Math.min(1, Math.max(0.02, (h.temp - 35) / 65));
   const fan = data.cool?.fan;
   gFan.target = fan?.rpm == null || !fan.max ? null : Math.min(1, Math.max(0.02, fan.rpm / fan.max));
-  const disks = data.disks || [];
+  const disks = diskRings();
   gDisks.forEach((g, i) => { g.target = disks[i]?.used == null ? null : disks[i].used / 100; });
   for (const g of [g5, g7, gHeat, gFan, ...gDisks]) {
     const on = g.target != null;
@@ -1672,7 +1705,7 @@ function labelOf(key) {
   if (key === "heat" || key === "cardSys") return data.heat?.temp == null ? "" : `${Math.round(data.heat.temp)}°C`;
   if (key === "fan") return data.cool?.fan?.rpm == null ? "" : `${Math.round(data.cool.fan.rpm)} RPM`;
   if (key === "cardTeam") return name(teamFocus());
-  if (/^disk\d$/.test(key)) { const d = (data.disks || [])[+key[4]]; return d ? `${d.name} ${Math.round(d.used)}%` : ""; }
+  if (/^disk\d$/.test(key)) { const d = diskRings()[+key[4]]; return d ? `${d.name} ${Math.round(d.used)}%` : ""; }
   return key ? name(key) : "";
 }
 const _sv = new THREE.Vector3();
@@ -1762,7 +1795,7 @@ function linkFrame() {
     setLink("cardSys", null, targetOf("cardSys"), data.heat && (data.heat.level === "hot" || data.heat.level === "critical") ? "bad" : "");
     setLink("fan", null, targetOf("fan"), "");          // 11-23 Keng：風扇環尖端標即時轉速
     setLink("cardTeam", null, null); setLink("pop", null, null);
-    gDisks.forEach((g, i) => setLink("disk" + i, null, targetOf("disk" + i), (data.disks || [])[i]?.used >= 85 ? "warn" : ""));
+    gDisks.forEach((g, i) => setLink("disk" + i, null, targetOf("disk" + i), diskRings()[i]?.used >= 85 ? "warn" : ""));
     // 11-23 Keng：標籤都在自己紅點的正上方置中；兩個標籤疊到時，後面那個再往上錯開一行
     const tl = ["cardUsage", "g7", "cardSys", "fan", "disk0", "disk1", "disk2", "disk3"].map(id => $("lt_" + id)).filter(t => t && t.textContent);
     for (let i = 0; i < tl.length; i++) for (let j = 0; j < i; j++) {
@@ -1929,6 +1962,8 @@ function renderSys() {
   for (const d of data.disks || []) {
     rows.push(`<div class="row"><span class="t">DISK</span><span>${esc(d.name)} · 剩 ${d.freeGB} GB</span><span>${Math.round(d.used)}%</span><div class="meter seg ramp"><b style="--p:${Math.max(0, Math.min(100, d.used))}%"></b></div></div>`);
   }
+  diskRings();
+  for (const n of diskAway()) rows.push(`<div class="row"><span class="t">DISK</span><span>${esc(n)} · 離線</span><span>—</span><div class="meter seg ramp"><b style="--p:0%"></b></div></div>`);
   rows.push(...auditRows());
   syncAudit();
   $("sysRows").innerHTML = rows.join("");
