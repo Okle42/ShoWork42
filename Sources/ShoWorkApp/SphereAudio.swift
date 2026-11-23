@@ -84,8 +84,12 @@ final class SphereAudio {
     private var started = false
     private var duration: Double?
 
+    /// 播報音量 0–1（球體音量選單），只影響播報、不動系統音量
+    var volume: Float = 0.8 { didSet { player.volume = volume } }
+
     init() {
         engine.attach(player)
+        player.volume = volume
         let mixer = engine.mainMixerNode
         let fmt = mixer.outputFormat(forBus: 0)
         // 11-23：tap 在音訊執行緒上跑。閉包寫在 @MainActor 類別裡會被當成主執行緒專用（Orbit42 debug 版一直報 data race）

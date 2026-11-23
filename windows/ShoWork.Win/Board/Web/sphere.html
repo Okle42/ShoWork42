@@ -332,6 +332,33 @@
   .card .k { display: flex; align-items: center; }
   .card .k .x { margin-left: auto; background: none; border: 0; color: var(--ink-faint); font: 13px/1 -apple-system, sans-serif; cursor: pointer; padding: 0 2px; }
   .card .k .x:hover { color: var(--acc); }
+  /* 11-23 Keng：音量鈕、配色鈕點了不是直接切換，而是叫出下拉選單（跟「⋯」選單同一個樣式） */
+  .dropMenu { position: fixed; z-index: 9; background: var(--panel-solid); border: 1px solid var(--line); border-radius: 8px; padding: 6px;
+    display: none; min-width: 200px; font-size: 12px; color: var(--ink); box-shadow: 0 8px 24px rgba(0,0,0,.28); }
+  .dropMenu.on { display: block; }
+  .dropMenu .hd { padding: 4px 8px 6px; font-size: 10px; letter-spacing: .08em; color: var(--ink-dim); }
+  .dropMenu .row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 4px; }
+  .dropMenu button.row { width: 100%; background: none; border: 0; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+  .dropMenu button.row:hover { background: var(--soft); }
+  .dropMenu .row .ic { width: 16px; text-align: center; color: var(--ink-dim); }
+  .dropMenu .row .lb { flex: 1; }
+  .dropMenu .row small { color: var(--ink-dim); font-size: 10px; }
+  .dropMenu .row .ck { width: 12px; color: var(--acc); }
+  .dropMenu button.row.sel .lb { color: var(--acc); }
+  .dropMenu .sep { border-top: 1px solid var(--line); margin: 4px 0; }
+  /* 開關：灰底白點 → 開的時候紅底 */
+  .dropMenu .sw { width: 28px; height: 16px; border-radius: 8px; background: var(--seg); position: relative; transition: background .15s; flex: none; }
+  .dropMenu .sw::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--ink); transition: left .15s; }
+  .dropMenu .sw.on { background: var(--acc); }
+  .dropMenu .sw.on::after { left: 14px; background: #fff; }
+  /* 音量滑桿：細灰線、紅色已填段、紅點 */
+  .dropMenu input[type=range] { -webkit-appearance: none; appearance: none; flex: 1; height: 16px; background: transparent; margin: 0; cursor: pointer; }
+  .dropMenu input[type=range]::-webkit-slider-runnable-track { height: 3px; border-radius: 2px;
+    background: linear-gradient(to right, var(--acc) 0 var(--pct, 80%), var(--line) var(--pct, 80%) 100%); }
+  .dropMenu input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; margin-top: -4.5px; border-radius: 50%;
+    background: var(--acc); border: 2px solid var(--panel-solid); box-shadow: 0 0 0 1px var(--acc-dim); }
+  .dropMenu input[type=range]:disabled { opacity: .4; }
+  .dropMenu .pct { width: 34px; text-align: right; font: 11px ui-monospace, Menlo, monospace; color: var(--ink-dim); }
   #panelMenu { position: fixed; z-index: 9; background: var(--panel-solid); border: 1px solid var(--line); border-radius: 8px; padding: 6px; display: none; min-width: 150px; }
   #panelMenu.on { display: block; }
   #panelMenu label { display: flex; align-items: center; gap: 8px; padding: 5px 8px; font-size: 12px; border-radius: 4px; cursor: pointer; }
@@ -423,6 +450,8 @@
 <div class="card" id="tlCard" role="dialog" aria-label="今日時間軸"></div>
 <div id="tip"></div>
 <div id="panelMenu" role="menu" aria-label="開關面板"></div>
+<div id="voiceMenu" class="dropMenu" role="menu" aria-label="語音與音量"></div>
+<div id="themeMenu" class="dropMenu" role="menu" aria-label="配色"></div>
 <div class="card pop" id="pop" role="status"></div>
 <div id="banner" role="alert"><div class="in"></div></div>
 
@@ -1335,18 +1364,58 @@ window.karaVoice = (ev, loc, len) => {
 };
 function renderVoice() {
   $("voice").classList.toggle("on", voiceOn);
-  $("voice").title = voiceOn ? "語音：開（點一下關掉）" : "語音：關（點一下打開）";
+  $("voice").title = (voiceOn ? "語音：開" : "語音：關") + "（點一下調音量、開關）";
   $("voice").innerHTML = voiceOn ? SPK_ON : SPK_OFF;
 }
 const SPK = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9v6h4l5 4V5L8 9z"/>';
 const SPK_ON = SPK + '<path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/></svg>';
 const SPK_OFF = SPK + '<path d="M17 9l5 6M22 9l-5 6"/></svg>';
-$("voice").onclick = () => {
-  voiceOn = !voiceOn; try { localStorage.setItem("sphere.voice", voiceOn ? "1" : "0"); } catch {}
+function setVoiceOn(on) {
+  voiceOn = on; try { localStorage.setItem("sphere.voice", voiceOn ? "1" : "0"); } catch {}
   renderVoice();
   if (!voiceOn) post({ action: "stopSpeaking" });
   else announce("語音打開了。");
+}
+/* 11-23 Keng：音量鈕點了叫出下拉選單：語音開關＋音量滑桿（0–100，存起來，原生端播報跟著調） */
+let voiceVol = 80;
+try { const v = parseInt(localStorage.getItem("sphere.volume"), 10); if (v >= 0 && v <= 100) voiceVol = v; } catch {}
+const sendVol = () => post({ action: "volume", value: voiceVol / 100 });
+function dropAt(menu, btn) {          // 選單貼在按鈕下方、右邊對齊按鈕（工具列在右上角），不超出畫面
+  const r = btn.getBoundingClientRect(), w = menu.offsetWidth || 220;
+  menu.style.top = (r.bottom + 6) + "px";
+  menu.style.left = Math.max(8, Math.min(innerWidth - w - 8, r.right - w)) + "px";
+}
+function closeDrops(except) { for (const id of ["voiceMenu", "themeMenu", "panelMenu"]) if (id !== except) $(id).classList.remove("on"); }
+function renderVoiceMenu() {
+  const m = $("voiceMenu");
+  m.innerHTML = `<div class="hd">語音播報</div>
+    <button class="row" data-v="toggle"><span class="lb">${voiceOn ? "播報開著" : "播報關著"}</span><span class="sw${voiceOn ? " on" : ""}"></span></button>
+    <div class="sep"></div>
+    <div class="row"><span class="ic">${SPK_SMALL}</span><input type="range" min="0" max="100" step="5" value="${voiceVol}" aria-label="音量" style="--pct:${voiceVol}%"><span class="pct">${voiceVol}%</span></div>
+    <button class="row" data-v="test"><span class="ic">▶</span><span class="lb">試聽目前的音量</span></button>`;
+}
+const SPK_SMALL = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M16.5 8.5a5 5 0 0 1 0 7"/></svg>';
+$("voice").onclick = e => {
+  e.stopPropagation(); closeDrops("voiceMenu");
+  const m = $("voiceMenu"); renderVoiceMenu(); m.classList.toggle("on"); dropAt(m, $("voice"));
 };
+$("voiceMenu").addEventListener("click", e => {
+  e.stopPropagation();
+  const b = e.target.closest("[data-v]"); if (!b) return;
+  if (b.dataset.v === "toggle") { setVoiceOn(!voiceOn); renderVoiceMenu(); }
+  if (b.dataset.v === "test") { if (!voiceOn) { setVoiceOn(true); renderVoiceMenu(); } else announce(`音量 ${voiceVol}%。`); }
+});
+$("voiceMenu").addEventListener("input", e => {
+  if (e.target.type !== "range") return;
+  voiceVol = +e.target.value; e.target.style.setProperty("--pct", voiceVol + "%");
+  $("voiceMenu").querySelector(".pct").textContent = voiceVol + "%";
+  try { localStorage.setItem("sphere.volume", String(voiceVol)); } catch {}
+  sendVol();                                         // 正在唸的那句也馬上變大變小
+});
+$("voiceMenu").addEventListener("change", e => {     // 放開滑桿：開著播報就唸一句試聽
+  if (e.target.type === "range" && voiceOn) announce(`音量 ${voiceVol}%。`);
+});
+addEventListener("storage", e => { if (e.key === "sphere.volume" && e.newValue != null) { voiceVol = +e.newValue || 0; if ($("voiceMenu").classList.contains("on")) renderVoiceMenu(); } });
 // 一句話：打字＋（有開語音就）唸；唸完或打完才往下
 async function speak(text, mute = false) {
   const v = voiceOn && host() && !mute;
@@ -2536,15 +2605,30 @@ function applyTheme() {
   waveHist.fill(0); waveIdle = 0;
   for (const g of [g5, g7, gHeat, ...gDisks]) paintRamp(g);       // 量表漸層跟著主題換（深色的「黑」、淺色的「白」不同）
   auditSeen = ""; syncAudit();                                    // 自檢環同一組漸層
-  $("bTheme").title = THEME_LABEL[themeMode] + "（點一下換）";
+  $("bTheme").title = THEME_LABEL[themeMode] + "（點一下選）";
   $("bTheme").textContent = themeMode === "auto" ? "◐" : themeMode === "dark" ? "●" : themeMode === "sun" ? "☀" : "○";
-  if (themeMode === "sun") { const { rise, set } = sunTimes(); $("bTheme").title = `配色：日出日落（今天 ${hhmm(rise)} 變淺、${hhmm(set)} 變深；點一下換）`; }
+  if (themeMode === "sun") { const { rise, set } = sunTimes(); $("bTheme").title = `配色：日出日落（今天 ${hhmm(rise)} 變淺、${hhmm(set)} 變深；點一下選）`; }
 }
-$("bTheme").onclick = () => {
-  themeMode = { auto: "dark", dark: "light", light: "sun", sun: "auto" }[themeMode] || "auto";
-  try { localStorage.setItem("sphere.theme", themeMode); } catch {}
-  applyTheme();
+/* 11-23 Keng：配色鈕點了叫出下拉選單，直接選要哪一種（不再點一下輪一次） */
+function renderThemeMenu() {
+  const { rise, set } = sunTimes();
+  const opts = [["auto", "◐", "自動", "跟系統"], ["dark", "●", "深色", ""], ["light", "○", "淺色", ""], ["sun", "☀", "日出日落", `${hhmm(rise)} 變淺 · ${hhmm(set)} 變深`]];
+  $("themeMenu").innerHTML = `<div class="hd">配色</div>` + opts.map(([k, ic, lb, sub]) =>
+    `<button class="row${themeMode === k ? " sel" : ""}" data-t="${k}"><span class="ic">${ic}</span><span class="lb">${lb}</span>${sub ? `<small>${sub}</small>` : ""}<span class="ck">${themeMode === k ? "✓" : ""}</span></button>`).join("");
+}
+$("bTheme").onclick = e => {
+  e.stopPropagation(); closeDrops("themeMenu");
+  const m = $("themeMenu"); renderThemeMenu(); m.classList.toggle("on"); dropAt(m, $("bTheme"));
 };
+$("themeMenu").addEventListener("click", e => {
+  e.stopPropagation();
+  const b = e.target.closest("[data-t]"); if (!b) return;
+  themeMode = b.dataset.t;
+  try { localStorage.setItem("sphere.theme", themeMode); } catch {}
+  applyTheme(); $("themeMenu").classList.remove("on");
+});
+addEventListener("pointerdown", e => { if (!e.target.closest(".dropMenu,#voice,#bTheme")) closeDrops("panelMenu"); });
+addEventListener("keydown", e => { if (e.key === "Escape") closeDrops(); });
 sysDark.addEventListener("change", () => { if (themeMode === "auto") applyTheme(); });
 // 日出日落模式：每分鐘看一次，到點就換（白轉黑、黑轉白有 2 秒漸變）
 setInterval(() => { if (themeMode === "sun" && document.documentElement.dataset.theme !== themeName()) applyTheme(); }, 60000);
@@ -2556,6 +2640,7 @@ window.karaTheme = m => { themeMode = m; applyTheme(); };      // 測試用
 setState("idle"); render(); renderVoice(); show("cardUsage", true); applyTheme();
 if (new URLSearchParams(location.search).has("demo")) setTimeout(demo, 600);
 post({ action: "ready" });
+sendVol();                 // 原生端播報音量（存在 localStorage，每次載入告訴它）
 </script>
 </body>
 </html>

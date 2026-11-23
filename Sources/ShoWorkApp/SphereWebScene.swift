@@ -46,7 +46,12 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
         cfg.userContentController.add(SphereWeakHandler(self), name: "sphere")
         audio.onEvent = { [weak self] ev in self?.voice(ev) }
         audio.onWord = { [weak self] loc, len in self?.web.evaluateJavaScript("window.karaVoice && window.karaVoice('word', \(loc), \(len))") }
-        audio.onLevels = { [weak self] bands, rms, pos, dur in self?.levels(bands, rms, pos: pos, dur: dur, mic: false) }
+        // 聲波在混音器後面量：音量調小時把量到的值放大回來，球的跳動不會跟著變小
+        audio.onLevels = { [weak self] bands, rms, pos, dur in
+            guard let self else { return }
+            let g = 1 / max(self.audio.volume, 0.1)
+            self.levels(bands.map { min(1, $0 * g) }, min(1, rms * g), pos: pos, dur: dur, mic: false)
+        }
         web.setValue(false, forKey: "drawsBackground")
         // 測試視窗在螢幕外＝被當成看不見、rAF 停掉、WebGL 不畫（同 OfficeWebHost）：測試時關掉遮擋偵測
         let occ = NSSelectorFromString("_setWindowOcclusionDetectionEnabled:")
@@ -88,6 +93,8 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
             jump(c)
         case "speak": speak(str("text") ?? "")
         case "stopSpeaking": audio.stop(); edge.stop()
+        case "volume":          // 11-23 Keng：球體音量選單（0–1）
+            if let v = (m["value"] as? NSNumber)?.floatValue { audio.volume = max(0, min(1, v)) }
         case "setVoice":       // 11-21 使用者：換聲音（選單選了就存起來、馬上試聽一句）
             guard let id = str("id"), SphereVoices.all().contains(where: { $0.id == id }) else { return }
             SphereVoices.selected = id
