@@ -2885,3 +2885,16 @@ sendVol();                 // 原生端播報音量（存在 localStorage，每�
 </script>
 </body>
 </html>
+// 11-23 Orbit42 iPhone App（?phone）：手機只能看和回答答案卡 ⇒ ＋新衛星、全螢幕不顯示
+if (new URLSearchParams(location.search).has("phone")) {
+  document.body.classList.add("phone");
+  for (const id of ["bNewSat", "bFull"]) { const e = $(id); if (e) { e.hidden = true; e.style.display = "none"; } }
+  // 直式手機：戰情卡（含答案卡）貼底、整排寬、內容可捲；其他卡片收起（用量、硬碟在外環上看得到）；操作提示不顯示
+  const st = document.createElement("style");
+  st.textContent = `
+    body.phone #cardUsage, body.phone #cardSys, body.phone #cardCool, body.phone #hint { display: none !important; }
+    body.phone #cardTeam { left: 10px !important; right: 10px !important; width: auto !important; top: auto !important;
+      bottom: 150px !important; max-height: 46vh !important; overflow-y: auto !important; -webkit-overflow-scrolling: touch; transform: none !important; }
+    body.phone #cardTeam .x, body.phone #cardTeam .grip { display: none !important; }`;
+  document.head.appendChild(st);
+}
