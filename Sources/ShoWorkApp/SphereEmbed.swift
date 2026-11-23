@@ -36,7 +36,8 @@ public enum SphereEmbed {
     public internal(set) static var latestSphere: Data?
     /// 11-23 Orbit42 iPhone App：衛星清單（JSON 陣列）與某顆衛星的終端機輸出（從第 from 個位元組起；JSON {total, from, data(base64)}）。Orbit42 設定
     public static var remoteSats: (() -> Data)?
-    public static var remoteScreen: ((String, Int) -> Data?)?
+    /// 第三個參數＝手機自己的行列數（11-24：手機在看時衛星改用手機大小；舊版 App 沒帶就是 nil）
+    public static var remoteScreen: ((String, Int, (cols: Int, rows: Int)?) -> Data?)?
     /// 11-24 iPhone 衛星終端機可操作：把手機送來的位元組（鍵盤、滑鼠跳脫序列）寫進那顆衛星的終端機；找不到衛星回 false。Orbit42 設定
     public static var remoteInput: ((String, Data) -> Bool)?
 

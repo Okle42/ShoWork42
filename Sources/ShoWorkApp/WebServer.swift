@@ -136,7 +136,9 @@ final class WebServer {
                              switch path {
                              case "/api/sphere": return SphereEmbed.latestSphere
                              case "/api/sats": return SphereEmbed.remoteSats?() ?? Data("[]".utf8)
-                             case "/api/sat": return q["id"].flatMap { id in SphereEmbed.remoteScreen?(id, Int(q["from"] ?? "") ?? 0) }
+                             case "/api/sat":
+                                 let size = Int(q["cols"] ?? "").flatMap { c in Int(q["rows"] ?? "").map { (cols: c, rows: $0) } }
+                                 return q["id"].flatMap { id in SphereEmbed.remoteScreen?(id, Int(q["from"] ?? "") ?? 0, size) }
                              default: return nil
                              }
                          })
