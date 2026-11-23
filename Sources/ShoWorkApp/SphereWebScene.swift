@@ -40,6 +40,7 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
         cfg.setURLSchemeHandler(OfficeWebSchemeHandler(root: dir), forURLScheme: OfficeWebSchemeHandler.scheme)
         let wv = SphereWebView(frame: .zero, configuration: cfg)
         wv.desk = desk
+        wv.orbit = orbit
         web = wv
         super.init()
         cfg.userContentController.add(SphereWeakHandler(self), name: "sphere")
@@ -624,8 +625,18 @@ final class SphereWebView: WKWebView {
     // 11-22 球體桌面版：上方標題列拖移、右下角縮放（DeskChrome）；noDrag＝網頁回報的按鈕位置（從上緣量的 CSS px）
     var desk = false
     var noDrag: [NSRect] = []
+    // 11-23 Orbit42：球體蓋滿整個視窗（含標題列），按住最上面那一條（按鈕以外）＝拖動整個視窗、雙擊＝放大／還原（跟 macOS 一樣）
+    var orbit = false
     override func mouseDown(with e: NSEvent) {
         if desk, DeskChrome.mouseDown(e, in: self, noDrag: noDrag) { return }
+        if orbit, let w = window, !w.styleMask.contains(.fullScreen) {
+            let p = convert(e.locationInWindow, from: nil)
+            let top = isFlipped ? p.y : bounds.height - p.y
+            if top < DeskChrome.barHeight + 6, !noDrag.contains(where: { $0.contains(NSPoint(x: p.x, y: top)) }) {
+                if e.clickCount == 2 { w.zoom(nil) } else { w.performDrag(with: e) }
+                return
+            }
+        }
         super.mouseDown(with: e)
     }
     // 浮動面板沒在前面時，第一下點擊也要算數（點球、按選項）

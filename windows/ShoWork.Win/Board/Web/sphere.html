@@ -1771,7 +1771,7 @@ function fitTools() {
 addEventListener("resize", fitTools);
 /* 桌面版：告訴原生端標題列上哪些地方是按鈕（其他地方按住＝拖視窗） */
 function deskChrome() {
-  if (!DESK) return;
+  if (!DESK && !ORBIT) return;          // 11-23 Orbit42 也要：標題列上哪些地方是按鈕（其他地方按住＝拖視窗）
   const r = $("tools").getBoundingClientRect();
   post({ action: "deskChrome", noDrag: [[r.left - 4, 0, r.width + 8, r.bottom + 4]] });
 }
