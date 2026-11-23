@@ -2188,10 +2188,13 @@ function parkAsk() {
   const ac = $("askCard"); if (!ORBIT || ac.parentNode !== $("teamRows")) return null;
   const st = askCaret(); document.body.appendChild(ac); return st || "parked";
 }
+let askOpenedFor = "";
 function placeAsk(st) {
   if (!ORBIT) return;
   const ac = $("askCard"), rows = $("teamRows");
   if (!ac.classList.contains("on")) { if (ac.parentNode === rows) document.body.appendChild(ac); return; }
+  // 11-23 Keng「你開在哪裡？我看不到」：戰情卡被收起來時答案卡跟著看不到 ⇒ 每個新問題出現時自動把戰情卡打開（同一題你再收起來就不硬開）
+  try { if (hidden.has("cardTeam") && askOpenedFor !== ac.dataset.sig) { askOpenedFor = ac.dataset.sig; setPanel("cardTeam", true); } } catch {}   // hidden 在檔尾才宣告，載入途中呼叫不會炸
   const i = (data.team || []).slice(0, 6).findIndex(c => c.sessionId === askSid);
   const row = i >= 0 ? rows.querySelector(`.row[data-i="${i}"]`) : null;
   if (ac.parentNode === rows && (row ? row.nextElementSibling === ac : rows.firstElementChild === ac)) return;
