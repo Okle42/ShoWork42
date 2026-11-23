@@ -568,14 +568,13 @@ const orbClock = (() => {
     x.beginPath(); x.roundRect(bx, by, bw, bh, r);
     x.fillStyle = v("--panel") || "rgba(20,20,21,.9)"; x.fill();
     x.lineWidth = 3; x.strokeStyle = v("--line") || "rgba(255,255,255,.14)"; x.stroke();
-    const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}:`, ss = pad(d.getSeconds());
+    // 11-23 Keng：拿掉後面的紅色游標（害整體沒置中）；改成「分:秒」中間的冒號紅／字色（淺色＝黑）每半秒輪流
+    const hh = pad(d.getHours()), mm = pad(d.getMinutes()), ss = pad(d.getSeconds()), ink = v("--ink") || "#f2f2f2";
     x.font = "500 168px ui-monospace, Menlo, monospace"; x.textBaseline = "alphabetic";
-    const wHM = x.measureText(hm).width, wSS = x.measureText(ss).width, cw = 52, gap = 14;
-    let tx = (W - (wHM + wSS + gap + cw)) / 2; const ty = 205;
-    x.fillStyle = v("--ink") || "#f2f2f2"; x.fillText(hm, tx, ty); tx += wHM;
-    if (d.getSeconds() === 42) x.fillStyle = v("--gold") || "#d4af37";      // 11-23 Keng：秒數平常白（同時:分），跳到 42 那一秒才變金色
-    x.fillText(ss, tx, ty); tx += wSS + gap;
-    if (on) { x.fillStyle = v("--acc") || "#ff3b30"; x.fillRect(tx, ty - 128, cw, 140); }
+    const parts = [[hh + ":" + mm, ink], [":", on ? (v("--acc") || "#ff3b30") : ink],
+                   [ss, d.getSeconds() === 42 ? (v("--gold") || "#d4af37") : ink]];      // 秒數平常同字色，跳到 42 那一秒變金色
+    let tx = (W - parts.reduce((w, [t]) => w + x.measureText(t).width, 0)) / 2; const ty = 205;
+    for (const [t, c] of parts) { x.fillStyle = c; x.fillText(t, tx, ty); tx += x.measureText(t).width; }
     x.font = "40px ui-monospace, Menlo, monospace"; x.fillStyle = v("--ink-dim") || "rgba(242,242,242,.56)";
     if ("letterSpacing" in x) x.letterSpacing = "5px";
     x.textAlign = "center"; x.fillText(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} · TPE`, W / 2, 282);
