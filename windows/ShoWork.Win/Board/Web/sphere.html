@@ -92,7 +92,9 @@
   body.orbitMode #teamRows > #askCard { position: static; left: auto; bottom: auto; transform: none; width: auto; margin: 2px 0 8px;
     box-shadow: none; background: var(--soft); padding: 8px 10px 10px; transition: none; }
   body.orbitMode #teamRows > #askCard .opts { grid-template-columns: 1fr; }
-  body.orbitMode #teamRows > #askCard { box-sizing: border-box; max-width: 100%; min-width: 0; }
+  body.orbitMode #teamRows > #askCard .q, body.orbitMode #teamRows > #askCard .sum { max-height: none; overflow: visible; }   /* 問題和摘要整段顯示，不在小框裡捲 */
+  body.orbitMode #teamRows > #askCard { box-sizing: border-box; max-width: 100%; min-width: 0;
+    width: auto !important; height: auto !important; max-height: none !important; left: auto !important; top: auto !important; overflow: visible !important; }   /* 11-23 Keng「答案卡要自動改變大小，不是要我拖拉」：以前拖拉存下的答案卡寬高（layout.askCard）在戰情列裡不算數 */
   body.orbitMode #teamRows > #askCard .foot { flex-wrap: wrap; row-gap: 4px; }   /* 戰情卡只有 310px：提示和連結放不下就換行，不撐出橫捲軸 */
   body.orbitMode #cardTeam > #askDot { position: static; transform: none; width: 100%; margin: 4px 0 6px; justify-content: center; }
   body.orbitMode.stack.asking #cardTeam { opacity: 1; pointer-events: auto; }
