@@ -107,10 +107,14 @@ final class WorkWindow: NSObject, NSWindowDelegate, WKScriptMessageHandler {
         window.delegate = self
         window.setFrameAutosaveName("ShoWorkWorkWindow")
         if window.frame.origin == .zero { window.center() }
+        // 11-23 修 Orbit42 當機：app 裡的 Bundle.main.resourceURL 是「相對於 app 的網址」（Contents/Resources/ ＋ 基準 file:///…app/），
+        // URLComponents(resolvingAgainstBaseURL: false) 會把基準丟掉 ⇒ 變成 "Contents/Resources/Web/work.html?orbit=1…"，
+        // 不是 file URL ⇒ WKWebView.loadFileURL 丟 NSInvalidArgumentException、整個 Orbit42 崩潰（點球上的隊長就當）。一律先轉絕對網址
+        let webDir = webDir.absoluteURL
         var url = webDir.appendingPathComponent("work.html")
         if let t = orbitTheme {
             embedded = true
-            var c = URLComponents(url: url, resolvingAgainstBaseURL: false)!
+            var c = URLComponents(url: url, resolvingAgainstBaseURL: true)!
             c.queryItems = [URLQueryItem(name: "orbit", value: "1"), URLQueryItem(name: "theme", value: t == "light" ? "light" : "dark")]
             url = c.url ?? url
         }
