@@ -789,6 +789,8 @@ function gaugeSide(g, rect) {
 const LAYER = r => 2.96 + r * 0.1;
 const g5 = gauge(LAYER(0), 0.055, 72, [0.7, 0.9]), g7 = gauge(LAYER(1), 0.055, 72, [0.8, 0.95]);
 const gHeat = gauge(LAYER(6), 0.055, 65, [(70 - 35) / 65, (85 - 35) / 65]);       // 一格＝1°C
+// 11-23 Keng：溫度環外面再一圈＝風扇即時轉速（目前 rpm／最高 rpm，cool42 給的；跟溫度環同一側翻）
+const gFan = gauge(LAYER(7), 0.055, 60, [0.5, 0.85]);
 // 硬碟環（右半邊，固定不翻）：最多 4 顆，一格 1%，85% 門檻刻線、超過變紅
 const gDisks = [2, 3, 4, 5].map(k => gauge(LAYER(k), 0.055, 100, [0.85, 0.95], dAng));
 const heatDot = new THREE.Mesh(new THREE.CircleGeometry(0.05, 12), gmat(0)); outer.add(heatDot);
@@ -802,9 +804,11 @@ function animGauges(dt, t) {
   const u5 = data.five_hour, u7 = data.seven_day, h = data.heat;
   g5.target = u5 == null ? null : u5 / 100; g7.target = u7 == null ? null : u7 / 100;
   gHeat.target = h?.temp == null ? null : Math.min(1, Math.max(0.02, (h.temp - 35) / 65));
+  const fan = data.cool?.fan;
+  gFan.target = fan?.rpm == null || !fan.max ? null : Math.min(1, Math.max(0.02, fan.rpm / fan.max));
   const disks = data.disks || [];
   gDisks.forEach((g, i) => { g.target = disks[i]?.used == null ? null : disks[i].used / 100; });
-  for (const g of [g5, g7, gHeat, ...gDisks]) {
+  for (const g of [g5, g7, gHeat, gFan, ...gDisks]) {
     const on = g.target != null;
     g.track.visible = g.fill.visible = g.tk.visible = g.hit.visible = on; if (!on) continue;
     g.cur += (g.target - g.cur) * Math.min(1, dt * (g === gHeat ? 0.9 : 2.2));        // 溫度慢慢走過去
@@ -1408,7 +1412,7 @@ function drawLinks() {
    （滑鼠在哪一列就指哪顆；沒有就指最需要注意的：需要你 > 卡住 > 進行中）、事件卡→講到的那個東西 */
 const linkRect = {};
 let rowSid = null, popTarget = null, popFresh = false;
-$("lkStatic").innerHTML = ["cardUsage", "g7", "cardTeam", "cardSys", "disk0", "disk1", "disk2", "disk3"].map(id => `<path id="lp_${id}"/><circle id="lb_${id}" r="0" style="fill:var(--bg);stroke:none;opacity:.85"/><circle id="lr_${id}" r="6" style="fill:none;stroke:var(--acc);stroke-width:1.2"/><circle id="lc_${id}" r="3"/><text id="lt_${id}"></text>`).join("");
+$("lkStatic").innerHTML = ["cardUsage", "g7", "cardTeam", "cardSys", "fan", "disk0", "disk1", "disk2", "disk3"].map(id => `<path id="lp_${id}"/><circle id="lb_${id}" r="0" style="fill:var(--bg);stroke:none;opacity:.85"/><circle id="lr_${id}" r="6" style="fill:none;stroke:var(--acc);stroke-width:1.2"/><circle id="lc_${id}" r="3"/><text id="lt_${id}"></text>`).join("");
 $("lkPop").innerHTML = `<path id="lp_pop" class="pop"/><circle id="lb_pop" r="0" style="fill:var(--bg);stroke:none;opacity:.85"/><circle id="lr_pop" class="pop" r="6" style="fill:none;stroke:var(--acc);stroke-width:1.2"/><circle id="lc_pop" class="pop" r="3"/><text id="lt_pop"></text>`;
 /** 尖端的標籤：指到的東西是什麼、多少 */
 function labelOf(key) {
@@ -1416,6 +1420,7 @@ function labelOf(key) {
   if (key === "5h" || key === "cardUsage") return data.five_hour == null ? "" : `5H ${Math.round(data.five_hour)}%`;
   if (key === "7d" || key === "g7") return data.seven_day == null ? "" : `7D ${Math.round(data.seven_day)}%`;
   if (key === "heat" || key === "cardSys") return data.heat?.temp == null ? "" : `${Math.round(data.heat.temp)}°C`;
+  if (key === "fan") return data.cool?.fan?.rpm == null ? "" : `${Math.round(data.cool.fan.rpm)} RPM`;
   if (key === "cardTeam") return name(teamFocus());
   if (/^disk\d$/.test(key)) { const d = (data.disks || [])[+key[4]]; return d ? `${d.name} ${Math.round(d.used)}%` : ""; }
   return key ? name(key) : "";
@@ -1433,6 +1438,7 @@ function targetOf(key) {
   if (key === "5h" || key === "cardUsage") return toScreen(gaugeTip(g5));
   if (key === "7d" || key === "g7") return toScreen(gaugeTip(g7));
   if (key === "heat" || key === "cardSys") return toScreen(gaugeTip(gHeat));
+  if (key === "fan") return toScreen(gaugeTip(gFan));
   if (key === "cardTeam") return satPoint(teamFocus());
   if (/^disk\d$/.test(key)) return toScreen(gaugeTip(gDisks[+key[4]]));
   return key ? satPoint(key) : null;
@@ -1504,10 +1510,11 @@ function linkFrame() {
     setLink("cardUsage", null, targetOf("cardUsage"), data.five_hour >= 70 ? "warn" : "");
     setLink("g7", null, targetOf("g7"), data.seven_day >= 80 ? "warn" : "");      // 11-22 Keng：7 天的 % 也要標
     setLink("cardSys", null, targetOf("cardSys"), data.heat && (data.heat.level === "hot" || data.heat.level === "critical") ? "bad" : "");
+    setLink("fan", null, targetOf("fan"), "");          // 11-23 Keng：風扇環尖端標即時轉速
     setLink("cardTeam", null, null); setLink("pop", null, null);
     gDisks.forEach((g, i) => setLink("disk" + i, null, targetOf("disk" + i), (data.disks || [])[i]?.used >= 85 ? "warn" : ""));
     // 11-23 Keng：標籤都在自己紅點的正上方置中；兩個標籤疊到時，後面那個再往上錯開一行
-    const tl = ["cardUsage", "g7", "cardSys", "disk0", "disk1", "disk2", "disk3"].map(id => $("lt_" + id)).filter(t => t && t.textContent);
+    const tl = ["cardUsage", "g7", "cardSys", "fan", "disk0", "disk1", "disk2", "disk3"].map(id => $("lt_" + id)).filter(t => t && t.textContent);
     for (let i = 0; i < tl.length; i++) for (let j = 0; j < i; j++) {
       const a = tl[j].getBBox(), b = tl[i].getBBox();
       if (a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height)
@@ -1517,7 +1524,7 @@ function linkFrame() {
     satMarks();
     return;
   }
-  gaugeSide(g5, linkRect.cardUsage); gaugeSide(g7, linkRect.cardUsage); gaugeSide(gHeat, linkRect.cardSys || linkRect.cardUsage);
+  gaugeSide(g5, linkRect.cardUsage); gaugeSide(g7, linkRect.cardUsage); gaugeSide(gHeat, linkRect.cardSys || linkRect.cardUsage); gaugeSide(gFan, linkRect.cardSys || linkRect.cardUsage);
   for (const id of ["cardUsage", "cardTeam", "cardSys"]) {
     const lvl = id === "cardUsage" ? (data.five_hour >= 70 ? "warn" : "") : id === "cardSys" ? (data.heat && (data.heat.level === "hot" || data.heat.level === "critical") ? "bad" : "") : "";
     setLink(id, linkRect[id], targetOf(id), lvl);
