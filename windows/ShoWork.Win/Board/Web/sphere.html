@@ -924,7 +924,11 @@ function rampColor(f, out = new THREE.Color()) {
 // 11-24 Keng 05:30：Orbit42 深色時智能體往外擴散的效果（警示衝擊波、說話粒子）反過來：從球的綠開始、擴到末端變白
 // 量表（paintRamp）照舊用 rampColor，不受影響
 function fxRev() { return ORBIT && themeName() === "dark"; }      // 用 function 宣告：setState 可能比這行早執行
-function fxRampColor(f, out = new THREE.Color()) { return rampColor(fxRev() ? 1 - f : f, out); }
+// 11-24 Keng 05:40「擴散末端的白太刺眼，淡一點」：反向時越往末端越暗（末端剩 55% 亮度；相加混色下＝淡灰白，不刺眼），綠的起點不變
+function fxRampColor(f, out = new THREE.Color()) {
+  if (!fxRev()) return rampColor(f, out);
+  return rampColor(1 - f, out).multiplyScalar(1 - 0.45 * Math.max(0, Math.min(1, f)));
+}
 function paintRamp(g) {
   const col = g.fill.geometry.attributes.color, c = new THREE.Color();
   for (let k = 0; k < g.n; k++) { rampColor((k + 0.5) / g.n, c); for (let v = 0; v < 4; v++) col.setXYZ(k * 4 + v, c.r, c.g, c.b); }
@@ -2386,6 +2390,15 @@ document.addEventListener("keydown", e => {
 });
 function done(c) { sentKey.set(c.sessionId, askKey(c)); askSid = null; $("askCard").dataset.sig = ""; renderAsk(); autoState(); }
 window.karaSetState = setState;
+// 11-24 測試：做 App 圖示用——只留智能體本體（核心、殼、斜環、粒子），拿掉量表、外環、衛星、時鐘、衝擊波和所有介面
+window.karaIconShot = (o = {}) => {
+  outer.removeFromParent(); if (!o.sats) satGroup.removeFromParent();
+  for (const m of shocks) m.removeFromParent();
+  if (o.noRibbons) ribGroup.removeFromParent();
+  root.traverse(m => { if (m.material?.map?.image?.height === 340) m.visible = false; });      // 球心時鐘面板
+  for (const el of document.body.children) if (el !== canvas && !el.contains(canvas)) el.style.visibility = "hidden";
+  document.body.style.background = o.bg || "#000";
+};
 window.karaData = () => data;
 window.karaSats = () => [...sats.values()].map(s => ({ name: s.c?.name, a: +s.orbit.a.toFixed(4), hovered: s === hovered }));   // 測試：衛星的軌道角度            // 測試注入碼讀資料用（SHOWORK_TEST_SPHERE_JS）
 window.karaAnchor = (x, y) => { satAnchor = { x, y }; };
