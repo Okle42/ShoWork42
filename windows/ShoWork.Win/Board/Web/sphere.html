@@ -1966,7 +1966,7 @@ function diff(team) {
       const was = p.status, is = c.status;
       if (is === was && (is !== "需要你" || p?.ask === c.ask)) continue;
       const who = c.name || "有個 session";
-      const pop = sessionPop(c);
+      const pop = null;   // 11-23 Keng：唸 session 狀態時不彈事件卡——內容跟「戰情 · SESSION」列和答案卡重複；語音照唸、需要你的橫幅照出
       // 11-23 Keng 模擬「訊息送出 → 完成」逐句校正：
       //   結果（summary）只用這一輪的「回報卡」——開工卡的 summary 是打算做什麼，不能當成做完的內容唸
       //   卡住講看板的真正原因（reason）：沒動靜幾分鐘／AI 自報等什麼，不再拿上一句摘要充數
