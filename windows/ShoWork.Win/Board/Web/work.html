@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>工作視窗</title>
 <link rel="stylesheet" href="work.css">
+<script>/* 11-23 Orbit42：嵌在衛星終端機外框裡 ⇒ 黑白灰紅、透明底（毛玻璃由外框做） */
+{ const q = new URLSearchParams(location.search); if (q.has("orbit")) { document.documentElement.classList.add("orbit"); document.documentElement.dataset.theme = q.get("theme") === "light" ? "light" : "dark"; } }</script>
 </head>
 <body>
 <header id="top">

@@ -104,3 +104,40 @@ select { background: var(--well); border: 1px solid var(--sep); border-radius: 6
 #toast { position: fixed; left: 50%; bottom: 70px; transform: translateX(-50%); padding: 7px 14px; border-radius: 9px; background: rgba(30, 30, 32, .95);
          border: 1px solid var(--sep); box-shadow: 0 6px 20px rgba(0, 0, 0, .4); font-size: 12px; z-index: 50; }
 #demoNote { position: fixed; left: 14px; bottom: 1px; font-size: 10px; color: var(--tertiary); }
+
+/* ── 11-23 T1123115042 Orbit42 衛星終端機樣式（html.orbit）：透明底、只用黑白灰＋紅；淺色時字只用深灰～紅 ── */
+html.orbit {
+  --win: transparent; --card: transparent;
+  --primary: #ededed; --secondary: rgba(237, 237, 237, .62); --tertiary: rgba(237, 237, 237, .38);
+  --accent: #ff3b30; --sep: rgba(255, 255, 255, .12); --well: rgba(0, 0, 0, .28);
+  --red: #ff3b30; --green: rgba(237, 237, 237, .7); --orange: #ff3b30;
+  --add: rgba(255, 255, 255, .08); --del: rgba(255, 59, 48, .16);
+  --soft: rgba(255, 255, 255, .06); --acc-soft: rgba(255, 59, 48, .16);
+  --mono: "SF Mono", Menlo, "PingFang TC", monospace;
+}
+html.orbit[data-theme="light"] {
+  --primary: #141414; --secondary: #3a3a3a; --tertiary: #555555;
+  --accent: #d7261b; --sep: rgba(0, 0, 0, .12); --well: rgba(255, 255, 255, .5);
+  --red: #d7261b; --green: #3a3a3a; --orange: #d7261b;
+  --add: rgba(0, 0, 0, .06); --del: rgba(215, 38, 27, .12);
+  --soft: rgba(0, 0, 0, .045); --acc-soft: rgba(215, 38, 27, .1);
+}
+html.orbit, html.orbit body { background: transparent; }
+html.orbit body { font-family: "SF Mono", Menlo, "PingFang TC", monospace; font-size: 12.5px; }
+html.orbit #top { background: transparent; }
+html.orbit .pill { background: var(--soft); color: var(--secondary); }
+html.orbit .pill.busy { background: var(--acc-soft); color: var(--accent); }
+html.orbit .pill.idle { background: var(--soft); color: var(--secondary); }
+html.orbit .pill.exited { background: transparent; color: var(--tertiary); }
+html.orbit .btn { background: transparent; border-color: var(--sep); border-radius: 14px; }
+html.orbit .btn:hover { background: var(--soft); }
+html.orbit .btn.primary, html.orbit #permit .opt.on { background: transparent; border-color: var(--accent); color: var(--accent); }
+html.orbit .user .bubble { background: transparent; border: 1px solid var(--sep); border-radius: 4px; }
+html.orbit .ai .text code { background: var(--soft); color: var(--accent); }
+html.orbit .tool { background: transparent; }
+html.orbit #permit { border-color: var(--accent); background: var(--acc-soft); }
+html.orbit .chip button { background: var(--tertiary); color: #fff; }
+html.orbit #toast { background: var(--well); color: var(--primary); backdrop-filter: blur(10px); }
+html.orbit select { background: transparent; }
+html.orbit #input { background: var(--soft); }
+html.orbit #input:focus { border-color: var(--accent); }
