@@ -1013,7 +1013,9 @@ canvas.addEventListener("wheel", e => {
   e.preventDefault();
   const f = Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0015));         // ctrlKey＝觸控板捏合
   if (autoOn) {                       // 自動排版：記下「你要大一點／小一點」的倍數，兩欄跟著球重排
-    layout.zmul = Math.min(2.2, Math.max(0.5, (layout.zmul || 1) * f)); saveLayout(); autoSoon(); return;
+    if (ORBIT) layout.zo = Math.min(1.6, Math.max(0.6, (layout.zo || 1) * f));
+    else layout.zmul = Math.min(2.2, Math.max(0.5, (layout.zmul || 1) * f));
+    saveLayout(); autoSoon(); return;
   }
   zoom = Math.min(2, Math.max(0.45, zoom * f));
   try { localStorage.setItem(ZKEY, String(zoom)); } catch {}
@@ -2402,7 +2404,8 @@ function remember(id) {
    窄／直的視窗：球往上移到 40% 高、卡片排在下面左右兩張（外環併進額度卡）
    開著時視窗一變、卡片內容一變就重排；拖面板、拉大小、滾輪縮放＝轉成手動（照當下位置記住） */
 var autoOn = layout.auto ?? !PANELS.some(id => layout[id]), autoStack = false;
-const TAN20 = Math.tan(20 * Math.PI / 180), CLEAR = 2.45;     // 卡片離球心至少 2.45 單位（內圈環）
+const TAN20 = Math.tan(20 * Math.PI / 180), CLEAR = 2.45;
+const Z_STD = 0.76;                                            // Orbit42 自動排版的標準球大小（見 autoLayout）     // 卡片離球心至少 2.45 單位（內圈環）
 function natH(el, w) { el.style.width = w + "px"; el.style.height = ""; el.style.maxHeight = "none"; return el.scrollHeight + 2; }
 function put(el, x, y, w, h) {
   Object.assign(el.style, { left: Math.round(x) + "px", top: Math.round(y) + "px", width: Math.round(w) + "px",
@@ -2425,7 +2428,11 @@ function autoLayout() {
     const zSide = W < H ? 15 : 10.5, upS = (H / 2) / (zSide * TAN20);              // 1 倍時每單位幾像素
     const want = Math.min(310, Math.max(250, W * 0.24));
     // 球的大小：兩欄放得下（寬）、上下塞得進字幕和狀態字之間（高）取小的，再乘上你滾輪調的倍數
-    const z = Math.max(0.45, Math.min(2, Math.min(1.15, (W / 2 - want - 2 * M - 12) / (CLEAR * upS), (room / 2) / (2.7 * upS)) * zmul));
+    // 11-23 Keng（Orbit42）「以這樣為標準大小，上下跟全螢幕都要保持這樣」：球固定佔畫面高度同一個比例
+    // （1448×910 視窗時最外圈半徑 ≈ 37% 高 ⇒ 0.76 倍，這個倍數跟視窗高度無關）；只有寬度放不下兩欄卡片時才縮小。
+    // 滾輪在標準大小上微調（另外記在 layout.zo，跟 ShoWork 桌面版的 zmul 分開）
+    const z = ORBIT ? Math.max(0.45, Math.min(Z_STD * (layout.zo || 1), (W / 2 - want - 2 * M - 12) / (CLEAR * upS)))
+      : Math.max(0.45, Math.min(2, Math.min(1.15, (W / 2 - want - 2 * M - 12) / (CLEAR * upS), (room / 2) / (2.7 * upS)) * zmul));
     const cw = Math.min(310, W / 2 - CLEAR * upS * z - 2 * M - 12);
     autoStack = cw < 220;
     document.body.classList.toggle("stack", autoStack);          // 先切版型再量高度（疊排時外環會併進額度卡）
