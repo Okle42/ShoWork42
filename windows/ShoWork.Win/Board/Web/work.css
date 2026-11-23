@@ -109,10 +109,10 @@ select { background: var(--well); border: 1px solid var(--sep); border-radius: 6
 html.orbit {
   --win: transparent; --card: transparent;
   --primary: #ededed; --secondary: rgba(237, 237, 237, .62); --tertiary: rgba(237, 237, 237, .38);
-  --accent: #ff3b30; --sep: rgba(255, 255, 255, .12); --well: rgba(0, 0, 0, .28);
-  --red: #ff3b30; --green: rgba(237, 237, 237, .7); --orange: #ff3b30;
-  --add: rgba(255, 255, 255, .08); --del: rgba(255, 59, 48, .16);
-  --soft: rgba(255, 255, 255, .06); --acc-soft: rgba(255, 59, 48, .16);
+  --accent: #4fc36a; --sep: rgba(255, 255, 255, .12); --well: rgba(0, 0, 0, .28);
+  --red: #4fc36a; --green: rgba(237, 237, 237, .7); --orange: #4fc36a;
+  --add: rgba(255, 255, 255, .08); --del: rgba(79, 195, 106, .16);
+  --soft: rgba(255, 255, 255, .06); --acc-soft: rgba(79, 195, 106, .16);
   --mono: "SF Mono", Menlo, "PingFang TC", monospace;
 }
 html.orbit[data-theme="light"] {

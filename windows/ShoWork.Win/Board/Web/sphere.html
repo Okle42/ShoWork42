@@ -27,9 +27,9 @@
     --ink: #f2f2f2; --ink-dim: rgba(242,242,242,.56); --ink-faint: rgba(242,242,242,.3);
     --panel: rgba(20,20,21,.9); --panel-solid: rgba(17,17,18,.96);
     --line: rgba(255,255,255,.14); --soft: rgba(255,255,255,.05); --seg: rgba(255,255,255,.1);
-    --acc: #ff3b30; --gray: #9a9a9a; --done: #6a6a6a; --gold: #d4af37;
-    --warn: #ff3b30; --bad: #ff3b30;
-    --r0: #f4f4f4; --r1: #8c8c8c; --r2: #3e3e3e; --r3: #ff3b30;      /* 量表漸層 白→灰→黑→紅（跟球體 THEME3.ramp 同一組） */
+    --acc: #4fc36a; --gray: #9a9a9a; --done: #6a6a6a; --gold: #d4af37;
+    --warn: #4fc36a; --bad: #4fc36a;
+    --r0: #f4f4f4; --r1: #8c8c8c; --r2: #3e3e3e; --r3: #4fc36a;      /* 量表漸層 白→灰→黑→綠（11-23 Keng：深色的紅全部改護眼綠，淺色維持紅）（跟球體 THEME3.ramp 同一組） */
     --cross: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='56'%3E%3Cpath d='M28 24.5v7M24.5 28h7' stroke='%23fff' stroke-opacity='.26' stroke-width='1'/%3E%3C/svg%3E");
   }
   :root[data-theme="light"] {
@@ -575,8 +575,8 @@ let speakAmp = 0;               // 說話時的「音量」，驅動球體脹縮
 // 11-22 黑白灰紅：BALL＝球本體（深色主題淺灰、淺色主題近黑）、GRAY＝待審／聆聽、ALERT／BAD＝紅（需要你／卡住）、DONE＝暗灰
 // 淺色背景上「相加混色」會整顆看不見 ⇒ 淺色主題改一般混色（applyTheme 會把所有材質換掉）
 const THEME3 = {
-  dark:  { ball: "#c9c9c9", gray: "#8f8f8f", alert: "#ff3b30", bad: "#ff3b30", done: "#5c5c5c", blend: THREE.AdditiveBlending,
-           ramp: ["#f4f4f4", "#8c8c8c", "#3e3e3e", "#ff3b30"] },      // 量表漸層 白→灰→黑→紅（深色底上「黑」用深灰，不然看不見）
+  dark:  { ball: "#c9c9c9", gray: "#8f8f8f", alert: "#4fc36a", bad: "#4fc36a", done: "#5c5c5c", blend: THREE.AdditiveBlending,
+           ramp: ["#f4f4f4", "#8c8c8c", "#3e3e3e", "#4fc36a"] },      // 量表漸層 白→灰→黑→綠（深色底上「黑」用深灰，不然看不見）
   light: { ball: "#1c1c1c", gray: "#7a7a7a", alert: "#d7261b", bad: "#d7261b", done: "#ababab", blend: THREE.NormalBlending,
            ramp: ["#d4d4d4", "#8c8c8c", "#141414", "#d7261b"] },      // 淺色底上「白」用淺灰
 };
@@ -668,7 +668,7 @@ const orbClock = (() => {
     const hh = pad(d.getHours()), mm = pad(d.getMinutes()), ss = pad(d.getSeconds()), ink = v("--ink") || "#f2f2f2";
     x.font = "500 168px ui-monospace, Menlo, monospace"; x.textBaseline = "alphabetic";
     x.lineWidth = 3; x.lineJoin = "round";      // 11-23 Keng「字稍微加粗一丁點」：同色細描邊，各瀏覽器粗細一致（換字重會跳到 Bold、太粗）
-    const parts = [[hh + ":" + mm, ink], [":", on ? (v("--acc") || "#ff3b30") : ink],
+    const parts = [[hh + ":" + mm, ink], [":", on ? (v("--acc") || "#4fc36a") : ink],
                    [ss, d.getSeconds() === 42 ? (v("--gold") || "#d4af37") : ink]];      // 秒數平常同字色，跳到 42 那一秒變金色
     let tx = (W - parts.reduce((w, [t]) => w + x.measureText(t).width, 0)) / 2; const ty = 205;
     for (const [t, c] of parts) { x.fillStyle = x.strokeStyle = c; x.fillText(t, tx, ty); x.strokeText(t, tx, ty); tx += x.measureText(t).width; }
@@ -1272,7 +1272,7 @@ function animFx(dt, t) {
 const rgb3 = c => `${Math.round(c.r * 255)},${Math.round(c.g * 255)},${Math.round(c.b * 255)}`;
 /* 字幕下的聲波：往左捲的音量歷史，上下對稱 */
 // 11-23 戰情卡「進行中」那一列的紅色雷達波：canvas 高解析度重畫（兩圈錯開半拍，2.6 秒一圈）
-const RADAR_MS = 2600; let radarAccFor = "", radarRGB = "255,59,48";
+const RADAR_MS = 2600; let radarAccFor = "", radarRGB = "79,195,106";
 function radarGrayRGB() { return document.documentElement.dataset.theme === "light" ? "120,120,124" : "170,170,176"; }
 function radarLoop(now) {
   requestAnimationFrame(radarLoop);
@@ -1280,10 +1280,10 @@ function radarLoop(now) {
   const rows = document.querySelectorAll(".row.trow.live");
   if (!rows.length) return;
   const dpr = Math.min(3, devicePixelRatio || 1);
-  const accRaw = getComputedStyle(document.documentElement).getPropertyValue("--acc").trim() || "#ff3b30";
+  const accRaw = getComputedStyle(document.documentElement).getPropertyValue("--acc").trim() || "#4fc36a";
   if (accRaw !== radarAccFor) {            // 把 --acc 換成 r,g,b（canvas 漸層要 rgba）
     const probe = document.createElement("i"); probe.style.color = accRaw; document.body.appendChild(probe);
-    radarRGB = (getComputedStyle(probe).color.match(/[\d.]+/g) || [255, 59, 48]).slice(0, 3).join(","); probe.remove(); radarAccFor = accRaw;
+    radarRGB = (getComputedStyle(probe).color.match(/[\d.]+/g) || [79, 195, 106]).slice(0, 3).join(","); probe.remove(); radarAccFor = accRaw;
   }
   for (const row of rows) {
     // 11-23 Keng：工作中＝紅色雷達波；等待（卡住／等外部的事）＝灰色雷達波
@@ -2097,6 +2097,7 @@ if (ORBIT) {
   // 11-23 Keng（主畫面整頓）：Orbit42 工具列只留 ＋新衛星、全螢幕、⋯、深淺、語音；早報／收工／時間軸／自動排版／聲音收進「⋯」，桌面版用不到
   for (const id of ["bBrief", "bWrap", "bTl", "bMini", "bAuto"]) $(id).style.display = "none";
   document.body.classList.add("orbitMode");
+  $("brandTab").innerHTML = "ORBIT<b>42</b>";   // 11-23 Keng：Orbit42 裡左上角品牌改成 ORBIT42
   $("bPanels").title = "面板開關、早報、收工、時間軸、自動排版、播報聲音";
   $("bFull").hidden = false; $("bFull").onclick = () => post({ action: "orbit", cmd: "fullscreen" });
   const b = $("bNewSat"); b.hidden = false;
