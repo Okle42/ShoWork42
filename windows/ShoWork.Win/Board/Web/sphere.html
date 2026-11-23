@@ -29,6 +29,7 @@
     --line: rgba(255,255,255,.14); --soft: rgba(255,255,255,.05); --seg: rgba(255,255,255,.1);
     --acc: #ff3b30; --gray: #9a9a9a; --done: #6a6a6a; --gold: #d4af37;
     --warn: #ff3b30; --bad: #ff3b30;
+    --r0: #f4f4f4; --r1: #8c8c8c; --r2: #3e3e3e; --r3: #ff3b30;      /* 量表漸層 白→灰→黑→紅（跟球體 THEME3.ramp 同一組） */
     --cross: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='56'%3E%3Cpath d='M28 24.5v7M24.5 28h7' stroke='%23fff' stroke-opacity='.26' stroke-width='1'/%3E%3C/svg%3E");
   }
   :root[data-theme="light"] {
@@ -39,6 +40,7 @@
     --line: rgba(0,0,0,.13); --soft: rgba(0,0,0,.045); --seg: rgba(0,0,0,.1);
     --acc: #d7261b; --gray: #6e6e6e; --done: #a6a6a6; --gold: #a8801a;
     --warn: #d7261b; --bad: #d7261b;
+    --r0: #d4d4d4; --r1: #8c8c8c; --r2: #141414; --r3: #d7261b;
     --cross: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='56'%3E%3Cpath d='M28 24.5v7M24.5 28h7' stroke='%23000' stroke-opacity='.22' stroke-width='1'/%3E%3C/svg%3E");
   }
   /* 11-22 Keng：小視窗的寬度全部一樣（額度、外環、戰情、事件卡、衛星小卡）；自動排版會依視窗改 --cw */
@@ -291,6 +293,11 @@
   .trow .sub { grid-column: 2 / -1; font-size: 10px; color: var(--ink-dim); letter-spacing: .04em; margin-top: -2px; }
   .trow .sub .hi { color: var(--warn); }
   .trow .meter { grid-column: 2 / -1; margin-top: 0; }
+  /* 11-23 Keng：戰情每一列一條「完成度」分段條，顏色照球體量表：白(0)→灰(40%)→黑(70%)→紅(85% 起)；
+     漸層鋪滿整條、只露出完成的那段（clip），所以越往後越深，跟球外圈的環一樣 */
+  .trow .meter.ramp { height: 5px; margin: 3px 0 2px; }
+  .meter.ramp b { width: 100% !important; background: linear-gradient(90deg, var(--r0) 0%, var(--r1) 40%, var(--r2) 70%, var(--r2) 84.5%, var(--r3) 85.5%, var(--r3) 100%) !important;
+    clip-path: inset(0 calc(100% - var(--p, 0%)) 0 0); transition: clip-path .8s ease; }
   .trow.flash { animation: rflash 1.6s ease-out; }
   @keyframes rflash { 0%, 35% { background: var(--acc-soft); } 100% { background: transparent; } }
   .more { font-size: 10px; color: var(--ink-dim); text-align: right; padding-top: 6px; letter-spacing: .08em; }
@@ -1406,7 +1413,7 @@ function renderTeam() {
     return `<div class="row trow${c.status === "進行中" ? " live" : ""}${c.sessionId ? " link" : ""}${changed ? " flash" : ""}" data-i="${i}" title="${c.sessionId ? "點一下跳到這個 session" : ""}">
       <span class="dot${c.status === "需要你" || c.status === "進行中" ? " pulse" : ""}" style="--c:${col}"></span>
       <span class="nm">${esc(c.name || "")}${c.doing ? `<small> · ${esc(c.doing)}</small>` : ""}</span><span>${c.progress != null ? c.progress + "%" : ""}</span>
-      ${c.progress != null ? `<div class="meter"><b style="width:${c.progress}%;background-color:${col}"></b></div>` : ""}
+      <div class="meter seg ramp" title="完成度 ${c.progress != null ? c.progress + "%" : "還沒回報"}"><b style="--p:${Math.max(0, Math.min(100, c.progress ?? 0))}%"></b></div>
       <div class="sub">${sub}</div></div>`;
   }).join("") + (team.length > 6 ? `<div class="more">還有 ${team.length - 6} 個 · 點衛星看</div>` : "");
   for (const c of team) if (c.sessionId) lastSt.set(c.sessionId, c.status);
