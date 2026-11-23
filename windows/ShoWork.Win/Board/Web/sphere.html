@@ -2560,8 +2560,22 @@ addEventListener("pointerup", () => {
   saveLayout();
 }, true);
 addEventListener("resize", () => { if (!autoOn) for (const id of PANELS) place(id); drawLinks(); });
+/** 11-23 Keng「我要限定範圍」：衛星斜對角排開的範圍＝左欄卡片右緣＋小縫 ～ 右欄卡片左緣－小縫、工具列下面 ～ 「思考中」狀態字上面
+ *  回 [x, y, w, h]（網頁座標，左上原點） */
+function satArea() {
+  const GAP = 10, W = innerWidth, H = innerHeight;
+  let l = 16, r = W - 16;
+  for (const id of PANELS) {
+    const el = $(id); if (id === "askCard" || !el.classList.contains("on") || el.classList.contains("off") || getComputedStyle(el).display === "none") continue;
+    const b = el.getBoundingClientRect(); if (!b.width) continue;
+    if (b.left + b.width / 2 < W / 2) l = Math.max(l, b.right + GAP); else r = Math.min(r, b.left - GAP);
+  }
+  const top = Math.max(52, $("tools").getBoundingClientRect().bottom + GAP);
+  const bottom = Math.min(H - 16, $("state").getBoundingClientRect().top - GAP);
+  return [l, top, Math.max(200, r - l), Math.max(200, bottom - top)].map(Math.round);
+}
 $("bAuto").onclick = () => {
-  if (ORBIT) post({ action: "orbit", cmd: "arrangeSats" });     // 11-23 Keng：自動排版時衛星終端機也沿斜對角排開（Orbit42 排原生小視窗）
+  if (ORBIT) setTimeout(() => post({ action: "orbit", cmd: "arrangeSats:" + satArea().join(",") }), 60);     // 11-23 Keng：自動排版時衛星終端機也沿斜對角排開（Orbit42 排原生小視窗）
   if (autoOn) return freezeAuto();
   layout = { auto: true, cols: layout.cols, zmul: 1 }; saveLayout(); autoOn = true;
   for (const id of PANELS) { const st = $(id).style; for (const k of ["left", "top", "right", "bottom", "width", "height", "maxHeight", "transform"]) st[k] = ""; }
