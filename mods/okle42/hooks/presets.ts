@@ -8,13 +8,14 @@ export const PRESETS = {
     // 11-23 改：ANSI 色名（white、red…）會被 Claude Code 換成固定的純白／純紅，不會跟著終端機深淺變
     // （淺色背景上你送出的字變成白字看不到）⇒ 改用 Claude Code 的主題鍵：text／subtle／inactive／error…
     // 這些跟著使用者的 Claude Code 主題（設成「自動」就跟終端機深淺）走。黑白灰紅：字＝text、灰＝subtle／inactive、紅＝error
-    accent: 'error', heading: 'text', tableHeader: 'text', strong: 'text', emphasis: 'subtle',
-    inlineCode: 'subtle', codeText: 'text', codeCommand: 'error', codeFlag: 'subtle', codeString: 'subtle',
-    codeComment: 'inactive', link: 'error', path: 'subtle', number: 'text', quote: 'subtle',
-    rule: 'inactive', tableRule: 'inactive', bullet: 'error', diagram: 'subtle', diagramText: 'text',
+    // 11-23 再改：紅＝'ansi:red'（終端機色票 1），不用 'error'（Claude Code 固定紅）⇒ Ghostty 深色主題色票 1 是護眼綠、淺色是紅，深淺自動換
+    accent: 'ansi:red', heading: 'text', tableHeader: 'text', strong: 'text', emphasis: 'subtle',
+    inlineCode: 'subtle', codeText: 'text', codeCommand: 'ansi:red', codeFlag: 'subtle', codeString: 'subtle',
+    codeComment: 'inactive', link: 'ansi:red', path: 'subtle', number: 'text', quote: 'subtle',
+    rule: 'inactive', tableRule: 'inactive', bullet: 'ansi:red', diagram: 'subtle', diagramText: 'text',
     diffAdded: 'diffAdded', diffRemoved: 'diffRemoved',
-    promptBorder: 'subtle', promptText: 'text', replyBorder: 'error',
-    alertNote: 'subtle', alertTip: 'subtle', alertImportant: 'text', alertWarning: 'error', alertCaution: 'error',
+    promptBorder: 'subtle', promptText: 'text', replyBorder: 'ansi:red',
+    alertNote: 'subtle', alertTip: 'subtle', alertImportant: 'text', alertWarning: 'ansi:red', alertCaution: 'ansi:red',
   },
   'catppuccin-mocha': {
     accent: '#cba6f7', heading: '#f9e2af', tableHeader: '#f9e2af', strong: '#ffffff', emphasis: '#f5c2e7',

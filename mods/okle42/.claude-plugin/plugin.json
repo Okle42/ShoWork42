@@ -1,6 +1,6 @@
 {
   "name": "okle42",
-  "version": "0.46.0-okle42.1",
+  "version": "0.46.0-okle42.2",
   "description": "Okle42 rendering for Claude Code replies (black/white/gray/red, follows the terminal light/dark palette). Fork of prismantis 0.46.0 by Nahum Litvin, MIT.",
   "author": {
     "name": "Okle42 (fork of prismantis by Nahum Litvin)"
