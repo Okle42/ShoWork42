@@ -22,6 +22,8 @@ final class WebServer {
     /// 從網頁回答過的時間（sessionId → 時間），讓網頁顯示「已送出」；原生收件匣的 answered 是畫面 @State，網頁另記
     private var answered: [String: Date] = [:]
     private var limiter = WebRateLimiter()
+    /// 手機終端機打字／點擊：一秒好幾筆 ⇒ 跟按鈕分開限頻（每分鐘 1200 筆）
+    private var inputLimiter = WebRateLimiter(perMinute: 1200, minGap: 0)
     private let store = WebStore()
     private let page = Data(WebPage.html.utf8)
 
@@ -114,7 +116,12 @@ final class WebServer {
     }
 
     func handle(_ r: WebRequest, peer: String) -> WebResponse {
-        WebRouter.handle(r, peer: peer, localIP: boundIP, token: store.token(), page: page, limiter: &limiter,
+        if r.path == WebRouter.inputPath {
+            return WebRouter.handleInput(r, peer: peer, localIP: boundIP, token: store.token(), limiter: &inputLimiter,
+                                         input: { id, d in SphereEmbed.remoteInput?(id, d) ?? false },
+                                         audit: { [store] e in store.audit(e) })
+        }
+        return WebRouter.handle(r, peer: peer, localIP: boundIP, token: store.token(), page: page, limiter: &limiter,
                          snapshot: { [self] in
                              let s = WebSnapshot.make(cards: BoardModel.shared.cards, tasks: BoardModel.shared.captainTasks,
                                                       inbox: CaptainInbox.pending(now: Date()), answered: answered, now: Date())

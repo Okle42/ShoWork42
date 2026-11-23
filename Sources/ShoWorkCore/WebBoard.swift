@@ -464,4 +464,31 @@ public enum WebRouter {
             return .json(404, ["error": "沒有這頁"])
         }
     }
+
+    // 11-24 Keng：iPhone 衛星終端機要能點、捲、打字（點不到 Claude Code 的「N new messages」按鈕）。
+    // POST /api/input {id, data(base64)} → 原封不動寫進那顆衛星的終端機（鍵盤、滑鼠點擊／滾輪的跳脫序列）。
+    // 跟按鈕動作分開：打字一秒好幾筆，按鈕的限頻（每分鐘 20 次）會卡住 ⇒ 自己一個限頻；稽核只記位元組數、不記內容（可能打密碼）
+    public static let inputPath = "/api/input"
+    public static let maxInput = 8192
+    public static func handleInput(_ r: WebRequest, peer: String?, localIP: String?, token: String?, now: Date = Date(),
+                                   limiter: inout WebRateLimiter,
+                                   input: (String, Data) -> Bool,
+                                   audit: (WebAuditEntry) -> Void = { _ in }) -> WebResponse {
+        guard let peer, WebBind.isTailscale(peer) else { return .json(403, ["error": "只接受 Tailscale 連線"]) }
+        guard peer != localIP else { return .json(403, ["error": "不接受 Mac mini 自己連自己"]) }
+        guard token != nil else { return .json(403, ["error": "還沒設定 token（showork web enable）"]) }
+        guard r.method == "POST" else { return .json(405, ["error": "方法不對"]) }
+        func done(_ resp: WebResponse, _ id: String?, _ msg: String) -> WebResponse {
+            audit(WebAuditEntry(at: now, peer: peer, action: "input", target: id, text: nil, status: resp.status, result: msg)); return resp
+        }
+        guard WebToken.matches(r.headers[tokenHeader], token) else { return done(.json(403, ["error": "token 不對"]), nil, "token 不對") }
+        guard (r.headers["content-type"] ?? "").lowercased().hasPrefix("application/json") else { return done(.json(415, ["error": "要 JSON"]), nil, "不是 JSON") }
+        guard limiter.allow(peer, now: now) else { return .json(429, ["error": "打太快了，等一下再試"]) }
+        guard let o = try? JSONSerialization.jsonObject(with: r.body) as? [String: Any],
+              let id = o["id"] as? String, WebAction.matches(id, "^[A-Za-z0-9_-]{1,64}$"),
+              let b = o["data"] as? String, let d = Data(base64Encoded: b), !d.isEmpty, d.count <= maxInput
+        else { return done(.json(400, ["error": "缺 id／data 或格式不對"]), nil, "格式不對") }
+        guard input(id, d) else { return done(.json(404, ["error": "找不到這顆衛星（可能已經關了）"]), id, "找不到衛星") }
+        return .json(200, ["ok": "1"])        // 成功的不逐筆記稽核（打字一秒好幾筆）；失敗的才記
+    }
 }

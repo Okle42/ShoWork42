@@ -297,4 +297,33 @@ struct WebBoardTests {
         #expect(read(req("GET", "/api/sat?id=ab12&from=40", token: tok)).1 == ["/api/sat#ab12@40"])
         #expect(read(req("GET", "/api/other", token: tok)).0.status == 404)
     }
+
+    // 11-24 iPhone 衛星終端機輸入：/api/input 要 token、只收 Tailscale、不收自己連自己；成功不記稽核內容
+    @Test func inputRoute() {
+        var lim = WebRateLimiter(perMinute: 1200, minGap: 0)
+        var got: [(String, Data)] = []
+        var audits: [WebAuditEntry] = []
+        func run(_ r: WebRequest, peer p: String = "100.77.57.35", found: Bool = true) -> Int {
+            WebRouter.handleInput(r, peer: p, localIP: mini, token: tok, limiter: &lim,
+                                  input: { got.append(($0, $1)); return found }, audit: { audits.append($0) }).status
+        }
+        let b64 = Data("\u{1b}[<0;5;3M".utf8).base64EncodedString()
+        let body = #"{"id":"ab12cd34","data":"\#(b64)"}"#
+        #expect(run(req("POST", "/api/input", token: tok, body: body)) == 200)
+        #expect(got.count == 1 && got[0].0 == "ab12cd34" && got[0].1 == Data("\u{1b}[<0;5;3M".utf8))
+        #expect(audits.isEmpty)
+        #expect(run(req("POST", "/api/input", token: "wrong", body: body)) == 403)
+        #expect(run(req("POST", "/api/input", body: body)) == 403)
+        #expect(run(req("POST", "/api/input", token: tok, body: body), peer: "192.168.1.5") == 403)
+        #expect(run(req("POST", "/api/input", token: tok, body: body), peer: mini) == 403)
+        #expect(run(req("GET", "/api/input", token: tok)) == 405)
+        #expect(run(req("POST", "/api/input", token: tok, body: body, contentType: "text/plain")) == 415)
+        #expect(run(req("POST", "/api/input", token: tok, body: #"{"id":"../x","data":"\#(b64)"}"#)) == 400)
+        #expect(run(req("POST", "/api/input", token: tok, body: #"{"id":"ab12","data":""}"#)) == 400)
+        let big = Data(count: WebRouter.maxInput + 1).base64EncodedString()
+        #expect(run(req("POST", "/api/input", token: tok, body: #"{"id":"ab12","data":"\#(big)"}"#)) == 400)
+        #expect(run(req("POST", "/api/input", token: tok, body: body), found: false) == 404)
+        #expect(got.count == 2)
+        #expect(audits.allSatisfy { $0.text == nil })
+    }
 }
