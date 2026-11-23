@@ -99,7 +99,9 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
             guard let id = str("id"), SphereVoices.all().contains(where: { $0.id == id }) else { return }
             SphereVoices.selected = id
             pushPrefs()
-            speak(str("sample") ?? "你好，我是球體助理，之後就用這個聲音播報。")
+            // 11-23 Keng「播報語音跟字幕完全不一樣」：原本原生端直接唸試聽句，網頁字幕不知道（還停在上一句、
+            // 還把網頁正在唸的那句提早當成唸完）⇒ 試聽改交給網頁播報佇列（karaToast＝announce），字幕跟聲音同一句
+            say(str("sample") ?? "你好，我是智能體，之後就用這個聲音播報。")
         case "answer":
             guard let c = card(str("sessionId")) else { return say("這個 session 已經不在了。") }
             let text = (str("text") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -261,7 +263,7 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
             DispatchQueue.main.asyncAfter(deadline: .now() + min(8, 0.18 * Double(t.count))) { [weak self] in self?.voice("end") }
             return
         }
-        audio.stop(); edge.stop()
+        audio.stop(notify: false); edge.stop()      // 換句：上一句的 end 不要發（網頁已經在等這一句）
         let id = SphereVoices.selected
         if id.hasPrefix("edge:") {
             // 微軟神經語音：edge-tts 合成 mp3（要網路；文字會送到微軟），播放時用音量驅動球跳動

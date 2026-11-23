@@ -224,7 +224,7 @@ struct BoardView: View {
             Image(systemName: "cube").tag("office").help("3D 辦公室")
             Image(systemName: "building.2").tag("tower").help("3D 辦公大樓")
             Image(systemName: "tree").tag("island").help("小島村莊")
-            Image(systemName: "circle.hexagongrid").tag("sphere").help("球體助理")
+            Image(systemName: "circle.hexagongrid").tag("sphere").help("智能體")
         }
         .pickerStyle(.segmented).labelsHidden().fixedSize()
         Button { newTask = true } label: { Label(short ? "新任務" : "新任務⋯", systemImage: "plus") }

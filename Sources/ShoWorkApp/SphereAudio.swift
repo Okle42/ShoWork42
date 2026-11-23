@@ -111,7 +111,7 @@ final class SphereAudio {
 
     /// Mac 內建語音：合成成 PCM，邊合成邊排進播放器；marker 記下每個詞的取樣位置
     func speak(_ u: AVSpeechUtterance) {
-        stop()
+        stop(notify: false)
         gen += 1; let g = gen
         synth.write(u, toBufferCallback: { [weak self] b in
             MainActor.assumeIsolated {
@@ -136,7 +136,7 @@ final class SphereAudio {
 
     /// 微軟神經語音的 mp3
     func play(file url: URL) -> Bool {
-        stop()
+        stop(notify: false)
         gen += 1
         guard let f = try? AVAudioFile(forReading: url) else { return false }
         begin(format: f.processingFormat)
@@ -148,7 +148,9 @@ final class SphereAudio {
         return true
     }
 
-    func stop() {
+    /// notify＝false：換下一句時停掉上一句，不發 "end"。網頁收到的 end 只認「目前這句」，
+    /// 上一句的 end 晚到會被當成新句唸完 ⇒ 字幕跳到下一句、聲音還在唸（11-23 Keng：語音跟字幕對不上）
+    func stop(notify: Bool = true) {
         gen += 1
         let was = started
         ticker?.invalidate(); ticker = nil
@@ -156,7 +158,7 @@ final class SphereAudio {
         player.stop()
         engine.stop()            // 效能（11-22）：沒在唸就關掉音訊引擎（不然 tap 一直對靜音做 FFT、音訊硬體也不休息）
         started = false; format = nil; scheduled = 0; synthDone = false; markers = []; duration = nil
-        if was { onEvent?("end") }
+        if was && notify { onEvent?("end") }
     }
 
     private func begin(format f: AVAudioFormat) {

@@ -17,7 +17,7 @@
        兩顆都開著時，自動播報（狀態變化、額度、溫度、早報、隊長回覆）只有桌面版出聲，分頁那顆只出字幕。 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>球體助理</title>
+<title>智能體</title>
 <style>
   /* 11-22 Keng：配色改成黑、白、灰、紅；品牌 Okle42／ShoWork42 的「42」用金色。深色／淺色兩套（工具列 ◐ 切：自動→深→淺）
      紅＝要你注意（需要你、卡住、額度、過熱）＋少量點綴；球本體是黑白灰 */
@@ -364,6 +364,8 @@
   .drag.snap { transition: left .28s ease, top .28s ease, width .28s ease, height .28s ease, opacity .35s, transform .35s; }
   .drag.dragging { cursor: grabbing; user-select: none; -webkit-user-select: none; }
   .card.drag.on { pointer-events: auto; }
+  .drag > * { cursor: auto; }      /* 11-23：只有標題列能拖，內容是一般游標、可以選字 */
+  .drag .k { cursor: grab; }
   .drag .row, .drag .q, .drag .text { cursor: auto; }
   .drag .row.link { cursor: pointer; }
   .drag::-webkit-resizer { background: transparent; }
@@ -476,7 +478,7 @@
 <svg id="links" aria-hidden="true"><g id="lkStatic"></g><g id="lkPop"></g></svg>
 
 <div id="caption">
-  <div class="who"><i></i><span id="who">球體 · 待命</span><span class="q" id="capQ"></span></div>
+  <div class="who"><i></i><span id="who">智能體 · 待命</span><span class="q" id="capQ"></span></div>
   <div class="text" id="capText"></div>
   <canvas id="wave" aria-hidden="true"></canvas>
   <div class="bar"><b id="capBar"></b></div>
@@ -522,7 +524,7 @@
 <div class="card pop" id="pop" role="status"></div>
 <div id="banner" role="alert"><div class="in"></div></div>
 
-<div id="deskBar" aria-hidden="true"><i></i><span class="brand">OKLE<b>42</b></span><span class="brand dim wide">· SHOWORK<b>42</b> · 球體</span></div>
+<div id="deskBar" aria-hidden="true"><i></i><span class="brand">OKLE<b>42</b></span><span class="brand dim wide">· SHOWORK<b>42</b> · 智能體</span></div>
 <div id="brandTab" class="brand" aria-hidden="true">OKLE<b>42</b> <span class="dim">· SHOWORK<b>42</b></span></div>
 <svg id="deskGrip" viewBox="0 0 18 18" aria-label="拖曳縮放"><path d="M16 7 7 16M16 11.5 11.5 16" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
 <div id="tools">
@@ -531,7 +533,7 @@
   <button class="pill sm" id="bBrief" title="唸一次早報（今天的狀況與額度）">早報</button>
   <button class="pill sm" id="bWrap" title="唸收工總結（今天做完什麼、還剩什麼）">收工</button>
   <button class="pill sm" id="bTl" title="今天每個 session 的狀態變化">時間<span class="wide">軸</span></button>
-  <button class="pill sm" id="bMini" title="球體桌面版：開／關">桌面版</button>
+  <button class="pill sm" id="bMini" title="智能體桌面版：開／關">桌面版</button>
   <button class="pill sm deskOnly" id="bSize" title="換尺寸：小 → 中 → 大（拖右下角也可以）">尺寸</button>
   <button class="pill sm deskOnly" id="bBoard" title="打開戰情中心">戰情<span class="wide">中心</span></button>
   <select class="pill sm" id="voiceSel" title="播報的聲音（選了會試聽一句）" aria-label="播報的聲音" hidden></select>
@@ -539,10 +541,10 @@
   <button class="pill sm" id="bAuto">自動<span class="wide">排版</span></button>
   <button class="pill sm" id="bTheme" title="配色：自動（跟系統）→ 深色 → 淺色" aria-label="配色">◐</button>
   <button class="pill sm" id="voice" aria-label="語音開關"></button>
-  <button class="pill sm deskOnly" id="bClose" title="收起桌面版（選單列「桌面球體」可再打開）" aria-label="收起">✕</button>
+  <button class="pill sm deskOnly" id="bClose" title="收起桌面版（選單列「桌面智能體」可再打開）" aria-label="收起">✕</button>
 </div>
 <div id="state"><span class="zh" id="stZh">待命</span><span class="en" id="stEn">STANDBY</span></div>
-<div id="hint">點球聽現況 · 按住球（或空白鍵）講話 · 滾輪縮放球 · 拖卡片到左／右欄自動排好</div>
+<div id="hint">點智能體聽現況 · 按住智能體（或空白鍵）講話 · 滾輪縮放智能體 · 拖卡片到左／右欄自動排好</div>
 <div id="controls">
   <button data-s="idle">待命</button>
   <button data-s="listening">聆聽</button>
@@ -680,6 +682,9 @@ const orbClock = (() => {
   };
 })();
 const shell = new THREE.Group(); root.add(shell);
+// 11-23 Keng「點空白區域也被當成點球」：點擊範圍＝看不見的球（殼的大小），掛在 root 底下跟著縮放
+const ballHit = new THREE.Mesh(new THREE.SphereGeometry(1.6, 24, 16), new THREE.MeshBasicMaterial({ visible: false }));
+root.add(ballHit);
 {
   const ico = new THREE.IcosahedronGeometry(1.55, 1).toNonIndexed();
   const p = ico.attributes.position;
@@ -1373,7 +1378,7 @@ function setState(s) {
   const en = bannerOn ? "WARNING" : STATES[s].en;
   if ($("stZh").dataset.v !== STATES[s].label) { $("stZh").dataset.v = STATES[s].label; $("stZh").textContent = STATES[s].label.split("").join(" "); }
   if ($("stEn").dataset.v !== en) { $("stEn").dataset.v = en; decode($("stEn"), en.split("").join(" ")); }
-  $("who").textContent = "球體 · " + STATES[s].label;
+  $("who").textContent = "智能體 · " + STATES[s].label;
   document.body.classList.toggle("alert", s === "alert" || waiting);
   document.querySelectorAll("#controls button[data-s]").forEach(b => b.classList.toggle("on", b.dataset.s === s));
 }
@@ -2017,7 +2022,7 @@ window.karaPrefs = (p) => {
     sel.value = p.voice; sel.hidden = false; if (ORBIT && typeof applyPanels === "function") try { applyPanels(); } catch {}
   }
   deskOn = !!p.mini;
-  $("bMini").classList.toggle("on", deskOn); $("bMini").title = deskOn ? "球體桌面版：開（點一下關掉）" : "球體桌面版：關（點一下打開）";
+  $("bMini").classList.toggle("on", deskOn); $("bMini").title = deskOn ? "智能體桌面版：開（點一下關掉）" : "智能體桌面版：關（點一下打開）";
   if (p.deskSize) $("bSize").innerHTML = `<span class="wide">尺寸 · </span>${esc(p.deskSize)}`;
   fitTools();
 };
@@ -2328,6 +2333,12 @@ function satAt(e) {
   const hit = ray.intersectObjects([...sats.values()].map(s => s.hit), false)[0];
   return hit ? sats.get(hit.object.userData.sid) : null;
 }
+/** 滑鼠在不在智能體（球）上：只有點在球上才唸現況／按住講話，空白處不算 */
+function ballAt(e) {
+  mouse.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+  ray.setFromCamera(mouse, camera);
+  return ray.intersectObject(ballHit, false).length > 0;
+}
 /** 點到哪個資料環：額度（5 小時／7 天）或溫度 */
 function gaugeAt(e) {
   mouse.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
@@ -2353,7 +2364,7 @@ canvas.addEventListener("pointermove", e => {
     tip.style.left = Math.min(e.clientX + 14, innerWidth - tip.offsetWidth - 8) + "px"; tip.style.top = (e.clientY + 14) + "px";
   }
   tip.classList.toggle("on", !!s);
-  canvas.style.cursor = s || gaugeAt(e) ? "pointer" : "";
+  canvas.style.cursor = s || gaugeAt(e) || ballAt(e) ? "pointer" : "";
 });
 let holdTimer = null, listening = false, heard = "", heardFinal = null, heardDone = false;
 canvas.addEventListener("pointerdown", e => {
@@ -2369,6 +2380,7 @@ canvas.addEventListener("pointerdown", e => {
   }
   const gk = gaugeAt(e); if (gk) { openPanelFor(gk); return; }
   closeSat();
+  if (!ballAt(e)) return;                         // 空白處：只關掉衛星小卡，不唸、不聽
   holdTimer = setTimeout(() => { holdTimer = null; startListen(); }, 380);
 });
 addEventListener("pointerup", () => {
@@ -2380,7 +2392,7 @@ function startListen() {
   listening = true; heard = ""; heardDone = false; queue.length = 0;
   post({ action: "stopSpeaking" });
   setState("listening");
-  $("who").textContent = "球體 · 聆聽中（放開就交給隊長）";
+  $("who").textContent = "智能體 · 聆聽中（放開就交給隊長）";
   $("capText").textContent = "我在聽⋯"; $("capBar").style.width = "0%";
   post({ action: "listen", on: true });
 }
@@ -2388,7 +2400,7 @@ function stopListen() {
   if (!listening) return;
   post({ action: "listen", on: false });
   if (heardDone) return finishListen();          // 還按著時辨識就給了最後一句：放開直接送
-  setState("thinking"); $("who").textContent = "球體 · 整理你說的話";
+  setState("thinking"); $("who").textContent = "智能體 · 整理你說的話";
   // 等原生端給最後一句（karaHeard final）；3 秒沒回就用目前聽到的
   const t = setTimeout(() => finishListen(), 3000);
   heardFinal = () => { clearTimeout(t); finishListen(); };
@@ -2404,7 +2416,7 @@ function finishListen() {
   if (!listening) return;
   listening = false;
   const text = heard.trim();
-  if (!text) { announce("沒聽清楚，再按住球講一次。"); return; }
+  if (!text) { announce("沒聽清楚，再按住智能體講一次。"); return; }
   const local = /^(交給|跟|告訴|請)隊長/.test(text) ? null : answerLocal(text);
   if (local) { announce(local); return; }
   post({ action: "captain", text: text.replace(/^(交給|跟|告訴|請)隊長(說)?[，,：:\s]*/, "") || text });
@@ -2520,7 +2532,7 @@ let demoRunning = false;
 async function demo() {
   if (demoRunning || talkingNow) return; demoRunning = true;
   show("cardUsage", false); show("cardTeam", false);
-  setState("speaking"); await speak("你好，我是球體助理。");
+  setState("speaking"); await speak("你好，我是智能體。");
   setState("listening"); await say("我在聽。", 90); await wait(1200);
   setState("thinking"); await say("讓我想一下⋯", 90); await wait(1400);
   setState("searching"); await say("正在查資料、整理給你。"); await wait(1800);
@@ -2695,13 +2707,16 @@ function freezeAuto() {
   try { localStorage.setItem(ZKEY, String(zoom)); } catch {}
   renderAuto();
 }
-function renderAuto() { $("bAuto").classList.toggle("on", autoOn); $("bAuto").title = autoOn ? "自動排版：開（拖卡片到左／右欄會自動吸附整理；拉右下角調大小＝改手動；點一下關掉）" : "自動排版：關（點一下讓面板和球自動排好）"; }
+function renderAuto() { $("bAuto").classList.toggle("on", autoOn); $("bAuto").title = autoOn ? "自動排版：開（拖卡片到左／右欄會自動吸附整理；拉右下角調大小＝改手動；點一下關掉）" : "自動排版：關（點一下讓面板和智能體自動排好）"; }
 let resizing = false, resizingId = null;
 for (const id of PANELS) {
   const el = $(id); el.classList.add("drag"); if (!autoOn) place(id);
   el.addEventListener("pointerdown", e => {
     if (e.button !== 0 || e.target.closest("button,input,select,textarea,a,.row.link,[data-act],[data-nav]")) return;
     const r = el.getBoundingClientRect();
+    const corner = e.clientX > r.right - 16 && e.clientY > r.bottom - 16;
+    // 11-23 Keng「平常可以選字，現在變成拖動視窗」：只有標題列（.k）和卡片邊緣空白能拖，內容文字留給滑鼠選字
+    if (!corner && e.target !== el && !e.target.closest(".k")) return;
     if (e.clientX > r.right - 16 && e.clientY > r.bottom - 16) { freezeAuto(); resizing = true; resizingId = id; return; }      // 右下角＝調大小（交給瀏覽器）
     if (e.clientX - r.left > el.clientWidth + 1) return;                                              // 捲軸
     e.preventDefault(); e.stopPropagation();

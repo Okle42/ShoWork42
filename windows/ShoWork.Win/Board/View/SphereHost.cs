@@ -118,7 +118,8 @@ sealed class SphereHost : IDisposable
                     if (Str(m, "id") is not { } id || !voice.All().Any(v => v.Id == id)) return;
                     voice.Selected = id;
                     PushPrefs();
-                    Speak(Str(m, "sample") ?? "你好，我是球體助理，之後就用這個聲音播報。");
+                    // 11-23：試聽交給網頁播報佇列（karaToast＝announce），字幕跟聲音才是同一句（Mac 同步改）
+                    Toast(Str(m, "sample") ?? "你好，我是智能體，之後就用這個聲音播報。");
                     return;
                 }
                 case "listen":
@@ -346,9 +347,9 @@ sealed class SphereVoice : IDisposable
     public string? Speak(string text)
     {
         Stop();
-        if (Sp() is not { } v) return "這台 Windows 叫不起系統語音（SAPI），球體先不出聲。";
+        if (Sp() is not { } v) return "這台 Windows 叫不起系統語音（SAPI），智能體先不出聲。";
         var id = Selected;
-        if (id.Length == 0) return "這台 Windows 沒有安裝中文語音（設定 > 時間與語言 > 語音，加入中文（台灣）），球體先不出聲。";
+        if (id.Length == 0) return "這台 Windows 沒有安裝中文語音（設定 > 時間與語言 > 語音，加入中文（台灣）），智能體先不出聲。";
         try
         {
             dynamic tokens = v.GetVoices("", "");
@@ -365,7 +366,7 @@ sealed class SphereVoice : IDisposable
         catch (Exception x)
         {
             Log.Note($"SPHERE voice: speak failed {x.GetType().Name} {x.Message}");
-            return "系統語音唸不出來，球體先不出聲。";
+            return "系統語音唸不出來，智能體先不出聲。";
         }
         speaking = true; sawRun = false; lastWord = -1; startedAt = DateTime.UtcNow;
         onEvent("start");
