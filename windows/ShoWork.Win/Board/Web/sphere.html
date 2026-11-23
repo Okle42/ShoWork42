@@ -99,7 +99,7 @@
   body.orbitMode #cardTeam > #askDot { position: static; transform: none; width: 100%; margin: 4px 0 6px; justify-content: center; }
   body.orbitMode.stack.asking #cardTeam { opacity: 1; pointer-events: auto; }
   /* Xena3 驗收：戰情卡有高度上限，答案卡展開時第 4 個選項／補充框／送出被切掉 ⇒ 有答案卡時暫時放寬到幾乎整個畫面高（答完恢復；手動拉過的高度也暫時讓開） */
-  body.orbitMode.asking #cardTeam { max-height: calc(100vh - 140px) !important; height: auto !important; }
+  /* （答題時戰情卡長高改由 autoLayout 讓它優先分高度，不再用 !important 硬撐、蓋到同欄的卡） */
   .card .k { font-size: 10px; letter-spacing: .18em; color: var(--ink-dim); }
   .card .head { display: flex; justify-content: space-between; align-items: baseline; margin: 4px 0 8px; }
   .card .head span { font-size: 14px; letter-spacing: .06em; }
@@ -320,7 +320,7 @@
   .chips i, .trow .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--c); display: inline-block; }
   .row.trow { grid-template-columns: 12px 1fr auto; align-items: center; }
   /* 11-22 Keng：進行中那一列要一眼看出在跑 ⇒ 紅色雷達波從名字前的點（原點）一圈圈往外擴散，掃過整個名牌再淡掉 */
-  .row.trow.live { position: relative; overflow: hidden; isolation: isolate; }
+  .row.trow.live { position: relative; isolation: isolate; }   /* 11-23 Keng：拿掉 overflow:hidden，名字前那顆點的光暈不再被切掉一半（canvas 本來就跟列一樣大） */
   /* 11-23 Keng「波浪低畫質」：原本是 640px 放射漸層用 transform 放大（點陣圖被拉糊）、環線只有 0.8% 寬（次像素、鋸齒）
      ⇒ 改成 canvas 依螢幕解析度逐格重畫：抗鋸齒細環線＋後面一段柔和的拖尾（radarLoop） */
   .row.trow.live > canvas.radar { position: absolute; inset: 0; width: 100%; height: 100%; z-index: -1; pointer-events: none; }
@@ -367,6 +367,7 @@
   .drag .row, .drag .q, .drag .text { cursor: auto; }
   .drag .row.link { cursor: pointer; }
   .drag::-webkit-resizer { background: transparent; }
+  body.orbitMode .drag { resize: horizontal; }      /* 11-23：Orbit42 高度照內容，只能拉寬度 */
   /* 11-22 Keng：小視窗要能開關 ⇒ .off＝關掉（工具列「面板」選單或卡片右上 ×），記在 localStorage sphere.hide.tab／desk */
   .card.off, body.stack .card.off { display: none !important; }
   .card .k { display: flex; align-items: center; }
@@ -1050,13 +1051,14 @@ window.karaOutro = () => {
 };
 
 // 滾輪縮放球體（11-22 Keng）：0.45–2 倍，記在 localStorage sphere.zoom.tab／desk
-const ZKEY = "sphere.zoom." + (DESK ? "desk" : "tab");
+const ZKEY = "sphere.zoom." + (DESK ? "desk" : ORBIT ? "orbit" : "tab");
 let zoom = 1, camZ = 10.5;
 try { zoom = Math.min(2, Math.max(0.45, +localStorage.getItem(ZKEY) || 1)); } catch {}
 let zoomCur = zoom;
+let lastRW = 0, lastRH = 0, lastPR = 0;
 function resize() {
-  const w = innerWidth, h = innerHeight;
-  renderer.setSize(w, h, false);
+  const w = innerWidth, h = innerHeight, pr = renderer.getPixelRatio();
+  if (w !== lastRW || h !== lastRH || pr !== lastPR) { renderer.setSize(w, h, false); lastRW = w; lastRH = h; lastPR = pr; }   // 11-23 審查 #10：大小沒變不重配畫布
   camera.aspect = w / h;
   camera.position.z = w < h ? 15 : 10.5;  // 直式畫面拉遠一點；v3 外環（3.2–3.7）也要進框
   // 疊排判斷：球（半徑 2 的那圈）的直徑 ≈ 5.49·h／z 像素；左右兩張卡片＋邊距吃掉之後剩的寬度放不下球 ⇒ 卡片改排到下面
@@ -1074,7 +1076,8 @@ function resize() {
   camera.position.z = camZ / zoomCur;            // 滾輪縮放（zoomCur 在 frame 裡漸近 zoom）
   camera.updateProjectionMatrix();
 }
-addEventListener("resize", resize); resize();
+let resizeRaf = 0;
+addEventListener("resize", () => { if (!ORBIT) return resize(); if (!resizeRaf) resizeRaf = requestAnimationFrame(() => { resizeRaf = 0; resize(); }); }); resize();
 canvas.addEventListener("wheel", e => {
   e.preventDefault();
   const f = Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0015));         // ctrlKey＝觸控板捏合
@@ -2526,10 +2529,17 @@ $("demo").onclick = demo;
 addEventListener("keydown", e => { if (e.code === "Space" && !embedded) { e.preventDefault(); demo(); } });
 
 /* ---------- 11-22 面板拖移／調大小（Keng：每個視窗都要能拖、能調）---------- */
-const PANELS = ["cardUsage", "cardTeam", "cardSys", "cardCool", "askCard"];        // 字幕固定在底部狀態字下面，不拖
-const LKEY = "sphere.layout." + (DESK ? "desk" : "tab");
+const PANELS = ORBIT ? ["cardUsage", "cardTeam", "cardSys", "cardCool"] : ["cardUsage", "cardTeam", "cardSys", "cardCool", "askCard"];   // Orbit42：答案卡展開在戰情列裡，不是獨立面板        // 字幕固定在底部狀態字下面，不拖
+// 11-23 Keng「自動排版做得很差」重做（只限 Orbit42）：版面另存 sphere.layout.orbit，不再沿用戰情中心分頁那份
+//   （舊的固定寬高、含 askCard 的欄位都不要了，只把球的大小偏好 zo 帶過來）
+const LKEY = "sphere.layout." + (DESK ? "desk" : ORBIT ? "orbit" : "tab");
 var layout = {};
-try { layout = JSON.parse(localStorage.getItem(LKEY) || "{}") || {}; } catch {}
+try { layout = JSON.parse(localStorage.getItem(LKEY) || "null") || {}; } catch {}
+if (ORBIT) {
+  if (!layout.v) { let zo; try { zo = JSON.parse(localStorage.getItem("sphere.layout.tab") || "{}").zo; } catch {} layout = { v: 2, auto: true, ...(zo ? { zo } : {}) }; }
+  layout.auto = true;
+  if (layout.cols) layout.cols = { l: (layout.cols.l || []).filter(x => x !== "askCard"), r: (layout.cols.r || []).filter(x => x !== "askCard") };
+}
 const saveLayout = () => { try { localStorage.setItem(LKEY, JSON.stringify(layout)); } catch {} };
 const topMin = () => DESK ? 36 : 0;
 // 11-22 Keng：調視窗大小時面板要跟著移動、不要跑版 ⇒ 位置記成「靠哪一邊」：
@@ -2565,7 +2575,7 @@ function remember(id) {
    寬的視窗：球在中間，左欄＝額度＋外環、右欄＝戰情；欄寬不夠就把球縮小（最小 0.62 倍）
    窄／直的視窗：球往上移到 40% 高、卡片排在下面左右兩張（外環併進額度卡）
    開著時視窗一變、卡片內容一變就重排；拖面板、拉大小、滾輪縮放＝轉成手動（照當下位置記住） */
-var autoOn = layout.auto ?? !PANELS.some(id => layout[id]), autoStack = false;
+var autoOn = ORBIT ? true : layout.auto ?? !PANELS.some(id => layout[id]), autoStack = false;   // Orbit42：永遠自動排（拖拉只改欄位順序、拉右下角只改那一欄寬度）
 const TAN20 = Math.tan(20 * Math.PI / 180), CLEAR = 2.45;
 const Z_STD = 0.76;                                            // Orbit42 自動排版的標準球大小（見 autoLayout）     // 卡片離球心至少 2.45 單位（內圈環）
 function natH(el, w) { el.style.width = w + "px"; el.style.height = ""; el.style.maxHeight = "none"; return el.scrollHeight + 2; }
@@ -2596,7 +2606,8 @@ function autoLayout() {
     const z = ORBIT ? Math.max(0.45, Math.min(Z_STD * (layout.zo || 1), (W / 2 - want - 2 * M - 12) / (CLEAR * upS)))
       : Math.max(0.45, Math.min(2, Math.min(1.15, (W / 2 - want - 2 * M - 12) / (CLEAR * upS), (room / 2) / (2.7 * upS)) * zmul));
     const cw = Math.min(310, W / 2 - CLEAR * upS * z - 2 * M - 12);
-    autoStack = cw < 220;
+    // Orbit42：疊排進出用兩段門檻（<210 才疊、>240 才回兩欄），視窗寬度在邊界附近拖動時不會來回跳
+    autoStack = ORBIT ? (autoStack ? cw < 240 : cw < 210) : cw < 220;
     document.body.classList.toggle("stack", autoStack);          // 先切版型再量高度（疊排時外環會併進額度卡）
     if (!autoStack) {
       zoom = z; document.documentElement.style.setProperty("--cw", Math.round(cw) + "px");
@@ -2604,17 +2615,28 @@ function autoLayout() {
       const cy = (capB + floor) / 2; autoLift = H / 2 - cy;
       for (const [side, ids0] of [["l", cols.l], ["r", cols.r]]) {
         const ids = ids0.filter(vis); if (!ids.length) continue;
-        let hs = ids.map(id => natH($(id), cw));
+        // Orbit42：每欄可以拉寬／拉窄（只記寬度，220～可用寬度）；高度永遠照內容
+        const cwS = ORBIT && layout.cw?.[side] ? Math.max(220, Math.min(layout.cw[side], W / 2 - CLEAR * upS * z * 0.6 - 2 * M)) : cw;
+        let hs = ids.map(id => natH($(id), cwS));
+        const nat = hs.slice();
         const gaps = 12 * (ids.length - 1), sum = hs.reduce((a, b) => a + b, 0);
-        if (sum + gaps > room) { const k = (room - gaps) / sum; hs = hs.map(h => Math.max(80, h * k)); }
+        if (sum + gaps > room) {
+          // 放不下：Orbit42 有答案卡時戰情卡優先（整張答案卡要看得到），其他卡先讓位到最少 80px；其餘照比例縮
+          const pri = ORBIT && document.body.classList.contains("asking") ? ids.indexOf("cardTeam") : -1;
+          if (pri >= 0) {
+            const others = ids.length - 1, keep = Math.min(hs[pri], room - gaps - 80 * others);
+            const rest = room - gaps - keep, osum = sum - hs[pri];
+            hs = hs.map((h, n) => n === pri ? keep : Math.max(80, osum ? h * rest / osum : 80));
+          } else { const k = (room - gaps) / sum; hs = hs.map(h => Math.max(80, h * k)); }
+        }
         const tot = hs.reduce((a, b) => a + b, 0) + gaps;
         let y = Math.max(capB, Math.min(floor - tot, cy - tot / 2));
-        const x = side === "l" ? M + 4 : W - M - 4 - cw;
-        ids.forEach((id, n) => { const el = $(id); put(el, x, y, cw, hs[n] < el.scrollHeight - 2 ? hs[n] : 0); y += hs[n] + 12; });
+        const x = side === "l" ? M + 4 : W - M - 4 - cwS;
+        ids.forEach((id, n) => { const el = $(id); put(el, x, y, cwS, hs[n] < nat[n] - 2 ? hs[n] : 0); y += hs[n] + 12; });
       }
       // 選項面板放在兩欄中間，不蓋到卡片
       const ax = M + 4 + cw + 12, aw = W - 2 * ax, ask = $("askCard");
-      if (aw >= 340) Object.assign(ask.style, { left: ax + "px", width: aw + "px", transform: "none" });
+      if (aw >= 340 && !ORBIT) Object.assign(ask.style, { left: ax + "px", width: aw + "px", transform: "none" });
     } else {
       autoLift = 0;
       const upB = (H / 2) / (20 * TAN20), cy = H * 0.4, cardsTop = Math.max(H * 0.56, capB + 120);
@@ -2624,6 +2646,7 @@ function autoLayout() {
       const ids = [...cols.l, ...cols.r].filter(id => id !== "cardSys" && id !== "cardCool" && vis(id));       // 疊排時外環、散熱併進額度卡
       ids.slice(0, 2).forEach((id, n) => put($(id), n ? W - M - 4 - w2 : M + 4, cardsTop, w2, Math.min(ch, natH($(id), w2))));
     }
+    if (ORBIT) syncSatArea();
   } finally { autoBusy = false; }
 }
 /** 自動排版時拖卡片放開：看放在左半還右半、在誰上面，改欄位後整理（吸附） */
@@ -2644,7 +2667,7 @@ let autoTick = 0;
 const autoSoon = () => { if (!autoOn || autoTick) return; autoTick = requestAnimationFrame(() => { autoTick = 0; resize(); drawLinks(); }); };
 /** 轉手動：每個面板照現在的位置、大小記下來 */
 function freezeAuto() {
-  if (!autoOn) return;
+  if (!autoOn || ORBIT) return;
   autoOn = false;
   for (const id of PANELS) {
     const el = $(id); if (!el.style.left) continue;
@@ -2656,13 +2679,13 @@ function freezeAuto() {
   renderAuto();
 }
 function renderAuto() { $("bAuto").classList.toggle("on", autoOn); $("bAuto").title = autoOn ? "自動排版：開（拖卡片到左／右欄會自動吸附整理；拉右下角調大小＝改手動；點一下關掉）" : "自動排版：關（點一下讓面板和球自動排好）"; }
-let resizing = false;
+let resizing = false, resizingId = null;
 for (const id of PANELS) {
   const el = $(id); el.classList.add("drag"); if (!autoOn) place(id);
   el.addEventListener("pointerdown", e => {
     if (e.button !== 0 || e.target.closest("button,input,select,textarea,a,.row.link,[data-act],[data-nav]")) return;
     const r = el.getBoundingClientRect();
-    if (e.clientX > r.right - 16 && e.clientY > r.bottom - 16) { freezeAuto(); resizing = true; return; }      // 右下角＝調大小（交給瀏覽器）
+    if (e.clientX > r.right - 16 && e.clientY > r.bottom - 16) { freezeAuto(); resizing = true; resizingId = id; return; }      // 右下角＝調大小（交給瀏覽器）
     if (e.clientX - r.left > el.clientWidth + 1) return;                                              // 捲軸
     e.preventDefault(); e.stopPropagation();
     const dx = e.clientX - r.left, dy = e.clientY - r.top;
@@ -2691,6 +2714,11 @@ for (const id of PANELS) {
 }
 addEventListener("pointerup", () => {
   if (!resizing) return; resizing = false;
+  if (ORBIT) {      // 11-23 審查 #1：只記被拉的那一張、而且只記它那一欄的寬度；高度一律回到照內容
+    const id = resizingId, el = id && $(id); resizingId = null; if (!el) return;
+    const b = el.getBoundingClientRect(), side = b.left + b.width / 2 < innerWidth / 2 ? "l" : "r";
+    layout.cw = { ...(layout.cw || {}), [side]: Math.round(el.offsetWidth) }; el.style.height = ""; saveLayout(); resize(); drawLinks(); return;
+  }
   for (const id of PANELS) { const el = $(id); if (el.style.width || el.style.height) {
     layout[id] = { ...layout[id], w: Math.round(el.offsetWidth), h: Math.round(el.offsetHeight) };
     el.style.maxHeight = "none";
@@ -2710,13 +2738,31 @@ function satArea() {
     if (b.left + b.width / 2 < W / 2) l = Math.max(l, b.right + GAP); else r = Math.min(r, b.left - GAP);
   }
   const top = Math.max(52, $("tools").getBoundingClientRect().bottom + GAP);
-  const bottom = Math.min(H - 16, $("state").getBoundingClientRect().top - GAP);
+  let bottom = Math.min(H - 16, $("state").getBoundingClientRect().top - GAP);
+  if (ORBIT && autoStack) {      // 11-23 審查 #9：疊排時卡片在下面左右兩張 ⇒ 衛星用卡片上方整片寬，不要擠進中間的縫
+    l = 16; r = W - 16;
+    for (const id of PANELS) { const el = $(id); if (!el.classList.contains("on") || el.classList.contains("off")) continue;
+      const b = el.getBoundingClientRect(); if (b.width) bottom = Math.min(bottom, b.top - GAP); }
+  }
   return [l, top, Math.max(200, r - l), Math.max(200, bottom - top)].map(Math.round);
 }
 // 11-23：Orbit42 開／關衛星時來問「現在要不要自動重排、排在哪」（自動排版關著＝null，Keng 手動擺的位置不動）
 window.karaSatArea = () => autoOn ? satArea() : null;
+// 11-23 審查 #4：Orbit42 每次排完版，衛星範圍有變（視窗縮放、全螢幕、卡片長高／開關）就通知 Orbit42 重排衛星（150ms 合併）
+let lastSatSig = "", satTimer = 0;
+function syncSatArea(now) {
+  if (!ORBIT || !autoOn) return;
+  clearTimeout(satTimer);
+  satTimer = setTimeout(() => {
+    const a = satArea(), sig = a.map(v => Math.round(v / 6)).join(",");
+    if (sig === lastSatSig) return; lastSatSig = sig;
+    post({ action: "orbit", cmd: "arrangeSats:" + a.join(",") });
+  }, now ? 0 : 150);
+}
 $("bAuto").onclick = () => {
-  if (ORBIT) setTimeout(() => post({ action: "orbit", cmd: "arrangeSats:" + satArea().join(",") }), 60);     // 11-23 Keng：自動排版時衛星終端機也沿斜對角排開（Orbit42 排原生小視窗）
+  if (ORBIT) {      // Orbit42 永遠自動排：這顆鈕＝欄寬恢復預設、卡片和衛星重新排一次
+    delete layout.cw; saveLayout(); resize(); drawLinks(); lastSatSig = ""; syncSatArea(true); return;
+  }
   if (autoOn) return freezeAuto();
   layout = { auto: true, cols: layout.cols, zmul: 1 }; saveLayout(); autoOn = true;
   for (const id of PANELS) { const st = $(id).style; for (const k of ["left", "top", "right", "bottom", "width", "height", "maxHeight", "transform"]) st[k] = ""; }
@@ -2726,6 +2772,11 @@ renderAuto();
 if (autoOn) { resize(); drawLinks(); }
 // 卡片第一次拿到資料、「需要你」出現／消失時重排一次（外環卡、選項面板的有無會改變版面）
 let autoSig = "";
+if (ORBIT) {
+  let mt = 0;
+  const mo = new MutationObserver(() => { clearTimeout(mt); mt = setTimeout(autoSoon, 120); });
+  for (const id of PANELS) mo.observe($(id), { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["class"] });
+}
 setInterval(() => { const sig = ["cardSys", "cardCool", "cardTeam", "askCard"].map(i => +$(i).classList.contains("on")).join() + $("sysRows").innerHTML.length + $("coolRows").innerHTML.length; if (sig !== autoSig) { autoSig = sig; autoSoon(); } }, 500);
 
 /* ---------- 11-22 小視窗開關（Keng） ---------- */
