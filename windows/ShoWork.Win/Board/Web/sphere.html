@@ -47,6 +47,8 @@
      只在 Orbit42（html.orbit）生效，ShoWork42 自己的球體不變。掛在 :root 上，畫布程式用 getComputedStyle(documentElement) 讀得到 */
   :root.orbit:not([data-theme="light"]) {
     --ink: #4fc36a; --acc: #ffffff; --warn: #ffffff; --bad: #ffffff;
+    --clock-ink: #ffffff;      /* 11-24 Keng 05:31「時間字體恢復白色」；冒號閃爍改綠才看得出在閃 */
+    --clock-blink: #4fc36a;
     /* 量表漸層（--r0～--r3）不對調：Keng 05:20「這些把它復原上一動」⇒ 維持白→灰→黑→綠 */
   }
   /* 11-22 Keng：小視窗的寬度全部一樣（額度、外環、戰情、事件卡、衛星小卡）；自動排版會依視窗改 --cw */
@@ -630,7 +632,13 @@ class Fade {
   set(col) { if (this.to.equals(col)) return; this.from.copy(this.c); this.to.copy(col); this.t0 = nowS(); }
   step() { const k = Math.min(1, (nowS() - this.t0) / this.dur), e = k * k * (3 - 2 * k); return this.c.copy(this.from).lerp(this.to, e); }
 }
-const accentFade = new Fade(BALL, 1.4);
+// 11-24 Keng 05:30「中間的球改成綠色、圖表不要動」：Orbit42 深色時智能體本體（核心、外殼、斜環、碎片）用 BODY＝綠；
+// 量表、外環等圖表照舊吃 BALL（白），所以不能直接改 BALL
+const BODY = new THREE.Color();
+const ORBIT_GREEN = "#4fc36a";
+function syncBody() { BODY.set(ORBIT && themeName() === "dark" ? ORBIT_GREEN : THEME3[themeName()].ball); }
+syncBody();
+const accentFade = new Fade(BODY, 1.4);
 let accent = accentFade.c;
 
 /* ---------- three.js 場景 ---------- */
@@ -679,10 +687,10 @@ const orbClock = (() => {
     x.fillStyle = v("--panel") || "rgba(20,20,21,.9)"; x.fill();
     x.lineWidth = 3; x.strokeStyle = v("--line") || "rgba(255,255,255,.14)"; x.stroke();
     // 11-23 Keng：拿掉後面的紅色游標（害整體沒置中）；改成「分:秒」中間的冒號紅／字色（淺色＝黑）每半秒輪流
-    const hh = pad(d.getHours()), mm = pad(d.getMinutes()), ss = pad(d.getSeconds()), ink = v("--ink") || "#f2f2f2";
+    const hh = pad(d.getHours()), mm = pad(d.getMinutes()), ss = pad(d.getSeconds()), ink = v("--clock-ink") || v("--ink") || "#f2f2f2";      // 11-24 Keng「時間字體恢復白色」：Orbit42 深色用 --clock-ink
     x.font = "500 168px ui-monospace, Menlo, monospace"; x.textBaseline = "alphabetic";
     x.lineWidth = 3; x.lineJoin = "round";      // 11-23 Keng「字稍微加粗一丁點」：同色細描邊，各瀏覽器粗細一致（換字重會跳到 Bold、太粗）
-    const parts = [[hh + ":" + mm, ink], [":", on ? (v("--acc") || "#4fc36a") : ink],
+    const parts = [[hh + ":" + mm, ink], [":", on ? (v("--clock-blink") || v("--acc") || "#4fc36a") : ink],
                    [ss, d.getSeconds() === 42 ? (v("--gold") || "#d4af37") : ink]];      // 秒數平常同字色，跳到 42 那一秒變金色
     let tx = (W - parts.reduce((w, [t]) => w + x.measureText(t).width, 0)) / 2; const ty = 205;
     for (const [t, c] of parts) { x.fillStyle = x.strokeStyle = c; x.fillText(t, tx, ty); x.strokeText(t, tx, ty); tx += x.measureText(t).width; }
@@ -913,6 +921,10 @@ function rampColor(f, out = new THREE.Color()) {
   let i = 0; while (i < 2 && f > RAMP_AT[i + 1]) i++;
   return out.copy(cs[i]).lerp(cs[i + 1], (f - RAMP_AT[i]) / (RAMP_AT[i + 1] - RAMP_AT[i]));
 }
+// 11-24 Keng 05:30：Orbit42 深色時智能體往外擴散的效果（警示衝擊波、說話粒子）反過來：從球的綠開始、擴到末端變白
+// 量表（paintRamp）照舊用 rampColor，不受影響
+function fxRev() { return ORBIT && themeName() === "dark"; }      // 用 function 宣告：setState 可能比這行早執行
+function fxRampColor(f, out = new THREE.Color()) { return rampColor(fxRev() ? 1 - f : f, out); }
 function paintRamp(g) {
   const col = g.fill.geometry.attributes.color, c = new THREE.Color();
   for (let k = 0; k < g.n; k++) { rampColor((k + 0.5) / g.n, c); for (let v = 0; v < 4; v++) col.setXYZ(k * 4 + v, c.r, c.g, c.b); }
@@ -1047,7 +1059,7 @@ const RAMP_LUT = new Float32Array(64 * 3); let rampLutFor = "";
 function rampLut() {
   const name = themeName(); if (name === rampLutFor) return RAMP_LUT;
   const c = new THREE.Color();
-  for (let i = 0; i < 64; i++) { rampColor(i / 63, c); RAMP_LUT[i * 3] = c.r; RAMP_LUT[i * 3 + 1] = c.g; RAMP_LUT[i * 3 + 2] = c.b; }
+  for (let i = 0; i < 64; i++) { fxRampColor(i / 63, c); RAMP_LUT[i * 3] = c.r; RAMP_LUT[i * 3 + 1] = c.g; RAMP_LUT[i * 3 + 2] = c.b; }
   rampLutFor = name; return RAMP_LUT;
 }
 const ribbons = [];
@@ -1328,7 +1340,7 @@ function animFx(dt, t) {
     m.visible = true;
     // 11-22 Keng：邊擴散邊變色（跟量表同一組 白→灰→黑→紅），擴到最外圈是紅的，最後一段才淡掉
     m.scale.setScalar(1.7 + k * 2.4);
-    rampColor(Math.min(1, k / 0.8), m.material.color);
+    fxRampColor(Math.min(1, k / 0.8), m.material.color);
     m.material.uniforms.uOpacity.value = k < 0.8 ? 0.85 : 0.85 * (1 - k) / 0.2;
   }
 }
@@ -1432,7 +1444,8 @@ function setState(s) {
   state = s; tgt = { ...STATES[s] };
   // 說話時沿用原本的顏色（有人在等你就維持橘），不要每播一句就粉紅↔橘來回閃
   const waiting = s === "speaking" && typeof pending === "function" && embedded && pending().length > 0;
-  accentFade.set(s === "alert" || waiting ? ALERT : s === "searching" ? BALL.clone().lerp(GRAY, 0.45) : BALL);
+  // 11-24 Keng 05:30：Orbit42 深色的球一律綠（需要你時也不變白），警示改由衝擊波綠→白＋橫幅表現
+  accentFade.set((s === "alert" || waiting) && !fxRev() ? ALERT : s === "searching" ? BODY.clone().lerp(GRAY, 0.45) : BODY);
   const en = bannerOn ? "WARNING" : STATES[s].en;
   if ($("stZh").dataset.v !== STATES[s].label) { $("stZh").dataset.v = STATES[s].label; $("stZh").textContent = STATES[s].label.split("").join(" "); }
   if ($("stEn").dataset.v !== en) { $("stEn").dataset.v = en; decode($("stEn"), en.split("").join(" ")); }
@@ -2945,7 +2958,7 @@ function applyTheme() {
   const name = themeName(), t = THEME3[name];
   if (!DESK) post({ action: "theme", mode: themeMode, name });      // 終端機跟著換（只由分頁那顆送，避免兩顆搶）
   document.documentElement.dataset.theme = name;
-  BALL.set(t.ball); GRAY.set(t.gray); ALERT.set(t.alert); BAD.set(t.bad); DONE.set(t.done);
+  BALL.set(t.ball); GRAY.set(t.gray); ALERT.set(t.alert); BAD.set(t.bad); DONE.set(t.done); syncBody();
   BLEND = t.blend;
   scene.traverse(o => { const ms = Array.isArray(o.material) ? o.material : o.material ? [o.material] : [];
     for (const m of ms) if (m.blending !== BLEND && m.visible !== false) { m.blending = BLEND; m.needsUpdate = true; } });
