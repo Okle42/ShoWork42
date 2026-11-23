@@ -43,6 +43,12 @@
     --r0: #d4d4d4; --r1: #8c8c8c; --r2: #141414; --r3: #d7261b;
     --cross: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='56'%3E%3Cpath d='M28 24.5v7M24.5 28h7' stroke='%23000' stroke-opacity='.22' stroke-width='1'/%3E%3C/svg%3E");
   }
+  /* 11-24 Keng：Orbit42 裡的深色「綠白對調」——原本白的字改綠、原本綠的（強調、量表尾端、警示）改白；灰字（--ink-dim）、黑底維持。
+     只在 Orbit42（html.orbit）生效，ShoWork42 自己的球體不變。掛在 :root 上，畫布程式用 getComputedStyle(documentElement) 讀得到 */
+  :root.orbit:not([data-theme="light"]) {
+    --ink: #4fc36a; --acc: #ffffff; --warn: #ffffff; --bad: #ffffff;
+    /* 量表漸層（--r0～--r3）不對調：Keng 05:20「這些把它復原上一動」⇒ 維持白→灰→黑→綠 */
+  }
   /* 11-22 Keng：小視窗的寬度全部一樣（額度、外環、戰情、事件卡、衛星小卡）；自動排版會依視窗改 --cw */
   :root { --cw: 310px; }
   :root { --acc-dim: color-mix(in srgb, var(--acc) 38%, transparent); --acc-soft: color-mix(in srgb, var(--acc) 10%, transparent); }
@@ -156,6 +162,9 @@
   #askCard .opts { flex-basis: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
   #askCard .pill.opt { border-radius: 8px; padding: 9px 12px; font-size: 13px; text-align: left; line-height: 1.35; white-space: normal; border-color: var(--line); }
   #askCard .pill.opt.rec { border-color: var(--acc); background: var(--acc-soft); }
+  /* 11-24 Keng「建議的文字框跟底色要再更白一點點才足夠點亮」：Orbit42 深色（綠白對調後強調＝白）⇒ 邊框實白、底 14% 白、字白 */
+  :root.orbit:not([data-theme="light"]) #askCard .pill.opt.rec { border-color: #ffffff; background: rgba(255,255,255,.14); color: #ffffff; }
+  :root.orbit:not([data-theme="light"]) #askCard .pill.opt.rec i { color: #ffffff; }
   #askCard .pill.opt b { font-weight: 600; color: var(--ink-dim); margin-right: 6px; font-size: 11px; }
   #askCard .opts > .pill.opt:last-child:nth-child(odd) { grid-column: 1 / -1; }
   #askCard .pill.opt i { display: block; font-style: normal; font-size: 10.5px; letter-spacing: .12em; color: var(--acc); margin-bottom: 2px; }
@@ -561,6 +570,7 @@
 import * as THREE from "three";
 const DESK = new URLSearchParams(location.search).has("desk");
 const ORBIT = new URLSearchParams(location.search).has("orbit");     // 11-23：嵌在 Orbit42 裡（SphereEmbed.swift）     // 球體桌面版（11-22，SphereMini.swift）
+if (ORBIT) document.documentElement.classList.add("orbit");      // 11-24 Orbit42 深色綠白對調（CSS :root.orbit）
 if (DESK) document.body.classList.add("desk");
 
 /* ---------- 狀態定義：每個狀態的轉速、亮度、標籤 ---------- */
@@ -582,6 +592,8 @@ const THEME3 = {
   light: { ball: "#1c1c1c", gray: "#7a7a7a", alert: "#d7261b", bad: "#d7261b", done: "#ababab", blend: THREE.NormalBlending,
            ramp: ["#d4d4d4", "#8c8c8c", "#141414", "#d7261b"] },      // 淺色底上「白」用淺灰
 };
+// 11-24 Keng：Orbit42 裡深色綠白對調（跟 CSS :root.orbit 同一組）：量表漸層 綠→灰→黑→白、警示改白
+if (ORBIT) Object.assign(THEME3.dark, { alert: "#ffffff", bad: "#ffffff" });      // 量表漸層 ramp 不對調（Keng 05:20 復原），維持白→灰→黑→綠
 const themePref = (() => { try { return localStorage.getItem("sphere.theme") || "auto"; } catch { return "auto"; } })();
 let themeMode = themePref;
 const sysDark = matchMedia("(prefers-color-scheme: dark)");
