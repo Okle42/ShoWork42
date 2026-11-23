@@ -379,7 +379,10 @@ final class Glow {
     }
     var overlayNumber: Int { window.windowNumber }
     var overlayVisible: Bool {
-        (CGWindowListCopyWindowInfo([.optionIncludingWindow], CGWindowID(window.windowNumber)) as? [[String: Any]])?.first?[kCGWindowIsOnscreen as String] as? Bool ?? false
+        // 11-23 修 Orbit42 閃退（10:26、11:21）：光圈視窗還沒真的上螢幕時 windowNumber 是負數，
+        // CGWindowID(負數) 直接 trap。沒有編號＝看不到，交給 sync() 重建
+        guard window.windowNumber > 0 else { return false }
+        return (CGWindowListCopyWindowInfo([.optionIncludingWindow], CGWindowID(window.windowNumber)) as? [[String: Any]])?.first?[kCGWindowIsOnscreen as String] as? Bool ?? false
     }
 
     /// Put the ring exactly around the target, directly BELOW it in z-order (target covers the middle).
