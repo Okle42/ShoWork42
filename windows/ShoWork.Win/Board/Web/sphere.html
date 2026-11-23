@@ -469,9 +469,9 @@
 <div class="card" id="cardUsage">
   <div class="k">額度 · 用量</div>
   <div class="head"><span>這 7 天</span><span class="big"><svg class="donut" viewBox="0 0 36 36"><circle class="tr" cx="18" cy="18" r="15.9"/><circle class="fg" id="d7" cx="18" cy="18" r="15.9" stroke-dasharray="0 100"/></svg><b id="u7">--%</b></span></div>
-  <div class="row"><span class="t">5H</span><span>5 小時額度<span class="rs" id="r5"></span></span><span id="u5">--%</span><div class="meter seg"><b id="m5"></b></div></div>
-  <div class="row"><span class="t">7D</span><span>7 天額度<span class="rs" id="r7"></span></span><span id="u7b">--%</span><div class="meter seg"><b id="m7"></b></div></div>
-  <div class="row"><span class="t">CTX</span><span>記憶量<span class="rs" id="rc"></span></span><span id="uc">--%</span><div class="meter seg"><b id="mc"></b></div></div>
+  <div class="row"><span class="t">5H</span><span>5 小時額度<span class="rs" id="r5"></span></span><span id="u5">--%</span><div class="meter seg ramp"><b id="m5"></b></div></div>
+  <div class="row"><span class="t">7D</span><span>7 天額度<span class="rs" id="r7"></span></span><span id="u7b">--%</span><div class="meter seg ramp"><b id="m7"></b></div></div>
+  <div class="row"><span class="t">CTX</span><span>記憶量<span class="rs" id="rc"></span></span><span id="uc">--%</span><div class="meter seg ramp"><b id="mc"></b></div></div>
   <div class="fc" id="fc" hidden></div>
   <div id="sysWrap"></div>
 </div>
@@ -1508,7 +1508,7 @@ async function pump() {
 /* ---------- 資料：嵌在 ShoWork42 時由 App 推進來；單獨開時讀 /usage ---------- */
 let data = { five_hour: null, seven_day: null, ctx: null, sessions: null, team: [] };
 function pct(v) { return v == null ? "--%" : Math.round(v) + "%"; }
-function meter(id, v) { const b = $(id); b.style.width = (v ?? 0) + "%"; b.style.backgroundColor = v >= 90 ? "var(--bad)" : v >= 70 ? "var(--warn)" : "var(--ink)"; }      // 紅只留給「要注意」
+function meter(id, v) { $(id).style.setProperty("--p", Math.max(0, Math.min(100, v ?? 0)) + "%"); }      // 11-23 Keng「量表要用我們的漸層」：白→灰→黑→紅（.meter.ramp），85% 起才到紅
 /* v5 ③：數字滾動（從現在的值滾到新值） */
 function roll(el, to, fmt = v => Math.round(v) + "%") {
   if (to == null) { el.textContent = "--%"; el._v = null; return; }
@@ -1780,14 +1780,14 @@ function sessionPop(c) {
   const ln = (k, v) => v == null || v === "" ? "" : `<div class="ln"><span class="t">${k}</span>${esc(v)}</div>`;
   return { level: c.status === "需要你" ? "warn" : c.status === "卡住" ? "bad" : "", sid: c.sessionId,
     html: `<div class="k">SESSION · ${esc(c.status || "")}</div><div class="head"><b>${esc(c.name || "")}</b><span style="font-size:12px;color:${ST_COL[c.status] || "var(--ink-dim)"}">${c.progress != null ? c.progress + "%" : ""}</span></div>
-      ${c.progress != null ? `<div class="meter seg" style="margin:0 0 6px"><b style="width:${c.progress}%;background-color:${ST_COL[c.status] || "var(--acc)"}"></b></div>` : ""}
+      ${c.progress != null ? `<div class="meter seg ramp" style="margin:0 0 6px"><b style="--p:${Math.max(0, Math.min(100, c.progress))}%"></b></div>` : ""}
       ${ln("在做", c.doing)}${ln(c.status === "需要你" ? "問題" : "摘要", clip(c.status === "需要你" ? (c.ask || "") : (c.summary || ""), 90))}${ln("記憶", c.ctx != null ? c.ctx + "%" : null)}` };
 }
 function usagePop(which) {
   const v = which === "7d" ? data.seven_day : data.five_hour, rs = which === "7d" ? data.seven_reset : data.five_reset, f = forecast();
   return { level: v >= 90 ? "bad" : "warn", side: "l", flash: "cardUsage", target: which === "7d" ? "7d" : "5h",
     html: `<div class="k">USAGE · ${which === "7d" ? "THIS WEEK" : "5 HOURS"}</div><div class="head"><span>${which === "7d" ? "這週額度" : "5 小時額度"}</span><b style="color:${lvlCol(v)}">${pct(v)}</b></div>
-      <div class="meter seg" style="margin:0 0 6px"><b style="width:${Math.min(100, v ?? 0)}%;background-color:${lvlCol(v)}"></b></div>
+      <div class="meter seg ramp" style="margin:0 0 6px"><b style="--p:${Math.max(0, Math.min(100, v ?? 0))}%"></b></div>
       ${rs != null ? `<div class="ln"><span class="t">重置</span>${hm(rs)} 後</div>` : ""}${which === "5h" && f && !f.calm ? `<div class="ln"><span class="t">預估</span>${f.before ? `${hm(f.left)} 後用完` : "撐得到重置"}</div>` : ""}` };
 }
 function showPop(p) {
@@ -1885,10 +1885,9 @@ function auditRows() {
 }
 function renderSys() {
   const rows = [];
-  for (const r of data.runs || []) rows.push(`<div class="row"><span class="t">RUN</span><span>${esc(clip((r.name ? r.name + " · " : "") + (r.label || "背景工作"), 22))}${r.eta ? " · 剩 " + esc(r.eta) : ""}</span><span>${Math.round(r.fraction * 100)}%</span><div class="meter"><b style="width:${Math.round(r.fraction * 100)}%"></b></div></div>`);
+  for (const r of data.runs || []) rows.push(`<div class="row"><span class="t">RUN</span><span>${esc(clip((r.name ? r.name + " · " : "") + (r.label || "背景工作"), 22))}${r.eta ? " · 剩 " + esc(r.eta) : ""}</span><span>${Math.round(r.fraction * 100)}%</span><div class="meter ramp"><b style="--p:${Math.round(r.fraction * 100)}%"></b></div></div>`);
   for (const d of data.disks || []) {
-    const col = d.used >= 95 ? "var(--bad)" : d.used >= 85 ? "var(--warn)" : "var(--ink)";
-    rows.push(`<div class="row"><span class="t">DISK</span><span>${esc(d.name)} · 剩 ${d.freeGB} GB</span><span>${Math.round(d.used)}%</span><div class="meter seg"><b style="width:${d.used}%;background-color:${col}"></b></div></div>`);
+    rows.push(`<div class="row"><span class="t">DISK</span><span>${esc(d.name)} · 剩 ${d.freeGB} GB</span><span>${Math.round(d.used)}%</span><div class="meter seg ramp"><b style="--p:${Math.max(0, Math.min(100, d.used))}%"></b></div></div>`);
   }
   rows.push(...auditRows());
   syncAudit();
@@ -1903,8 +1902,7 @@ function renderCool() {
   const h = data.heat;
   if (h?.temp != null) {
     const lv = { ok: "正常", warm: "偏熱", hot: "很熱", critical: "過熱" }[h.level] || h.level;
-    const col = h.level === "hot" || h.level === "critical" ? "var(--bad)" : h.level === "warm" ? "var(--ink)" : "var(--gray)";
-    rows.push(`<div class="row"><span class="t">TEMP</span><span>機器溫度 · ${esc(lv)}${data.paused ? " · 動畫降速" : ""}</span><span>${Math.round(h.temp)}°C</span><div class="meter"><b style="width:${Math.min(100, Math.max(2, (h.temp - 35) / 65 * 100))}%;background:${col}"></b></div></div>`);
+    rows.push(`<div class="row"><span class="t">TEMP</span><span>機器溫度 · ${esc(lv)}${data.paused ? " · 動畫降速" : ""}</span><span>${Math.round(h.temp)}°C</span><div class="meter ramp"><b style="--p:${Math.min(100, Math.max(2, (h.temp - 35) / 65 * 100))}%"></b></div></div>`);
   }
   // 11-23 Keng：cool42 面板併進來——風扇（轉速＋模式鈕）、時脈／降頻、吃 CPU 前三名
   const cool = data.cool;
@@ -1912,7 +1910,7 @@ function renderCool() {
     const f = cool.fan || {}, mode = cool.guardMode, fixedMax = mode === "fixed";
     const mb = (m, label, on) => `<button class="pill sm${on ? " on" : ""}" data-fan="${m}">${label}</button>`;
     const fanPct = f.max ? Math.round(f.rpm / f.max * 100) : 0;
-    rows.push(`<div class="row"><span class="t">FAN</span><span>風扇${cool.guardRunning ? "" : " · 守護程式沒在跑"}</span><span>${f.rpm ?? "--"} rpm</span><div class="meter"><b style="width:${fanPct}%;background:var(--ink)"></b></div><span class="abtn">${mb("curve", "曲線", mode === "curve")}${mb("auto", "系統", mode === "auto")}${mb("max", "全速", fixedMax)}</span></div>`);
+    rows.push(`<div class="row"><span class="t">FAN</span><span>風扇${cool.guardRunning ? "" : " · 守護程式沒在跑"}</span><span>${f.rpm ?? "--"} rpm</span><div class="meter ramp"><b style="--p:${fanPct}%"></b></div><span class="abtn">${mb("curve", "曲線", mode === "curve")}${mb("auto", "系統", mode === "auto")}${mb("max", "全速", fixedMax)}</span></div>`);
     const thr = cool.clockThrottled || cool.gpuThrottlePercent > 0 || (cool.thermalPressure && cool.thermalPressure !== "Nominal");
     rows.push(`<div class="row"><span class="t">CLK</span><span title="${cool.maxToday ? `今天最高 ${cool.maxToday}°C` : ""}">P 核 ${((cool.pcoreMHz || 0) / 1000).toFixed(1)}GHz · GPU ${Math.round(cool.gpuMax || 0)}°C</span><span${thr ? ' style="color:var(--bad)"' : ""}>${thr ? "降頻" : "全速"}</span></div>`);
     if ((cool.top || []).length) rows.push(`<div class="row atip"><span class="t">CPU</span><span>${cool.top.map(p => `${esc(clip(p.name, 18))} ${p.cpu}%`).join(" · ")}</span></div>`);
@@ -2033,7 +2031,7 @@ function quota() {
     heatSaid = Date.now();
     const t = Math.round(data.heat.temp);
     announce(`機器現在 ${t} 度，有點熱，動畫先降速。`, { auto: true, banner: { level: "bad", icon: "heat", tag: "溫度 · THERMAL", source: "COOL42", title: `機器 ${t}°C`, sub: "動畫降速中，重的工作可以晚點再跑" },
-      pop: { level: "bad", side: "l", target: "heat", html: `<div class="k">THERMAL · COOL42</div><div class="head"><span>機器溫度</span><b style="color:var(--bad)">${t}°C</b></div><div class="meter seg"><b style="width:${Math.min(100, Math.max(2, (t - 35) / 65 * 100))}%;background-color:var(--bad)"></b></div>` } });
+      pop: { level: "bad", side: "l", target: "heat", html: `<div class="k">THERMAL · COOL42</div><div class="head"><span>機器溫度</span><b style="color:var(--bad)">${t}°C</b></div><div class="meter seg ramp"><b style="--p:${Math.min(100, Math.max(2, (t - 35) / 65 * 100))}%"></b></div>` } });
   }
   if (data.heat) heatWas = !!hot;
 }
