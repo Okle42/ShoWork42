@@ -25,26 +25,6 @@ final class WorkWindow: NSObject, NSWindowDelegate, WKScriptMessageHandler {
         return w
     }
 
-    /// 11-23 T1123115042 Orbit42：只要內容（網頁），裝進 Orbit42 衛星終端機那款小視窗；不開自己的視窗。
-    /// theme：dark／light（Orbit42 球體的深淺）；網頁帶 ?orbit=1 換成黑白灰紅、透明底（毛玻璃由外框做）
-    static func embedded(_ sid: String, cwd: String?, theme: String) -> NSView? {
-        if let w = windows[sid] {
-            if w.embedded { return w.web }
-            w.window.close()                          // 原本開著舊視窗：關掉，改嵌進去
-        }
-        guard let dir = webDir else { return nil }
-        let w = WorkWindow(sid: sid, cwd: cwd, webDir: dir, orbitTheme: theme)
-        windows[sid] = w
-        return w.web
-    }
-    static func closeEmbedded(_ sid: String) {
-        guard let w = windows[sid], w.embedded else { return }
-        w.cleanup(); w.web.removeFromSuperview()
-    }
-    static func setOrbitTheme(_ theme: String) {
-        for w in windows.values where w.embedded { w.web.evaluateJavaScript("document.documentElement.dataset.theme=\"\(theme == "light" ? "light" : "dark")\"") }
-    }
-
     private func front() {
         if Self.testMode { window.setFrameOrigin(NSPoint(x: -6000, y: -6000)); window.orderBack(nil); return }
         window.makeKeyAndOrderFront(nil)
@@ -85,9 +65,8 @@ final class WorkWindow: NSObject, NSWindowDelegate, WKScriptMessageHandler {
     private var ready = false
 
     private var host: SessionHost { SessionHost.shared }
-    private var embedded = false
 
-    private init(sid: String, cwd: String?, webDir: URL, orbitTheme: String? = nil) {
+    private init(sid: String, cwd: String?, webDir: URL) {
         self.sid = sid
         self.cwd = cwd ?? SessionHost.shared.owners()[sid]?.cwd
         let cfg = WKWebViewConfiguration()
@@ -107,18 +86,8 @@ final class WorkWindow: NSObject, NSWindowDelegate, WKScriptMessageHandler {
         window.delegate = self
         window.setFrameAutosaveName("ShoWorkWorkWindow")
         if window.frame.origin == .zero { window.center() }
-        // 11-23 修 Orbit42 當機：app 裡的 Bundle.main.resourceURL 是「相對於 app 的網址」（Contents/Resources/ ＋ 基準 file:///…app/），
-        // URLComponents(resolvingAgainstBaseURL: false) 會把基準丟掉 ⇒ 變成 "Contents/Resources/Web/work.html?orbit=1…"，
-        // 不是 file URL ⇒ WKWebView.loadFileURL 丟 NSInvalidArgumentException、整個 Orbit42 崩潰（點球上的隊長就當）。一律先轉絕對網址
-        let webDir = webDir.absoluteURL
-        var url = webDir.appendingPathComponent("work.html")
-        if let t = orbitTheme {
-            embedded = true
-            var c = URLComponents(url: url, resolvingAgainstBaseURL: true)!
-            c.queryItems = [URLQueryItem(name: "orbit", value: "1"), URLQueryItem(name: "theme", value: t == "light" ? "light" : "dark")]
-            url = c.url ?? url
-        }
-        web.loadFileURL(url, allowingReadAccessTo: webDir)
+        let webDir = webDir.absoluteURL       // 相對網址會讓 loadFileURL 丟例外（11-23 當機）
+        web.loadFileURL(webDir.appendingPathComponent("work.html"), allowingReadAccessTo: webDir)
     }
 
     func windowWillClose(_ notification: Notification) { cleanup() }

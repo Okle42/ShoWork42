@@ -55,6 +55,13 @@ struct InboxTests {
 
     @Test("背景隊長的第一句話帶登記、回報方式與交辦內容")
     func bootstrap() {
+        // 11-24 隊長改背景終端機型：已是背景 session 的不能再帶參數（會開成副本）
+        #expect(CaptainLaunch.bgArgs(resume: "s1", saved: true, model: "m", prompt: "p") == ["--bg", "--resume", "s1", "p"])
+        let fresh = CaptainLaunch.bgArgs(resume: nil, saved: false, model: "m", prompt: "p")
+        #expect(fresh.contains("隊長") && fresh.last == "p" && !fresh.contains("--resume"))
+        #expect(CaptainLaunch.bgArgs(resume: "s1", saved: false, model: "m", prompt: nil).contains("--model"))
+        #expect(CaptainLaunch.bgJob("note: x\nbackgrounded · 03e944d5 · Ivan5\n") == "03e944d5")
+        #expect(CaptainLaunch.bgJob("error") == nil)
         let s = CaptainLaunch.bootstrap(showork: "/x/showork", task: "幫我看 ProjectA")
         #expect(s.contains("\"/x/showork\" captain") && s.contains("--options") && s.hasSuffix("幫我看 ProjectA"))
     }

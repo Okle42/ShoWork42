@@ -107,10 +107,40 @@ public enum CaptainLaunch {
     public static let defaultModel = "claude-opus-5-5"
     public static let modelKey = "captain.model"
 
+    /// `claude --bg` 的參數（11-24 Keng「隊長用衛星終端機打開就好」：隊長一律是背景終端機型，`claude attach` 看得到）。
+    /// saved＝已經是背景 session：它記著自己的參數，再帶參數會另開一個副本（實測 2.1.331）⇒ 只帶 --resume
+    public static func bgArgs(resume: String?, saved: Bool, model: String, prompt: String?) -> [String] {
+        var a = ["--bg"]
+        if let resume { a += ["--resume", resume] }
+        if !(resume != nil && saved) {
+            a += ["--model", model, "--permission-mode", "bypassPermissions",
+                  "--settings", #"{"enabledPlugins":{"flightdeck@claude-flightdeck":false}}"#]
+            if resume == nil { a += ["-n", "隊長"] }
+        }
+        if let prompt { a.append(prompt) }
+        return a
+    }
+
+    /// 「backgrounded · <job id>」→ job id
+    public static func bgJob(_ out: String) -> String? {
+        guard let r = out.range(of: #"backgrounded · [0-9a-f]{6,}"#, options: .regularExpression) else { return nil }
+        return out[r].split(separator: " ").last.map(String.init)
+    }
+
+    /// 這段對話已經是背景 session 了嗎（~/.claude/jobs/*/state.json 記的 sessionId）
+    public static func savedJob(_ sid: String, jobsDir: String = Peer.claudeDir + "/jobs") -> String? {
+        let fm = FileManager.default
+        return ((try? fm.contentsOfDirectory(atPath: jobsDir)) ?? []).first { j in
+            guard let d = fm.contents(atPath: "\(jobsDir)/\(j)/state.json"),
+                  let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { return false }
+            return o["sessionId"] as? String == sid || o["resumeSessionId"] as? String == sid
+        }
+    }
+
     /// 背景隊長的第一句話：登記、守則，以及它看不到終端機 ⇒ 所有要跟使用者講的都走 showork card
     public static func bootstrap(showork: String, task: String) -> String {
         """
-        你是 AI 工作戰情中心的隊長（背景 session，使用者看不到你的終端機）。
+        你是 AI 工作戰情中心的隊長（背景 session，使用者可以從衛星終端機打開看，但不一定開著）。
         1. 先跑：\"\(showork)\" captain（登記成隊長並印出守則），照守則做事：先看 \"\(showork)\" roster，選人後用 \"\(showork)\" task add 派工；同專案只派一個；小事自己做。
         2. 你要跟使用者講的話，一律用 \"\(showork)\" card 回報（--summary 寫結果；要他決定就 --status review --ask "<問題>" --options "<選項1>|<選項2>"）。他在戰情中心看卡片、按選項回答你。
         3. 之後使用者從戰情中心交辦的事，會以【使用者從看板交辦】的訊息送進來，一樣照守則處理。

@@ -52,16 +52,6 @@ public enum SphereEmbed {
         return true
     }
 
-    /// 11-23 T1123115042：戰情中心自己持有的 session（kind board，例如隊長）的對話內容，給 Orbit42 裝進衛星終端機外框。
-    /// 這類 session 是引擎用 claude -p 串流跑的，不是終端機程式，沒辦法 attach；內容用工作視窗那份網頁（?orbit=1 黑白灰紅、透明底）
-    public static func workView(sessionId: String, cwd: String?, theme: String) -> NSView? {
-        WorkWindow.embedded(SessionHost.shared.handle(for: sessionId) ?? sessionId, cwd: cwd, theme: theme)
-    }
-    public static func closeWorkView(sessionId: String) {
-        WorkWindow.closeEmbedded(SessionHost.shared.handle(for: sessionId) ?? sessionId)
-    }
-    public static func workTheme(_ theme: String) { WorkWindow.setOrbitTheme(theme) }
-
     /// 完整球體（跟戰情中心的球體分頁同一份 sphere.html，多帶 ?orbit=1 顯示 Orbit42 才有的按鈕）
     public static func makeView() -> NSView {
         guard let h = SphereWebHost(orbit: true) else {

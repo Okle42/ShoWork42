@@ -121,7 +121,11 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
             if blocked { return say("測試：不交給隊長「\(text)」。") }
             DispatchQueue.global().async {
                 let msg = BoardActions.askCaptain(text)
-                DispatchQueue.main.async { MainActor.assumeIsolated { self.say(msg + "。") } }
+                let rec = BoardActions.liveCaptain()
+                DispatchQueue.main.async { MainActor.assumeIsolated {
+                    self.say(msg + "。")
+                    if let rec { self.openTerminal(rec) }      // 11-24 Keng：交給隊長後用衛星終端機打開它
+                } }
             }
         case "mini":
             let on = m["on"] as? Bool ?? !SphereMini.shared.enabled
@@ -204,6 +208,20 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
     private func jump(_ c: BoardCard) {
         if blocked { return say("測試：不跳到 \(c.display)。") }
         // 11-23 Orbit42：點衛星先交給 Orbit42（在它自己的終端機面板打開）；它處理不了才走原本的跳 Ghostty
+        if c.kind == "board", SphereEmbed.openSession != nil {      // 11-24 Keng「用衛星終端機打開就好」：串流型先轉成終端機型再打開，不再有對話小視窗
+            let sid = c.sessionId, name = c.display, cwd = c.cwd
+            DispatchQueue.global().async {
+                let r = BoardActions.toTerminal(sid)
+                DispatchQueue.main.async { MainActor.assumeIsolated {
+                    switch r {
+                    case .failure(let e): self.say("打不開 \(name)：\(e.message)。")
+                    case .success(let job):
+                        _ = SphereEmbed.openSession?(SphereEmbed.SessionRef(sessionId: sid, pid: 0, jobId: job, kind: "bg", cwd: cwd, name: name))
+                    }
+                } }
+            }
+            return
+        }
         if let open = SphereEmbed.openSession,
            open(SphereEmbed.SessionRef(sessionId: c.sessionId, pid: c.pid, jobId: c.jobId, kind: c.kind, cwd: c.cwd, name: c.display)) { return }
         if c.kind == "board" {
@@ -211,6 +229,11 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
         } else if let msg = BoardActions.jumpOrAttach(c) {
             say(msg)
         }
+    }
+
+    private func openTerminal(_ r: SessionRecord) {
+        guard r.kind == "bg" else { return }
+        _ = SphereEmbed.openSession?(SphereEmbed.SessionRef(sessionId: r.sessionId, pid: r.pid, jobId: r.jobId, kind: r.kind, cwd: r.cwd, name: r.name ?? "隊長"))
     }
 
     /// 結果回網頁當一句播報

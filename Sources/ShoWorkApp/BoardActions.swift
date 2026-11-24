@@ -504,11 +504,7 @@ extension BoardActions {
 
     /// 把一件事交給隊長，由它決定給誰
     nonisolated static func toCaptain(_ sid: String, text: String) -> Result<String, CardError> {
-        let body = "【使用者從看板交辦】\(text)\n請照隊長守則處理：先看名冊（showork roster），選人後用 showork task add 派工；小事自己做。"
-        // 11-08 H4：戰情中心持有的隊長（串流模式沒有跨 session 信箱）⇒ 直接當一句話送進去；終端機接手中就走下面的 Peer
-        if let h = SessionHost.shared.handle(for: sid), let s = try? SessionHost.shared.ensure(h) {
-            return s.send(body) ? .success("board") : .failure(CardError("隊長的程序已經結束"))
-        }
+        let body = captainOrder(text)
         guard let cap = Peer.find(sid) else { return .failure(CardError("隊長的 session 沒開著")) }
         return Peer.send(to: cap, text: body, fromName: "AI工作戰情中心（使用者）")
     }
@@ -520,8 +516,8 @@ extension BoardActions {
     nonisolated static var captainModel: String {
         UserDefaults(suiteName: "ai.okle42.showork")?.string(forKey: CaptainLaunch.modelKey).flatMap { $0.isEmpty ? nil : $0 } ?? CaptainLaunch.defaultModel
     }
-    /// 剛開的背景隊長（短 id、開的時間）：還沒登記好之前不要再開第二個
-    nonisolated(unsafe) private static var launching: (id: String, at: Date)?
+    /// 正在開／接回隊長（開始的時間）：還沒登記好之前不要再開第二個
+    nonisolated(unsafe) private static var launching: Date?
     nonisolated private static let launchLock = NSLock()
 
     /// 現在的隊長還開著嗎（行程在、有收件匣）
@@ -529,62 +525,99 @@ extension BoardActions {
         CaptainStore.captain().flatMap { Peer.find($0.sessionId) }
     }
 
-    /// 交給隊長：隊長在就直送；不在就開一個背景隊長（claude --bg --model <captainModel>），把這件事當它的第一句話。
+    /// 同一時間只轉一個（連點兩下不會開成兩份）
+    nonisolated private static let handoffLock = NSLock()
+
+    /// 戰情中心的串流 session（kind board）→ 背景終端機型，同一段對話、同一個 id；回傳 job id。
+    /// 正在做事不打斷。會等（關舊程序、開新的），呼叫端放背景佇列。
+    nonisolated static func toTerminal(_ sid: String, prompt: String? = nil) -> Result<String, CardError> {
+        handoffLock.lock(); defer { handoffLock.unlock() }
+        let host = SessionHost.shared
+        guard let h = host.handle(for: sid) else {
+            if prompt == nil, let job = Peer.sessions().first(where: { $0.sessionId == sid })?.jobId ?? CaptainLaunch.savedJob(sid) { return .success(job) }
+            return startBackground(resume: sid, prompt: prompt, cwd: BoardPaths.home, model: captainModel)
+        }
+        if let s = host.session(h), s.state != .idle { return .failure(CardError("它還在做事，做完這一輪再打開")) }
+        let r = host.owners()[h], live = host.liveId(h)
+        guard host.release(h) else { return .failure(CardError("舊的程序關不掉")) }
+        let job = startBackground(resume: live, prompt: prompt, cwd: r?.cwd ?? BoardPaths.home, model: r?.model ?? captainModel)
+        if case .success = job {
+            host.forget(h)                  // 不再由戰情中心持有：之後送話走跨 session 信箱，不會又被接回串流模式
+            if h != live, let c = CaptainStore.captain(), c.sessionId == h { CaptainStore.setCaptain(CaptainRecord(sessionId: live, name: c.name)) }
+        }
+        return job
+    }
+
+    /// claude --bg（輸出寫暫存檔：背景服務會繼承 stdout，用 pipe 會一直讀不到結尾）
+    nonisolated private static func startBackground(resume: String?, prompt: String?, cwd: String, model: String) -> Result<String, CardError> {
+        guard let claude = Tools.claude() else { return .failure(CardError("找不到 claude 指令")) }
+        let out = FileManager.default.temporaryDirectory.appendingPathComponent("showork-bg-\(UUID().uuidString).txt")
+        defer { try? FileManager.default.removeItem(at: out) }
+        let args = CaptainLaunch.bgArgs(resume: resume, saved: resume.map { CaptainLaunch.savedJob($0) != nil } ?? false, model: model, prompt: prompt)
+        _ = Tools.run("/bin/zsh", ["-c", "out=$1; shift; \"$@\" < /dev/null > \"$out\" 2>&1", "showork-bg", out.path, claude] + args, cwd: cwd, timeout: 60)
+        let text = (try? String(contentsOf: out, encoding: .utf8)) ?? ""
+        guard let job = CaptainLaunch.bgJob(text) else {
+            return .failure(CardError(String(text.trimmingCharacters(in: .whitespacesAndNewlines).prefix(200))))
+        }
+        Log.note("BG \(job) resume=\(resume ?? "-") model=\(model)")
+        return .success(job)
+    }
+
+    /// 等背景 session 登記好
+    nonisolated static func waitJob(_ job: String, seconds: Int = 30) -> SessionRecord? {
+        for _ in 0..<seconds {
+            if let r = Peer.sessions().first(where: { $0.jobId == job }) { return r }
+            Thread.sleep(forTimeInterval: 1)
+        }
+        return nil
+    }
+
+    nonisolated static func captainOrder(_ text: String) -> String {
+        "【使用者從看板交辦】\(text)\n請照隊長守則處理：先看名冊（showork roster），選人後用 showork task add 派工；小事自己做。"
+    }
+
+    /// 交給隊長：隊長在就直送；程序不在就把它的對話接回來（背景終端機型）；接不回來才開新隊長。
     /// 會等（開 session 最多 30 秒），呼叫端放背景佇列。
     nonisolated static func askCaptain(_ text: String) -> String {
         let line = Inbox.message(text)
         guard !line.isEmpty else { return "沒有內容" }
-        // 戰情中心持有的隊長：程序關著也會自動接回（toCaptain → SessionHost.ensure）
-        if let cap = CaptainStore.captain(), SessionHost.shared.handle(for: cap.sessionId) != nil,
-           case .success = toCaptain(cap.sessionId, text: line) {
-            return "已交給隊長「\(cap.name ?? "隊長")」"
+        let cap = CaptainStore.captain()
+        // 舊的串流隊長還在做事：先照舊送進去，不打斷（閒下來再轉成終端機型）
+        if let cap, let h = SessionHost.shared.handle(for: cap.sessionId), let s = SessionHost.shared.session(h), s.state != .idle {
+            return s.send(captainOrder(line)) ? "已交給隊長「\(cap.name ?? "隊長")」" : "送不到隊長：程序已經結束"
         }
-        if let cap = liveCaptain() {
-            switch toCaptain(cap.sessionId, text: line) {
-            case .success: return "已交給隊長「\(cap.name ?? "隊長")」"
+        if let live = liveCaptain(), SessionHost.shared.handle(for: live.sessionId) == nil {
+            switch toCaptain(live.sessionId, text: line) {
+            case .success: return "已交給隊長「\(live.name ?? "隊長")」"
             case .failure(let e): return "送不到隊長：\(e.message)"
             }
         }
         launchLock.lock()
-        if let l = launching, Date().timeIntervalSince(l.at) < 120 {
+        if let at = launching, Date().timeIntervalSince(at) < 120 {
             launchLock.unlock()
-            if let r = Peer.find(l.id) {
-                CaptainStore.setCaptain(CaptainRecord(sessionId: r.sessionId, name: r.name))
-                return toCaptain(r.sessionId, text: line).map { _ in "已交給隊長「\(r.name ?? "隊長")」" }.get(or: "送不到隊長")
-            }
             return "隊長剛開，還在暖機；過半分鐘再送一次"
         }
-        launching = (id: "", at: Date())
+        launching = Date()
         launchLock.unlock()
-        let prompt = CaptainLaunch.bootstrap(showork: TaskRouter.showork, task: line)
-        // 11-08 H4：隊長由戰情中心自己持有（SessionHost，串流模式）；點隊長就是它的工作視窗。開不起來才退回 claude --bg
-        if let s = try? SessionHost.shared.start(cwd: BoardPaths.home, model: captainModel, name: "隊長", permissionMode: "bypassPermissions"),
-           s.send(prompt) {
-            CaptainStore.setCaptain(CaptainRecord(sessionId: s.sessionId, name: "隊長"))
-            launching = nil
-            Log.note("CAPTAIN owned \(s.sessionId) model=\(captainModel)")
-            return "已開新隊長（\(modelTitle(captainModel))），這件事是它的第一個任務"
-        }
-        guard let claude = Tools.claude() else { launching = nil; return "找不到 claude 指令，開不了隊長" }
-        let r = Tools.run(claude, ["--bg", "--model", captainModel, "-n", "隊長", "--permission-mode", "bypassPermissions", prompt],
-                          cwd: BoardPaths.home, timeout: 60)
-        let all = r.out + r.err
-        guard let l = all.split(separator: "\n").first(where: { $0.contains("backgrounded") }),
-              let id = l.split(separator: "·").dropFirst().first?.trimmingCharacters(in: .whitespaces), id.count >= 6 else {
-            launching = nil
-            return "開隊長失敗：" + String(all.trimmingCharacters(in: .whitespacesAndNewlines).prefix(200))
-        }
-        launching = (id: id, at: Date())
-        Log.note("CAPTAIN launched \(id) model=\(captainModel)")
-        // 登記成隊長（它自己跑 showork captain 也會登記；先登記，下一句交辦才找得到它）
-        for _ in 0..<30 {
-            if let rec = Peer.find(id) {
-                CaptainStore.setCaptain(CaptainRecord(sessionId: rec.sessionId, name: rec.name))
-                return "已開新隊長（\(modelTitle(captainModel))），這件事是它的第一個任務"
+        defer { launchLock.lock(); launching = nil; launchLock.unlock() }
+        var why = ""
+        if let cap {
+            switch toTerminal(cap.sessionId, prompt: captainOrder(line)) {
+            case .success(let job):
+                if let rec = waitJob(job), rec.sessionId != CaptainStore.captain()?.sessionId {
+                    CaptainStore.setCaptain(CaptainRecord(sessionId: rec.sessionId, name: rec.name ?? cap.name))
+                }
+                return "已交給隊長「\(cap.name ?? "隊長")」"
+            case .failure(let e): why = "舊隊長接不回來（\(e.message)），"
             }
-            Thread.sleep(forTimeInterval: 1)
         }
-        return "已開新隊長（\(modelTitle(captainModel))），正在暖機"
+        switch startBackground(resume: nil, prompt: CaptainLaunch.bootstrap(showork: TaskRouter.showork, task: line), cwd: BoardPaths.home, model: captainModel) {
+        case .failure(let e): return "開隊長失敗：" + e.message
+        case .success(let job):
+            // 登記成隊長（它自己跑 showork captain 也會登記；先登記，下一句交辦才找得到它）
+            if let rec = waitJob(job) { CaptainStore.setCaptain(CaptainRecord(sessionId: rec.sessionId, name: rec.name)) }
+            return why + "已開新隊長（\(modelTitle(captainModel))），這件事是它的第一個任務"
+        }
     }
 
     nonisolated static func modelTitle(_ m: String) -> String {
