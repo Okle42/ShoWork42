@@ -362,6 +362,8 @@ final class SphereWebHost: NSObject, WKNavigationDelegate, WKScriptMessageHandle
         func mins(_ d: Date?) -> Any { d.map { max(0, Int(($0.timeIntervalSince(now) / 60).rounded())) } ?? NSNull() }
         o["five_reset"] = mins(l?.fiveHour?.resetsAt)
         o["seven_reset"] = mins(l?.sevenDay?.resetsAt)
+        // 額度資料的時間（epoch 秒，取到分鐘，免得每次重寫都重推）：面板標「多久前更新」，超過 15 分鐘標過期
+        o["quota_at"] = l?.snapshotAt.map { (floor($0.timeIntervalSince1970 / 60) * 60) } ?? NSNull()
         // 記憶量：最近有動靜的那個 session
         let recent = people.filter { $0.ctx != nil }.max { ($0.lastActivity ?? .distantPast) < ($1.lastActivity ?? .distantPast) }
         o["ctx"] = recent?.ctx.map { $0.percent.rounded() } ?? NSNull()

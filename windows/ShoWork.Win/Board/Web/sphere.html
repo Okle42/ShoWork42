@@ -2,7 +2,7 @@
 <html lang="zh-Hant">
 <head>
 <!-- 戰情中心第四個分頁「球體」（11-21 Kang：參考 IG 的 K.A.R.A 2.0 球體助理）。原型在 IGSkills42/research/kara。
-     原生端每次資料變動呼叫 window.karaUpdate({five_hour, seven_day, five_reset, seven_reset, ctx, sessions, doneToday,
+     原生端每次資料變動呼叫 window.karaUpdate({five_hour, seven_day, five_reset, seven_reset, quota_at, ctx, sessions, doneToday,
        team:[{name,status,sessionId,progress,doing,summary,ask,options,permit}], runs:[{label,name,fraction,eta}], heat:{temp,level}, paused})。
      v3（11-21）：#1 需要你時球下方浮出選項按鈕（回答／放行）#2 按住球講話交給隊長 #3 session 衛星 #4 額度預警
                   #5 早報／收工總結 #6 外環＝背景工作進度＋cool42 溫度 #7 ?mini=1＝桌面常駐小球（SphereMini.swift）
@@ -323,6 +323,9 @@
   .row.atip span:last-child { grid-column: 2 / -1; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
   .row .rs { display: block; font-size: 10px; color: var(--ink-dim); letter-spacing: .04em; margin-top: 1px; }
   .fc { margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--line); font-size: 11px; line-height: 1.45; color: var(--ink-dim); }
+  .qage { margin-top: 6px; font-size: 11px; line-height: 1.45; color: var(--ink-dim); }
+  .qage.stale { color: var(--bad); font-weight: 600; }
+  #cardUsage.stale #u5, #cardUsage.stale #u7, #cardUsage.stale #u7b { opacity: .45; }
   .fc.warn { color: var(--warn); } .fc.bad { color: var(--bad); } .fc.ok { color: var(--ink-dim); }
   .card.flash { animation: cflash 1.6s ease-out; }
   @keyframes cflash { 0%, 40% { border-color: var(--warn); box-shadow: 0 0 24px var(--acc-dim); } 100% { border-color: var(--line); box-shadow: none; } }
@@ -475,7 +478,7 @@
     .row { font-size: 13px; }
     .row .t, #satCard .ln .t, .pop .ln .t { font-size: 11.5px; letter-spacing: .06em; font-weight: 500; }
     .row .rs, .trow .sub, .chips span, .more, .row .aks, .tl .axis, .dropMenu .hd, .dropMenu .row small { font-size: 11.5px; letter-spacing: .02em; }
-    .row.atip, .fc, .legend, .trow .nm small, .pill.sm, .dropMenu .pct { font-size: 12px; }
+    .row.atip, .fc, .qage, .legend, .trow .nm small, .pill.sm, .dropMenu .pct { font-size: 12px; }
     .row .abtn .pill { font-size: 11px; }
     .brand { font-size: 11px; letter-spacing: .16em; }
     #state .zh { font-size: 13px; letter-spacing: .2em; color: var(--ink); }
@@ -504,6 +507,7 @@
   <div class="row"><span class="t">7D</span><span>7 天額度<span class="rs" id="r7"></span></span><span id="u7b">--%</span><div class="meter seg ramp"><b id="m7"></b></div></div>
   <div class="row"><span class="t">CTX</span><span>記憶量<span class="rs" id="rc"></span></span><span id="uc">--%</span><div class="meter seg ramp"><b id="mc"></b></div></div>
   <div class="fc" id="fc" hidden></div>
+  <div class="qage" id="qage" hidden></div>
   <div id="sysWrap"></div>
 </div>
 
@@ -1704,6 +1708,21 @@ function forecast() {
   const rate = (v1 - v0) / mins, left = Math.round((100 - v1) / rate);
   return { left, rate, before: data.five_reset != null && left < data.five_reset };
 }
+/* 額度資料多久前更新（quota_at 由原生端給；Windows 沒給就不顯示）。超過 15 分鐘＝過期：加 ⚠ 與警示色（深色主題的警示色是綠，不能只靠顏色）、數字變淡、不做用完預估 */
+const QUOTA_STALE_MIN = 15;
+const quotaAge = () => data.quota_at == null ? null : Math.max(0, Math.floor((Date.now() / 1000 - data.quota_at) / 60));
+const quotaStale = () => (quotaAge() ?? 0) > QUOTA_STALE_MIN;
+function renderQuotaAge() {
+  const m = quotaAge(), el = $("qage"), stale = quotaStale();
+  el.hidden = m == null;
+  el.className = "qage" + (stale ? " stale" : "");
+  $("cardUsage").classList.toggle("stale", stale);
+  if (stale) $("fc").hidden = true;
+  if (m == null) return;
+  const ago = m < 1 ? "剛剛更新" : m < 60 ? `${m} 分鐘前更新` : m < 1440 ? `${Math.floor(m / 60)} 小時前更新` : `${Math.floor(m / 1440)} 天前更新`;
+  el.textContent = stale ? `⚠ 資料過期 · ${ago}` : ago;
+}
+setInterval(renderQuotaAge, 30000);
 function render() {
   const top = (data.team || []).filter(c => c.ctx != null).sort((a, b) => b.ctx - a.ctx)[0], ctxV = top ? top.ctx : data.ctx;
   roll($("u7"), data.seven_day); roll($("u7b"), data.seven_day); roll($("u5"), data.five_hour); roll($("uc"), ctxV);
@@ -1712,8 +1731,9 @@ function render() {
   $("r5").textContent = data.five_reset != null ? `${hm(data.five_reset)} 後重置` : "";
   $("r7").textContent = data.seven_reset != null ? `${hm(data.seven_reset)} 後重置` : "";
   $("rc").textContent = top ? `最高：${top.name}` : "最近的 session";
-  track5(data.five_hour);
-  const f = forecast(), fc = $("fc");
+  renderQuotaAge();
+  if (!quotaStale()) track5(data.five_hour);
+  const f = quotaStale() ? null : forecast(), fc = $("fc");
   fc.hidden = !f;
   if (f) {
     fc.className = "fc " + (f.calm ? "ok" : f.before ? (f.left < 60 ? "bad" : "warn") : "ok");
