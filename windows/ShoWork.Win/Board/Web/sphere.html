@@ -573,6 +573,7 @@ import * as THREE from "three";
 const DESK = new URLSearchParams(location.search).has("desk");
 const ORBIT = new URLSearchParams(location.search).has("orbit");     // 11-23：嵌在 Orbit42 裡（SphereEmbed.swift）     // 球體桌面版（11-22，SphereMini.swift）
 if (ORBIT) document.documentElement.classList.add("orbit");      // 11-24 Orbit42 深色綠白對調（CSS :root.orbit）
+const PHONE = new URLSearchParams(location.search).has("phone");      // iPhone App 裡的球體
 if (DESK) document.body.classList.add("desk");
 
 /* ---------- 狀態定義：每個狀態的轉速、亮度、標籤 ---------- */
@@ -2756,7 +2757,8 @@ function autoLayout() {
     const W = innerWidth, H = innerHeight;
     for (const k of ["left", "top", "right", "bottom", "width", "height", "maxHeight", "transform"]) $("askCard").style[k] = "";
     const capB = topMin() + 48, floor = H - 150, room = floor - capB;       // 工具列下面 ～ 底部狀態字＋現況那一行的上面
-    const vis = id => $(id).classList.contains("off") ? false : id === "cardSys" ? $("cardSys").classList.contains("on") && $("sysRows").innerHTML !== ""
+    const vis = id => PHONE || $(id).classList.contains("off") ? false :      // 手機：卡片自己擺（檔尾 phoneCards），自動排版只管球
+      id === "cardSys" ? $("cardSys").classList.contains("on") && $("sysRows").innerHTML !== ""
       : id === "cardCool" ? $("cardCool").classList.contains("on") && $("coolRows").innerHTML !== ""
       : id === "cardTeam" ? $("cardTeam").classList.contains("on") : true;
     const cols = layout.cols || DEF_COLS, zmul = layout.zmul || 1;
@@ -2849,6 +2851,7 @@ let resizing = false, resizingId = null;
 for (const id of PANELS) {
   const el = $(id); el.classList.add("drag"); if (!autoOn) place(id);
   el.addEventListener("pointerdown", e => {
+    if (PHONE) return;                                   // 手機用檔尾 phoneCards 的觸控拖曳
     if (e.button !== 0 || e.target.closest("button,input,select,textarea,a,.row.link,[data-act],[data-nav]")) return;
     const r = el.getBoundingClientRect();
     const corner = e.clientX > r.right - 16 && e.clientY > r.bottom - 16;
@@ -2929,6 +2932,7 @@ function syncSatArea(now) {
   }, now ? 0 : 150);
 }
 $("bAuto").onclick = () => {
+  if (PHONE) { window.phoneCardsReset?.(); return; }      // 手機：小視窗回預設位置和大小
   if (ORBIT) {      // Orbit42 永遠自動排：這顆鈕＝欄寬恢復預設、卡片和衛星重新排一次
     delete layout.cw; saveLayout(); resize(); drawLinks(); lastSatSig = ""; syncSatArea(true); return;
   }
@@ -3046,17 +3050,95 @@ window.karaTheme = m => { themeMode = m; applyTheme(); };      // 測試用
 setState("idle"); render(); renderVoice(); show("cardUsage", true); applyTheme();
 if (new URLSearchParams(location.search).has("demo")) setTimeout(demo, 600);
 // 11-23 Orbit42 iPhone App（?phone）：手機只能看和回答答案卡 ⇒ ＋新衛星、全螢幕不顯示
-if (new URLSearchParams(location.search).has("phone")) {
+if (PHONE) {
   document.body.classList.add("phone");
   for (const id of ["bNewSat", "bFull"]) { const e = $(id); if (e) { e.hidden = true; e.style.display = "none"; } }
-  // 直式手機：戰情卡（含答案卡）貼底、整排寬、內容可捲；其他卡片收起（用量、硬碟在外環上看得到）；操作提示不顯示
+  // 11-24 Keng「每張都能自由拖位置和調大小，跟 Mac 一樣」：四張小視窗都能開；拖標題列＝移動、拖右下角＝調大小，
+  // 位置大小記在 localStorage（直式、橫式各記一份）。「⋯ › 自動排版」＝回預設
   const st = document.createElement("style");
   st.textContent = `
-    body.phone #cardUsage, body.phone #cardSys, body.phone #cardCool, body.phone #hint { display: none !important; }
-    body.phone #cardTeam { left: 10px !important; right: 10px !important; width: auto !important; top: auto !important;
-      bottom: 150px !important; max-height: 46vh !important; overflow-y: auto !important; -webkit-overflow-scrolling: touch; transform: none !important; }
-    body.phone #cardTeam .x, body.phone #cardTeam .grip { display: none !important; }`;
+    body.phone #hint, body.phone #sysWrap { display: none !important; }
+    body.phone .card.drag { resize: none !important; min-width: 0; background: var(--panel-solid) !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important; padding-top: 0; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+    body.phone.stack #cardSys.on:not(.off), body.phone.stack #cardCool.on:not(.off) { display: block; }
+    body.phone .card.drag.on, body.phone.asking .card.drag.on { opacity: 1 !important; pointer-events: auto !important; }
+    body.phone .card.drag > .k { position: sticky; top: 0; z-index: 2; margin: 0 -10px 4px; padding: 10px; background: var(--panel-solid);
+      touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+    body.phone .card.drag > .k .x { font-size: 20px; padding: 6px 10px; margin: -6px -8px -6px auto; }
+    body.phone .pcGrip { position: fixed; width: 36px; height: 36px; touch-action: none; display: none; }
+    body.phone .pcGrip::after { content: ""; position: absolute; right: 7px; bottom: 7px; width: 11px; height: 11px;
+      border-right: 2px solid var(--ink-dim); border-bottom: 2px solid var(--ink-dim); border-radius: 0 0 3px 0; }`;
   document.head.appendChild(st);
+  phoneCards();
+}
+function phoneCards() {
+  const ids = PANELS, G = 8, MINW = 150, MINH = 84, key = () => "sphere.phoneCards." + (innerWidth < innerHeight ? "p" : "l");
+  // 預設（佔畫面的比例 x, y, w；h 沒寫＝照內容、最多 maxH）：戰情在下面整排，其他三張小的錯開放上面
+  const DEF = () => innerWidth < innerHeight
+    ? { cardUsage: { x: .02, y: .10, w: .62 }, cardSys: { x: .36, y: .17, w: .62 }, cardCool: { x: .02, y: .24, w: .62 }, cardTeam: { x: .02, y: .53, w: .96, h: .32 } }
+    : { cardUsage: { x: .02, y: .14, w: .30 }, cardSys: { x: .02, y: .50, w: .30 }, cardCool: { x: .67, y: .56, w: .31 }, cardTeam: { x: .67, y: .14, w: .31, h: .40 } };
+  let pos = {}, loaded = "", busy = null, zTop = 10;
+  const Z0 = { cardUsage: 5, cardSys: 6, cardCool: 7, cardTeam: 8 }, z = { ...Z0 }, grips = {};      // 每張不同層，把手才不會浮到別張上面
+  const top0 = () => Math.max(topMin(), $("tools").offsetTop + $("tools").offsetHeight) + 6;      // 不拖到工具列底下
+  // 用 offset 不用 getBoundingClientRect：開場動畫會帶縮放
+  const box = el => ({ left: el.offsetLeft, top: el.offsetTop, width: el.offsetWidth, height: el.offsetHeight });
+  const load = () => { if (loaded === key()) return; loaded = key(); try { pos = JSON.parse(localStorage.getItem(loaded) || "{}") || {}; } catch { pos = {}; } };
+  const save = () => { try { localStorage.setItem(key(), JSON.stringify(pos)); } catch {} };
+  const set = (el, k, v) => { if (el.style.getPropertyValue(k) !== v) el.style.setProperty(k, v, "important"); };
+  function layoutOne(id) {
+    const el = $(id), g = grips[id], W = innerWidth, H = innerHeight, top = top0(), o = { ...DEF()[id], ...pos[id] };
+    const w = Math.max(MINW, Math.min(W - 2 * G, o.w * W)), maxH = H - top - G;
+    set(el, "width", Math.round(w) + "px"); set(el, "max-height", Math.round(o.h ? maxH : H * .4) + "px");
+    set(el, "height", o.h ? Math.round(Math.max(MINH, Math.min(maxH, o.h * H))) + "px" : "auto");
+    set(el, "right", "auto"); set(el, "bottom", "auto"); set(el, "transform", "none"); set(el, "z-index", String(z[id]));
+    const h = el.offsetHeight || MINH;
+    const x = Math.max(G, Math.min(W - w - G, o.x * W)), y = Math.max(top, Math.min(H - h - G, o.y * H));
+    set(el, "left", Math.round(x) + "px"); set(el, "top", Math.round(y) + "px");
+    const on = el.classList.contains("on") && !el.classList.contains("off") && el.offsetHeight > 0;
+    set(g, "display", on ? "block" : "none"); set(g, "z-index", String(z[id]));
+    set(g, "left", Math.round(x + w - 34) + "px"); set(g, "top", Math.round(y + h - 34) + "px");
+  }
+  const all = () => { load(); ids.forEach(layoutOne); drawLinks(); };
+  let tick = 0; const soon = () => { if (!tick) tick = setTimeout(() => { tick = 0; all(); }, 0); };
+  // 選單（z 9）、答案提示要永遠在卡片上面 ⇒ 卡片疊到 10 以上時把選單一起抬高
+  const front = id => { z[id] = ++zTop; for (const d of document.querySelectorAll(".dropMenu, #panelMenu, #tools")) d.style.setProperty("z-index", String(zTop + 100), "important"); layoutOne(id); };
+  function track(handle, id, mode) {
+    handle.addEventListener("pointerdown", e => {
+      if (busy || e.button !== 0 || e.target.closest("button")) return;
+      e.preventDefault(); e.stopPropagation(); load(); front(id);
+      const el = $(id), r = box(el), x0 = e.clientX, y0 = e.clientY, W = innerWidth, H = innerHeight;
+      busy = id; try { handle.setPointerCapture(e.pointerId); } catch {}
+      const move = v => {
+        if (v.pointerId !== e.pointerId) return;
+        const dx = v.clientX - x0, dy = v.clientY - y0, o = pos[id] = { ...DEF()[id], ...pos[id] };
+        if (mode === "move") {
+          o.x = Math.max(G, Math.min(W - r.width - G, r.left + dx)) / W; o.y = Math.max(top0(), Math.min(H - r.height - G, r.top + dy)) / H;
+        } else {
+          o.x = r.left / W; o.y = r.top / H;
+          o.w = Math.max(MINW, Math.min(W - G - r.left, r.width + dx)) / W; o.h = Math.max(MINH, Math.min(H - G - r.top, r.height + dy)) / H;
+        }
+        layoutOne(id); drawLinks();
+      };
+      const up = v => {
+        if (v.pointerId !== e.pointerId) return;
+        for (const [n, f] of [["pointermove", move], ["pointerup", up], ["pointercancel", up]]) handle.removeEventListener(n, f);
+        busy = null; save(); all();
+      };
+      handle.addEventListener("pointermove", move); handle.addEventListener("pointerup", up); handle.addEventListener("pointercancel", up);
+    });
+  }
+  for (const id of ids) {
+    const el = $(id), g = grips[id] = document.createElement("div"); g.className = "pcGrip"; g.setAttribute("aria-label", "調整大小"); document.body.append(g);
+    track(el.querySelector(".k"), id, "move"); track(g, id, "size");
+    el.addEventListener("pointerdown", () => { if (z[id] !== zTop) front(id); }, true);      // 點哪張，哪張到最上面
+    new ResizeObserver(() => { if (!busy) soon(); }).observe(el);
+    let cls = el.className;
+    new MutationObserver(() => { if (el.className === cls) return;
+      const was = /\boff\b/.test(cls); cls = el.className; if (was && !/\boff\b/.test(cls)) front(id); soon(); }).observe(el, { attributes: true, attributeFilter: ["class"] });
+  }
+  addEventListener("resize", soon);
+  window.phoneCardsReset = () => { pos = {}; save(); Object.assign(z, Z0); all(); };
+  window.phoneCardsState = () => Object.fromEntries(ids.map(id => { const r = box($(id)); return [id, [r.left, r.top, r.width, r.height].map(Math.round)]; }));      // 測試
+  all();
 }
 post({ action: "ready" });
 sendVol();                 // 原生端播報音量（存在 localStorage，每次載入告訴它）
