@@ -2537,7 +2537,7 @@ canvas.addEventListener("pointermove", e => {
   hovered = s; if (s) s.hover = true;
   const tip = $("tip");
   if (s?.c) {
-    tip.textContent = moon ? `${moon.kind === "web" ? "網頁" : "3D"} · ${clip(moon.title || "", 40)} · 點一下${moon.on ? "收起" : "打開"}` : `${s.c.name} · ${s.c.status}${s.c.doing ? " · " + clip(s.c.doing, 24) : ""}`;
+    tip.textContent = moon ? `${moon.kind === "web" ? "網頁" : "3D"} · ${clip(moon.title || "", 40)} · 點一下${moon.on && !PHONE ? "收起" : "打開"}` : `${s.c.name} · ${s.c.status}${s.c.doing ? " · " + clip(s.c.doing, 24) : ""}`;
     tip.style.left = Math.min(e.clientX + 14, innerWidth - tip.offsetWidth - 8) + "px"; tip.style.top = (e.clientY + 14) + "px";
   }
   tip.classList.toggle("on", !!s);
@@ -2546,7 +2546,7 @@ canvas.addEventListener("pointermove", e => {
 let holdTimer = null, listening = false, heard = "", heardFinal = null, heardDone = false;
 canvas.addEventListener("pointerdown", e => {
   if (e.button !== 0) return;
-  const moon = moonAt(e); if (moon) { if (!PHONE) post({ action: "orbit", cmd: `moon:${moon.sid}:${moon.kind}` }); return; }
+  const moon = moonAt(e); if (moon) { post(PHONE ? { action: "moon", sessionId: moon.sid, kind: moon.kind } : { action: "orbit", cmd: `moon:${moon.sid}:${moon.kind}` }); return; }
   const s = satAt(e);
   if (s?.c) {
     satAnchor = { x: e.clientX, y: e.clientY }; post({ action: "sessionInfo", sessionId: s.c.sessionId });
