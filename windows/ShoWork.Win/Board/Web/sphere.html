@@ -189,6 +189,8 @@
   #askUndo { position: fixed; left: 50%; bottom: 112px; transform: translateX(-50%); display: none; align-items: center; gap: 10px;
     background: var(--panel-solid, var(--panel)); border: 1px solid var(--line); border-radius: 6px; padding: 7px 12px; font-size: 12px; z-index: 9; }
   #askUndo.on { display: flex; }
+  body.orbitMode #cardTeam > #askUndo { position: sticky; left: auto; bottom: 0; transform: none; width: auto; box-sizing: border-box; margin: 6px 0 0; z-index: 3; background: var(--panel-solid); box-shadow: none; justify-content: space-between; }
+  body.orbitMode #cardTeam > #askUndo .t { min-width: 0; }
   #askUndo .t { color: var(--ink-dim); max-width: 380px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   /* v3 #3：衛星提示 */
   #tip { position: fixed; pointer-events: none; background: var(--panel); border: 1px solid var(--line); border-radius: 4px;
@@ -2383,6 +2385,8 @@ function sendLater(c, msg, label) {
   drafts.delete(c.sessionId);
   undoQ = { msg, c, draft, t: setTimeout(flushUndo, 3000) };
   u.innerHTML = `<span class="t">已送出給 ${esc(c.name || "")}：${esc(clip(label || "", 40))}</span><button class="pill sm" id="askUndoBtn">復原</button>`;
+  // 11-24 Keng「點答案卡，終端機短暫消失」：Orbit42 的復原條黏在戰情卡底部，不浮在畫面中間跟終端機搶位置；戰情卡收起來時才放回畫面下方
+  if (ORBIT) { const inTeam = !$("cardTeam").classList.contains("off"); (inTeam ? $("cardTeam") : document.body).appendChild(u); }
   u.classList.add("on");
   done(c);
 }
