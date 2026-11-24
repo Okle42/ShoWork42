@@ -842,7 +842,51 @@ function syncSats(team) {
     const col = SAT_COLOR[c.status] || SAT_GRAY;
     s.fade.set(col);
   }
-  for (const [id, s] of sats) if (!keep.has(id)) { satGroup.remove(s.pivot); s.mesh.material.dispose(); s.halo.material.dispose(); sats.delete(id); }
+  for (const [id, s] of sats) if (!keep.has(id)) { satGroup.remove(s.pivot); for (const m of s.moons || []) { m.mesh.material.dispose(); m.hit.material.dispose(); if (hoveredMoon === m) hoveredMoon = null; } s.mesh.material.dispose(); s.halo.material.dispose(); sats.delete(id); }
+  syncMoons();
+}
+// 11-24 Keng「衛星終端機的行星旁邊會多一顆小衛星」：Orbit42 在那顆衛星裡開了 3D／圖片或網頁 ⇒ 行星旁邊繞一顆小衛星（3D＝稜角、網頁＝圓環）。
+// Orbit42 用 karaMoons({ sessionId: [{ kind, title, on }] }) 告訴我；點小衛星送 orbit "moon:<sessionId>:<kind>"（開／收那塊面板）
+const moonGeo = { "3d": new THREE.OctahedronGeometry(0.05, 0), web: new THREE.TorusGeometry(0.04, 0.014, 8, 20) }, moonHitGeo = new THREE.SphereGeometry(0.1, 8, 6);
+let moonData = {};
+window.karaMoons = d => { moonData = d || {}; syncMoons(); };
+function syncMoons() {
+  for (const [sid, s] of sats) {
+    const want = moonData[sid] || [];
+    s.moons ||= [];
+    s.moons = s.moons.filter(m => { if (want.some(w => w.kind === m.kind)) return true; s.pivot.remove(m.mesh, m.hit); m.mesh.material.dispose(); m.hit.material.dispose(); if (hoveredMoon === m) hoveredMoon = null; return false; });
+    for (const w of want) {
+      let m = s.moons.find(x => x.kind === w.kind);
+      if (!m) {
+        if (!moonGeo[w.kind]) continue;
+        const mesh = new THREE.Mesh(moonGeo[w.kind], new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, blending: BLEND, depthWrite: false }));
+        const hit = new THREE.Mesh(moonHitGeo, new THREE.MeshBasicMaterial({ visible: false }));
+        m = { kind: w.kind, mesh, hit, a: w.kind === "web" ? Math.PI : 0, sid };
+        hit.userData.moon = m; s.pivot.add(mesh, hit); s.moons.push(m);
+      }
+      m.title = w.title; m.on = w.on;
+    }
+  }
+}
+let hoveredMoon = null;
+function animMoons(s, dt, x, z, col) {
+  for (const m of s.moons || []) {
+    m.a += dt * 1.1 * (hoveredMoon === m || s.hover ? 0.05 : s.slow ?? 1);
+    const R = 0.3;
+    m.mesh.position.set(x + Math.cos(m.a) * R, Math.sin(m.a) * R * 0.55, z + Math.sin(m.a) * R * 0.8);
+    m.hit.position.copy(m.mesh.position);
+    m.mesh.rotation.y += dt * 0.9; if (m.kind === "web") m.mesh.rotation.x = 0.9;
+    m.mesh.material.color.copy(col);
+    m.mesh.material.opacity += ((m.on || hoveredMoon === m ? 1 : 0.6) - m.mesh.material.opacity) * Math.min(1, dt * 4);
+    m.mesh.scale.setScalar(hoveredMoon === m ? 1.7 : m.on ? 1.2 : 1);
+  }
+}
+function moonAt(e) {
+  const hits = [...sats.values()].flatMap(s => (s.moons || []).map(m => m.hit));
+  if (!hits.length) return null;
+  mouse.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+  ray.setFromCamera(mouse, camera);
+  return ray.intersectObjects(hits, false)[0]?.object.userData.moon || null;
 }
 // 11-22 Keng：點衛星要追著跑 ⇒ 滑鼠移到衛星軌道附近就減速到 15%，停在某顆衛星上就整個停住；移開再慢慢回到原速
 let satSlow = 1, pointerAt = null;
@@ -862,6 +906,7 @@ function animSats(dt, t) {
     const x = Math.cos(s.orbit.a) * s.orbit.r, z = Math.sin(s.orbit.a) * s.orbit.r;
     for (const m of [s.mesh, s.halo, s.hit]) m.position.set(x, 0, z);
     const col = s.fade.step(); s.mesh.material.color.copy(col); s.halo.material.color.copy(col);
+    animMoons(s, dt, x, z, col);
     const need = st === "需要你";
     const k = need ? 1 + 0.35 * Math.sin(t * 5) : 1;
     s.mesh.scale.setScalar(k * (s.hover || s.c?.sessionId === rowSid ? 1.6 : 1));
@@ -2415,7 +2460,8 @@ window.karaIconShot = (o = {}) => {
   document.body.style.background = o.bg || "#000";
 };
 window.karaData = () => data;
-window.karaSats = () => [...sats.values()].map(s => ({ name: s.c?.name, a: +s.orbit.a.toFixed(4), hovered: s === hovered }));   // 測試：衛星的軌道角度            // 測試注入碼讀資料用（SHOWORK_TEST_SPHERE_JS）
+window.karaMoonPoints = () => [...sats.values()].flatMap(s => (s.moons || []).map(m => ({ kind: m.kind, sid: m.sid, ...toScreen(m.mesh.getWorldPosition(new THREE.Vector3())) })));      // 測試
+window.karaSats = () => [...sats.values()].map(s => ({ name: s.c?.name, sid: s.c?.sessionId, a: +s.orbit.a.toFixed(4), hovered: s === hovered }));   // 測試：衛星的軌道角度            // 測試注入碼讀資料用（SHOWORK_TEST_SPHERE_JS）
 window.karaAnchor = (x, y) => { satAnchor = { x, y }; };
 window.karaSay = (text) => announce(text);
 window.karaToast = (text) => announce(text);
@@ -2481,12 +2527,13 @@ let hovered = null;
 canvas.addEventListener("pointerleave", () => { pointerAt = null; });
 canvas.addEventListener("pointermove", e => {
   pointerAt = { x: e.clientX, y: e.clientY, t: performance.now() };
-  const s = satAt(e);
+  const moon = moonAt(e); hoveredMoon = moon;
+  const s = moon ? sats.get(moon.sid) : satAt(e);
   if (hovered && hovered !== s) hovered.hover = false;
   hovered = s; if (s) s.hover = true;
   const tip = $("tip");
   if (s?.c) {
-    tip.textContent = `${s.c.name} · ${s.c.status}${s.c.doing ? " · " + clip(s.c.doing, 24) : ""}`;
+    tip.textContent = moon ? `${moon.kind === "web" ? "網頁" : "3D"} · ${clip(moon.title || "", 40)} · 點一下${moon.on ? "收起" : "打開"}` : `${s.c.name} · ${s.c.status}${s.c.doing ? " · " + clip(s.c.doing, 24) : ""}`;
     tip.style.left = Math.min(e.clientX + 14, innerWidth - tip.offsetWidth - 8) + "px"; tip.style.top = (e.clientY + 14) + "px";
   }
   tip.classList.toggle("on", !!s);
@@ -2495,6 +2542,7 @@ canvas.addEventListener("pointermove", e => {
 let holdTimer = null, listening = false, heard = "", heardFinal = null, heardDone = false;
 canvas.addEventListener("pointerdown", e => {
   if (e.button !== 0) return;
+  const moon = moonAt(e); if (moon) { if (!PHONE) post({ action: "orbit", cmd: `moon:${moon.sid}:${moon.kind}` }); return; }
   const s = satAt(e);
   if (s?.c) {
     satAnchor = { x: e.clientX, y: e.clientY }; post({ action: "sessionInfo", sessionId: s.c.sessionId });
