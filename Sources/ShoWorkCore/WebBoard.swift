@@ -491,4 +491,30 @@ public enum WebRouter {
         guard input(id, d) else { return done(.json(404, ["error": "找不到這顆衛星（可能已經關了）"]), id, "找不到衛星") }
         return .json(200, ["ok": "1"])        // 成功的不逐筆記稽核（打字一秒好幾筆）；失敗的才記
     }
+
+    // 11-24 Keng：iPhone 動作按鈕／控制中心一按就聽，說完的話送給 Mac 上的智能體（跟在 Mac 上按住智能體講話同一條路：
+    // 簡單的智能體自己答，答不了交給隊長）。POST /api/say {text} → 200；Orbit42 沒開（沒有球體）→ 503。稽核記前 60 字
+    public static let sayPath = "/api/say"
+    public static let maxSay = 500
+    public static func handleSay(_ r: WebRequest, peer: String?, localIP: String?, token: String?, now: Date = Date(),
+                                 limiter: inout WebRateLimiter,
+                                 say: (String) -> Bool,
+                                 audit: (WebAuditEntry) -> Void = { _ in }) -> WebResponse {
+        guard let peer, WebBind.isTailscale(peer) else { return .json(403, ["error": "只接受 Tailscale 連線"]) }
+        guard peer != localIP else { return .json(403, ["error": "不接受 Mac mini 自己連自己"]) }
+        guard token != nil else { return .json(403, ["error": "還沒設定 token（showork web enable）"]) }
+        guard r.method == "POST" else { return .json(405, ["error": "方法不對"]) }
+        func done(_ resp: WebResponse, _ text: String?, _ msg: String) -> WebResponse {
+            audit(WebAuditEntry(at: now, peer: peer, action: "say", target: nil, text: text.map { String($0.prefix(60)) }, status: resp.status, result: msg)); return resp
+        }
+        guard WebToken.matches(r.headers[tokenHeader], token) else { return done(.json(403, ["error": "token 不對"]), nil, "token 不對") }
+        guard (r.headers["content-type"] ?? "").lowercased().hasPrefix("application/json") else { return done(.json(415, ["error": "要 JSON"]), nil, "不是 JSON") }
+        guard limiter.allow(peer, now: now) else { return .json(429, ["error": "講太快了，等一下再試"]) }
+        guard let o = try? JSONSerialization.jsonObject(with: r.body) as? [String: Any], let raw = o["text"] as? String
+        else { return done(.json(400, ["error": "缺 text"]), nil, "格式不對") }
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, text.count <= maxSay else { return done(.json(400, ["error": "text 是空的或太長（\(maxSay) 字內）"]), nil, "長度不對") }
+        guard say(text) else { return done(.json(503, ["error": "Mac 上的 Orbit42 沒開（沒有智能體可以聽）"]), text, "沒有球體") }
+        return done(.json(200, ["ok": "1"]), text, "交給智能體")
+    }
 }

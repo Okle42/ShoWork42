@@ -326,4 +326,28 @@ struct WebBoardTests {
         #expect(got.count == 2)
         #expect(audits.allSatisfy { $0.text == nil })
     }
+
+    // 11-24 iPhone 語音：/api/say 要 token、只收 Tailscale；空字串／太長 400；沒有球體 503；稽核記前 60 字
+    @Test func sayRoute() {
+        var lim = WebRateLimiter(perMinute: 1200, minGap: 0)
+        var got: [String] = []
+        var audits: [WebAuditEntry] = []
+        func run(_ r: WebRequest, peer p: String = "100.77.57.35", ok: Bool = true) -> Int {
+            WebRouter.handleSay(r, peer: p, localIP: mini, token: tok, limiter: &lim,
+                                say: { got.append($0); return ok }, audit: { audits.append($0) }).status
+        }
+        #expect(run(req("POST", "/api/say", token: tok, body: #"{"text":"  現在誰在等我？ "}"#)) == 200)
+        #expect(got == ["現在誰在等我？"])
+        #expect(audits.last?.text == "現在誰在等我？" && audits.last?.action == "say")
+        #expect(run(req("POST", "/api/say", token: "wrong", body: #"{"text":"x"}"#)) == 403)
+        #expect(run(req("POST", "/api/say", token: tok, body: #"{"text":"x"}"#), peer: "192.168.1.5") == 403)
+        #expect(run(req("POST", "/api/say", token: tok, body: #"{"text":"x"}"#), peer: mini) == 403)
+        #expect(run(req("GET", "/api/say", token: tok)) == 405)
+        #expect(run(req("POST", "/api/say", token: tok, body: #"{"text":"x"}"#, contentType: "text/plain")) == 415)
+        #expect(run(req("POST", "/api/say", token: tok, body: #"{"text":"   "}"#)) == 400)
+        let long = String(repeating: "說", count: WebRouter.maxSay + 1)
+        #expect(run(req("POST", "/api/say", token: tok, body: #"{"text":"\#(long)"}"#)) == 400)
+        #expect(run(req("POST", "/api/say", token: tok, body: #"{"text":"有人嗎"}"#), ok: false) == 503)
+        #expect(got.count == 2)
+    }
 }

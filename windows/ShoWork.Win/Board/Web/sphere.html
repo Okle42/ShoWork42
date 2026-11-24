@@ -2553,6 +2553,14 @@ function finishListen() {
   announce(`交給隊長：${clip(text, 40)}`);
 }
 
+// 11-24 Keng：iPhone 動作按鈕／控制中心說的話（經 /api/say 進來）：跟在 Mac 上按住智能體講完放開一樣處理
+window.karaRemoteSay = (text) => {
+  const t = String(text || "").trim(); if (!t) return;
+  heard = t; heardDone = true; listening = true;
+  $("capText").textContent = "（手機）" + t;
+  finishListen();
+};
+
 /* ---------- v4 B：簡單的問題球自己答（用手上的資料，不花隊長的額度）；答不了才交給隊長 ---------- */
 function answerLocal(q) {
   const t = q.replace(/\s+/g, "");

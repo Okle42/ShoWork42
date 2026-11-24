@@ -43,6 +43,15 @@ public enum SphereEmbed {
 
     private static var hosts: [SphereWebHost] = []
 
+    /// 11-24 iPhone 語音：手機說完的話交給 Orbit42 的智能體（sphere.html window.karaRemoteSay，跟按住講話放開同一條路）。沒有球體回 false
+    public static func say(_ text: String) -> Bool {
+        guard let h = hosts.last,
+              let j = try? JSONSerialization.data(withJSONObject: [text], options: [.fragmentsAllowed]),
+              let arg = String(data: j, encoding: .utf8)?.dropFirst().dropLast() else { return false }
+        h.web.evaluateJavaScript("window.karaRemoteSay && window.karaRemoteSay(\(arg))")
+        return true
+    }
+
     /// 11-23 T1123115042：戰情中心自己持有的 session（kind board，例如隊長）的對話內容，給 Orbit42 裝進衛星終端機外框。
     /// 這類 session 是引擎用 claude -p 串流跑的，不是終端機程式，沒辦法 attach；內容用工作視窗那份網頁（?orbit=1 黑白灰紅、透明底）
     public static func workView(sessionId: String, cwd: String?, theme: String) -> NSView? {
