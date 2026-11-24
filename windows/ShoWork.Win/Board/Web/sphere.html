@@ -2508,7 +2508,7 @@ canvas.addEventListener("pointerdown", e => {
   closeSat();
   if (!ballAt(e)) {                               // 空白處：關掉衛星小卡，不唸、不聽
     // 11-24 Keng：Orbit42 裡點空白處 ⇒ 衛星終端機小視窗全部收下去、露出智能體（要說話就能直接點球）
-    if (ORBIT) post({ action: "orbit", cmd: "hideSats" });
+    if (ORBIT && !PHONE) post({ action: "orbit", cmd: "hideSats" });      // 手機沒有衛星小視窗
     return;
   }
   holdTimer = setTimeout(() => { holdTimer = null; startListen(); }, 380);
@@ -3057,18 +3057,42 @@ if (PHONE) {
   // 位置大小記在 localStorage（直式、橫式各記一份）。「⋯ › 自動排版」＝回預設
   const st = document.createElement("style");
   st.textContent = `
+    html, body.phone { touch-action: none; overscroll-behavior: none; }
+    body.phone #gl { touch-action: none; }
+    body.phone .card { touch-action: pan-y; }
     body.phone #hint, body.phone #sysWrap { display: none !important; }
-    body.phone .card.drag { resize: none !important; min-width: 0; background: var(--panel-solid) !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important; padding-top: 0; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+    body.phone .card.drag { resize: none !important; min-width: 0; box-sizing: border-box; padding: 0 12px 14px !important; overflow-x: hidden; overflow-wrap: anywhere; background: var(--panel-solid) !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important;  overscroll-behavior: contain; }
     body.phone.stack #cardSys.on:not(.off), body.phone.stack #cardCool.on:not(.off) { display: block; }
     body.phone .card.drag.on, body.phone.asking .card.drag.on { opacity: 1 !important; pointer-events: auto !important; }
-    body.phone .card.drag > .k { position: sticky; top: 0; z-index: 2; margin: 0 -10px 4px; padding: 10px; background: var(--panel-solid);
+    body.phone .card.drag > .k { position: sticky; top: 0; z-index: 2; margin: 0 -12px 4px; padding: 11px 12px 9px; border-bottom: 1px solid var(--line); background: var(--panel-solid);
       touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
     body.phone .card.drag > .k .x { font-size: 20px; padding: 6px 10px; margin: -6px -8px -6px auto; }
     body.phone .pcGrip { position: fixed; width: 36px; height: 36px; touch-action: none; display: none; }
     body.phone .pcGrip::after { content: ""; position: absolute; right: 7px; bottom: 7px; width: 11px; height: 11px;
       border-right: 2px solid var(--ink-dim); border-bottom: 2px solid var(--ink-dim); border-radius: 0 0 3px 0; }`;
   document.head.appendChild(st);
-  phoneCards();
+  document.querySelector('meta[name="viewport"]').content = "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no";
+  for (const n of ["gesturestart", "gesturechange"]) document.addEventListener(n, e => e.preventDefault(), { passive: false });
+  phonePinch(); phoneCards();
+}
+// 11-24 Keng「縮放球體變成整個螢幕縮放」：網頁不准縮放；兩指在球的畫面上捏合＝只縮放球體（記在 layout，下次打開一樣大）
+function phonePinch() {
+  const pts = new Map(); let d0 = 0, k0 = 1;
+  const dist = () => { const [a, b] = [...pts.values()]; return Math.hypot(a.x - b.x, a.y - b.y) || 1; };
+  canvas.addEventListener("pointerdown", e => {
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pts.size < 2) return;
+    e.stopImmediatePropagation(); e.preventDefault();
+    if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }      // 第二指放下＝要縮放，不是按住講話
+    if (pts.size === 2) { d0 = dist(); k0 = layout.zmul || 1; }
+  }, true);
+  addEventListener("pointermove", e => {
+    if (!pts.has(e.pointerId)) return; pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pts.size !== 2) return;
+    layout.zmul = Math.min(2.2, Math.max(0.5, k0 * dist() / d0)); layout.zo = Math.min(1.6, Math.max(0.6, layout.zmul)); autoSoon();
+  });
+  const end = e => { if (!pts.delete(e.pointerId)) return; if (pts.size === 1) saveLayout(); else if (pts.size === 2) { d0 = dist(); k0 = layout.zmul || 1; } };
+  addEventListener("pointerup", end, true); addEventListener("pointercancel", end, true);
 }
 function phoneCards() {
   const ids = PANELS, G = 8, MINW = 150, MINH = 84, key = () => "sphere.phoneCards." + (innerWidth < innerHeight ? "p" : "l");
@@ -3136,7 +3160,7 @@ function phoneCards() {
       const was = /\boff\b/.test(cls); cls = el.className; if (was && !/\boff\b/.test(cls)) front(id); soon(); }).observe(el, { attributes: true, attributeFilter: ["class"] });
   }
   addEventListener("resize", soon);
-  window.phoneCardsReset = () => { pos = {}; save(); Object.assign(z, Z0); all(); };
+  window.phoneCardsReset = () => { pos = {}; delete layout.zmul; delete layout.zo; saveLayout(); autoSoon(); save(); Object.assign(z, Z0); all(); };
   window.phoneCardsState = () => Object.fromEntries(ids.map(id => { const r = box($(id)); return [id, [r.left, r.top, r.width, r.height].map(Math.round)]; }));      // 測試
   all();
 }
